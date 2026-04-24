@@ -1,0 +1,50 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: furniture-postgres
+    environment:
+      POSTGRES_USER: furniture
+      POSTGRES_PASSWORD: furniture
+      POSTGRES_DB: furniture
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  catalog-service:
+    build:
+      context: .
+      dockerfile: services/catalog_service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
+    ports:
+      - "8001:8000"
+    depends_on:
+      - postgres
+
+  cutting-service:
+    build:
+      context: .
+      dockerfile: services/cutting_service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
+    ports:
+      - "8002:8000"
+    depends_on:
+      - postgres
+
+  planner-service:
+    build:
+      context: .
+      dockerfile: services/planner_service/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
+    ports:
+      - "8003:8000"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
