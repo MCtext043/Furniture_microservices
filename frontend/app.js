@@ -11,6 +11,8 @@ const state = {
   cart: [],
   projectId: null,
   furnitureCount: 0,
+  roomItems: [],
+  three: null,
 };
 
 const demoCategories = ["Кухни", "Шкафы", "Гостиные", "Спальни", "Офис", "Детские"];
@@ -38,7 +40,12 @@ const demoParts = [
 
 function apiBase() {
   const input = document.getElementById("apiBase");
-  return (input?.value || localStorage.getItem(LS_API) || "http://127.0.0.1:8080").replace(/\/$/, "");
+  return (input?.value || localStorage.getItem(LS_API) || defaultApiBase()).replace(/\/$/, "");
+}
+
+function defaultApiBase() {
+  const host = window.location.hostname || "127.0.0.1";
+  return `http://${host}:8080`;
 }
 
 function token() {
@@ -107,6 +114,16 @@ async function api(method, path, body, withAuth = false) {
   return payload;
 }
 
+async function validateToken() {
+  if (!token()) return false;
+  try {
+    const response = await fetch(`${apiBase()}/auth/me`, { headers: { Authorization: `Bearer ${token()}` } });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function requestNoBody(method, path, withAuth = false) {
   const headers = { Accept: "application/json" };
   if (withAuth && token()) headers.Authorization = `Bearer ${token()}`;
@@ -118,7 +135,9 @@ async function requestNoBody(method, path, withAuth = false) {
 }
 
 async function autoLogin() {
-  if (token()) return;
+  if (token() && (await validateToken())) return;
+  setToken("");
+  setCustomerName("");
   try {
     const data = await api("POST", "/auth/token", { username: "admin", password: "demo123456" });
     setToken(data.access_token);
@@ -437,8 +456,10 @@ async function addFurnitureSet() {
     }
     const furniture = await api("GET", `/planner/projects/${state.projectId}/furniture`);
     state.furnitureCount = furniture.length;
+    state.roomItems = furniture;
     document.getElementById("plannerHint").textContent = `В проекте №${state.projectId}: ${furniture.length} предмета мебели`;
     renderRoom(furniture);
+    renderRoom3D(furniture);
     toast("Комплект мебели размещён");
   } catch (error) {
     toast(`Не удалось разместить мебель: ${error.message}`, false);
@@ -460,6 +481,110 @@ function renderRoom(items) {
       return `<div class="furniture-chip" style="left:${left}%; top:${top}%; width:${width}%; height:${height}%">${escapeHtml(item.name)}</div>`;
     })
     .join("");
+}
+
+function initRoom3D() {
+  const host = document.getElementById("room3d");
+  if (!host || !window.THREE) {
+    return;
+  }
+
+  const width = host.clientWidth || 640;
+  const height = 360;
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1f2937);
+
+  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+  camera.position.set(5.8, 4.2, 6.5);
+  camera.lookAt(0, 0, 0);
+
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(width, height);
+  host.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
+  host.appendChild(renderer.domElement);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.75);
+  scene.add(ambient);
+  const light = new THREE.DirectionalLight(0xffffff, 0.95);
+  light.position.set(3, 7, 4);
+  scene.add(light);
+
+  const group = new THREE.Group();
+  scene.add(group);
+
+  const floor = new THREE.Mesh(
+    new THREE.BoxGeometry(6, 0.08, 5),
+    new THREE.MeshStandardMaterial({ color: 0xd8c2a8, roughness: 0.85 })
+  );
+  floor.position.y = -0.04;
+  group.add(floor);
+
+  const backWall = new THREE.Mesh(
+    new THREE.BoxGeometry(6, 2.6, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0xf7efe4, roughness: 0.9 })
+  );
+  backWall.position.set(0, 1.3, -2.5);
+  group.add(backWall);
+
+  const leftWall = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, 2.6, 5),
+    new THREE.MeshStandardMaterial({ color: 0xefe0cf, roughness: 0.9 })
+  );
+  leftWall.position.set(-3, 1.3, 0);
+  group.add(leftWall);
+
+  state.three = { scene, camera, renderer, group, host };
+  renderRoom3D([]);
+
+  const animate = () => {
+    if (!state.three) return;
+    group.rotation.y += 0.002;
+    renderer.render(scene, camera);
+    requestAnimationFrame(animate);
+  };
+  animate();
+
+  window.addEventListener("resize", () => {
+    if (!state.three) return;
+    const w = host.clientWidth || 640;
+    camera.aspect = w / height;
+    camera.updateProjectionMatrix();
+    renderer.setSize(w, height);
+  });
+}
+
+function renderRoom3D(items) {
+  if (!state.three) return;
+  const { group } = state.three;
+  const old = group.children.filter((obj) => obj.userData.kind === "furniture");
+  old.forEach((obj) => group.remove(obj));
+
+  const fallback = [
+    { name: "Кухонный остров", width: 1.8, depth: 0.8, height: 0.9, x: 1, z: 1 },
+    { name: "Шкаф Verona", width: 1.4, depth: 0.6, height: 2.2, x: 3, z: 0.5 },
+    { name: "Диван Soft Cloud", width: 2.2, depth: 1, height: 0.9, x: 0.8, z: 3 },
+  ];
+  const source = items.length ? items : fallback;
+  const colors = [0xb7791f, 0x8b5cf6, 0x0f766e, 0xbe123c, 0x2563eb];
+
+  source.forEach((item, index) => {
+    const w = Math.max(Number(item.width) || 1, 0.35);
+    const d = Math.max(Number(item.depth) || 1, 0.35);
+    const h = Math.max(Number(item.height) || 1, 0.35);
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      new THREE.MeshStandardMaterial({ color: colors[index % colors.length], roughness: 0.55, metalness: 0.05 })
+    );
+    mesh.position.set(
+      (Number(item.x) || index + 1) - 2.2,
+      h / 2,
+      (Number(item.z) || index + 1) - 2.0
+    );
+    mesh.rotation.y = ((Number(item.rotation_y) || 0) * Math.PI) / 180;
+    mesh.userData.kind = "furniture";
+    group.add(mesh);
+  });
 }
 
 async function prepareAssetLink() {
@@ -487,7 +612,7 @@ function setBackendStatus(ok, message) {
 }
 
 async function boot() {
-  document.getElementById("apiBase").value = localStorage.getItem(LS_API) || "http://127.0.0.1:8080";
+  document.getElementById("apiBase").value = localStorage.getItem(LS_API) || defaultApiBase();
   document.getElementById("saveApiBase").addEventListener("click", () => {
     localStorage.setItem(LS_API, document.getElementById("apiBase").value.trim());
     location.reload();
@@ -506,6 +631,7 @@ async function boot() {
   renderParts();
   renderCart();
   renderRoom([]);
+  initRoom3D();
   updateAccountButton();
 
   try {

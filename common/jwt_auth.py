@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import jwt
 from fastapi import Depends, Header, HTTPException
-from jwt import DecodeError
+from jwt import ExpiredSignatureError, PyJWTError
 
 ALGORITHM = "HS256"
 
@@ -42,7 +42,9 @@ def _decode_optional(authorization: str | None) -> TokenClaims | None:
         else:
             roles = []
         return TokenClaims(sub=sub, username=username, roles=roles)
-    except DecodeError as exc:
+    except ExpiredSignatureError as exc:
+        raise HTTPException(status_code=401, detail="Token expired") from exc
+    except PyJWTError as exc:
         raise HTTPException(status_code=401, detail="Invalid token") from exc
 
 

@@ -36,6 +36,9 @@
     .service-card { border: 1px solid #eadccc; border-radius: 1.25rem; background: #fff; box-shadow: 0 12px 30px rgba(71, 48, 29, .08); }
     .room-plan { min-height: 260px; border: 10px solid #d9c2aa; background: repeating-linear-gradient(45deg, #fbf6ef 0 12px, #f3e7d7 12px 24px); position: relative; overflow: hidden; border-radius: .75rem; }
     .furniture-chip { position: absolute; border-radius: .65rem; background: rgba(122,79,43,.86); color: #fff; font-size: .75rem; padding: .4rem .55rem; box-shadow: 0 8px 20px rgba(0,0,0,.18); }
+    .viewer-3d { min-height: 360px; border-radius: .9rem; overflow: hidden; background: linear-gradient(180deg, #111827, #384152); position: relative; }
+    .viewer-3d canvas { display: block; width: 100%; height: 360px; }
+    .viewer-badge { position: absolute; top: .75rem; left: .75rem; z-index: 2; }
     .cut-sheet { background: #fffdf8; border: 2px dashed #c8a984; border-radius: .75rem; min-height: 240px; display: grid; place-items: center; }
     .asset-tile { background: linear-gradient(135deg, #fff, #f3e7d7); border: 1px solid #eadccc; border-radius: 1rem; }
     .toast-container { z-index: 1080; }
@@ -184,7 +187,25 @@
         </div>
         <div class="col-lg-6">
           <div class="service-card p-4 h-100">
-            <div class="room-plan" id="roomPlan"></div>
+            <ul class="nav nav-pills mb-3" role="tablist">
+              <li class="nav-item" role="presentation">
+                <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#room3dPane" type="button">3D помещение</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#room2dPane" type="button">План сверху</button>
+              </li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="room3dPane">
+                <div class="viewer-3d" id="room3d">
+                  <span class="badge text-bg-warning viewer-badge">Интерактивная 3D-демонстрация</span>
+                </div>
+                <div class="small text-muted mt-2">3D-сцена создаётся прямо на странице. После добавления комплекта мебель появится и в 3D, и на плане.</div>
+              </div>
+              <div class="tab-pane fade" id="room2dPane">
+                <div class="room-plan" id="roomPlan"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -265,6 +286,7 @@
 
   <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="app.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="app.js?v=20260507-2"></script>
 </body>
 </html>
