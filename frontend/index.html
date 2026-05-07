@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WoodCraft Market — мебель и сервисы для дома</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    :root {
+      --brand: #7a4f2b;
+      --brand-dark: #3d2818;
+      --soft: #fbf6ef;
+    }
+    body { background: #f7f3ee; color: #2f2924; }
+    .navbar { background: rgba(61, 40, 24, 0.96); backdrop-filter: blur(8px); }
+    .navbar-brand { letter-spacing: .3px; font-weight: 800; }
+    .hero {
+      background:
+        linear-gradient(120deg, rgba(35, 22, 13, .9), rgba(122, 79, 43, .58)),
+        radial-gradient(circle at 80% 20%, rgba(255, 210, 150, .45), transparent 30%),
+        url("https://images.unsplash.com/photo-1618221195710-dd6b41faaea6?auto=format&fit=crop&w=1600&q=80");
+      background-size: cover;
+      background-position: center;
+      border-radius: 0 0 2rem 2rem;
+      min-height: 470px;
+    }
+    .hero-card { background: rgba(255,255,255,.92); border: 0; box-shadow: 0 20px 50px rgba(0,0,0,.18); }
+    .section-title { font-weight: 800; color: var(--brand-dark); }
+    .muted-title { color: #8d735f; text-transform: uppercase; letter-spacing: .12em; font-size: .78rem; font-weight: 700; }
+    .category-pill { cursor: pointer; border-color: #d6c3ad; color: #5a402b; }
+    .category-pill.active, .category-pill:hover { background: var(--brand); color: #fff; border-color: var(--brand); }
+    .product-card { border: 0; border-radius: 1.25rem; overflow: hidden; box-shadow: 0 12px 32px rgba(71, 48, 29, .10); transition: transform .18s ease, box-shadow .18s ease; }
+    .product-card:hover { transform: translateY(-5px); box-shadow: 0 18px 40px rgba(71, 48, 29, .18); }
+    .product-art { min-height: 180px; display: grid; place-items: center; color: #fff; font-size: 4rem; }
+    .price { color: var(--brand); font-weight: 800; }
+    .service-card { border: 1px solid #eadccc; border-radius: 1.25rem; background: #fff; box-shadow: 0 12px 30px rgba(71, 48, 29, .08); }
+    .room-plan { min-height: 260px; border: 10px solid #d9c2aa; background: repeating-linear-gradient(45deg, #fbf6ef 0 12px, #f3e7d7 12px 24px); position: relative; overflow: hidden; border-radius: .75rem; }
+    .furniture-chip { position: absolute; border-radius: .65rem; background: rgba(122,79,43,.86); color: #fff; font-size: .75rem; padding: .4rem .55rem; box-shadow: 0 8px 20px rgba(0,0,0,.18); }
+    .cut-sheet { background: #fffdf8; border: 2px dashed #c8a984; border-radius: .75rem; min-height: 240px; display: grid; place-items: center; }
+    .asset-tile { background: linear-gradient(135deg, #fff, #f3e7d7); border: 1px solid #eadccc; border-radius: 1rem; }
+    .toast-container { z-index: 1080; }
+    .status-dot { width: .65rem; height: .65rem; border-radius: 50%; display: inline-block; background: #adb5bd; }
+    .status-dot.ok { background: #22c55e; }
+    .status-dot.bad { background: #ef4444; }
+  </style>
+</head>
+<body>
+  <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+    <div class="container">
+      <a class="navbar-brand" href="#top">WoodCraft Market</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="nav">
+        <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
+          <li class="nav-item"><a class="nav-link" href="#catalog">Каталог</a></li>
+          <li class="nav-item"><a class="nav-link" href="#cutting">Раскрой</a></li>
+          <li class="nav-item"><a class="nav-link" href="#planner">Планировщик</a></li>
+          <li class="nav-item"><a class="nav-link" href="#assets">3D и материалы</a></li>
+          <li class="nav-item">
+            <button class="btn btn-outline-light ms-lg-2" data-bs-toggle="modal" data-bs-target="#accountModal" id="accountBtn">
+              Войти
+            </button>
+          </li>
+          <li class="nav-item">
+            <button class="btn btn-warning ms-lg-2" data-bs-toggle="offcanvas" data-bs-target="#cartCanvas">
+              Корзина <span class="badge text-bg-dark" id="cartCount">0</span>
+            </button>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero d-flex align-items-center" id="top">
+    <div class="container py-5">
+      <div class="row align-items-center g-4">
+        <div class="col-lg-7 text-white">
+          <div class="muted-title text-warning mb-3">Маркетплейс мебели и производственные сервисы</div>
+          <h1 class="display-4 fw-bold mb-3">Мебель, раскрой и планировка комнаты в одном месте</h1>
+          <p class="lead mb-4">Демонстрационный магазин с живыми товарами, корзиной, подбором 3D-материалов и сервисом расчёта раскроя.</p>
+          <div class="d-flex flex-wrap gap-2">
+            <a href="#catalog" class="btn btn-warning btn-lg">Смотреть каталог</a>
+            <a href="#planner" class="btn btn-outline-light btn-lg">Спланировать комнату</a>
+          </div>
+        </div>
+        <div class="col-lg-5">
+          <div class="card hero-card p-4">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="status-dot" id="backendDot"></span>
+              <strong id="backendStatus">Подключаем витрину...</strong>
+            </div>
+            <p class="text-muted mb-3">Витрина автоматически наполняется тестовыми товарами и подключается к сервисам магазина.</p>
+            <div class="row text-center g-2">
+              <div class="col-4"><div class="p-3 bg-light rounded"><div class="h4 mb-0" id="statProducts">0</div><small>товаров</small></div></div>
+              <div class="col-4"><div class="p-3 bg-light rounded"><div class="h4 mb-0" id="statCategories">0</div><small>категорий</small></div></div>
+              <div class="col-4"><div class="p-3 bg-light rounded"><div class="h4 mb-0">24/7</div><small>сервисы</small></div></div>
+            </div>
+            <div class="accordion accordion-flush mt-3" id="settings">
+              <div class="accordion-item">
+                <h2 class="accordion-header">
+                  <button class="accordion-button collapsed small" type="button" data-bs-toggle="collapse" data-bs-target="#settingsBody">Настройка стенда</button>
+                </h2>
+                <div id="settingsBody" class="accordion-collapse collapse" data-bs-parent="#settings">
+                  <div class="accordion-body px-0">
+                    <label class="form-label small text-muted">Адрес gateway</label>
+                    <div class="input-group input-group-sm">
+                      <input class="form-control" id="apiBase" value="http://127.0.0.1:8080" />
+                      <button class="btn btn-outline-secondary" id="saveApiBase">Сохранить</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container py-5">
+    <section class="mb-5" id="catalog">
+      <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+        <div>
+          <div class="muted-title">Каталог</div>
+          <h2 class="section-title mb-1">Готовые решения для дома</h2>
+          <p class="text-muted mb-0">Подберите мебель, добавьте в корзину или сохраните в избранное.</p>
+        </div>
+        <div class="input-group" style="max-width: 360px">
+          <span class="input-group-text">Поиск</span>
+          <input class="form-control" id="searchInput" placeholder="шкаф, кухня, стол..." />
+        </div>
+      </div>
+      <div class="d-flex flex-wrap gap-2 mb-4" id="categoryPills"></div>
+      <div class="row g-4" id="productGrid">
+        <div class="col-12 text-center text-muted py-5">Загружаем товары...</div>
+      </div>
+    </section>
+
+    <section class="mb-5" id="cutting">
+      <div class="row g-4 align-items-stretch">
+        <div class="col-lg-5">
+          <div class="service-card p-4 h-100">
+            <div class="muted-title">Производство</div>
+            <h2 class="section-title">Расчёт раскроя листа</h2>
+            <p class="text-muted">Покажите заказчику, как сервис помогает оценить размещение деталей на листе ЛДСП.</p>
+            <div class="row g-2">
+              <div class="col-6"><label class="form-label small">Ширина листа, мм</label><input class="form-control" id="sheetW" type="number" value="2800"></div>
+              <div class="col-6"><label class="form-label small">Высота листа, мм</label><input class="form-control" id="sheetH" type="number" value="2070"></div>
+            </div>
+            <div class="mt-3" id="partsList"></div>
+            <button class="btn btn-primary mt-3" id="btnOptimize">Рассчитать раскрой</button>
+          </div>
+        </div>
+        <div class="col-lg-7">
+          <div class="service-card p-4 h-100">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+              <h5 class="mb-0">Схема размещения</h5>
+              <span class="badge text-bg-success" id="cutStats">готово к расчёту</span>
+            </div>
+            <div class="cut-sheet" id="cutView">
+              <span class="text-muted">После расчёта здесь появится схема деталей</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-5" id="planner">
+      <div class="row g-4 align-items-stretch">
+        <div class="col-lg-6">
+          <div class="service-card p-4 h-100">
+            <div class="muted-title">Планировщик</div>
+            <h2 class="section-title">Демо-комната клиента</h2>
+            <p class="text-muted">Создайте проект и добавьте несколько предметов мебели, чтобы увидеть простую план-схему.</p>
+            <div class="row g-2 mb-3">
+              <div class="col-md-7"><input class="form-control" id="projectName" value="Кухня-гостиная клиента"></div>
+              <div class="col-md-5"><input class="form-control" id="projectLocation" value="Москва"></div>
+            </div>
+            <button class="btn btn-success me-2" id="btnCreateRoom">Создать проект</button>
+            <button class="btn btn-outline-secondary" id="btnAddFurniture">Добавить комплект мебели</button>
+            <div class="small text-muted mt-3" id="plannerHint">Проект ещё не создан.</div>
+          </div>
+        </div>
+        <div class="col-lg-6">
+          <div class="service-card p-4 h-100">
+            <div class="room-plan" id="roomPlan"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="mb-5" id="assets">
+      <div class="d-flex justify-content-between align-items-end gap-3 mb-4">
+        <div>
+          <div class="muted-title">3D и материалы</div>
+          <h2 class="section-title mb-1">Библиотека для проектов</h2>
+          <p class="text-muted mb-0">В демонстрации это S3/MinIO-хранилище для моделей, текстур и изображений.</p>
+        </div>
+        <button class="btn btn-outline-primary" id="btnAssetLink">Подготовить ссылку на 3D-модель</button>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-4"><div class="asset-tile p-4 h-100"><div class="display-5">🪑</div><h5>3D-модели</h5><p class="text-muted mb-0">GLB/OBJ-файлы для планировщика комнат.</p></div></div>
+        <div class="col-md-4"><div class="asset-tile p-4 h-100"><div class="display-5">🎨</div><h5>Материалы</h5><p class="text-muted mb-0">Текстуры дерева, ткани, камня и фурнитуры.</p></div></div>
+        <div class="col-md-4"><div class="asset-tile p-4 h-100"><div class="display-5">🖼️</div><h5>Изображения</h5><p class="text-muted mb-0">Фотографии товаров, сцен и комплектов.</p></div></div>
+      </div>
+      <div class="alert alert-light border mt-3 small mb-0" id="assetResult">Ссылка на загрузку пока не запрошена.</div>
+    </section>
+  </main>
+
+  <div class="offcanvas offcanvas-end" tabindex="-1" id="cartCanvas">
+    <div class="offcanvas-header">
+      <h5 class="offcanvas-title">Корзина клиента</h5>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+    </div>
+    <div class="offcanvas-body">
+      <div id="cartItems" class="vstack gap-3"></div>
+      <hr />
+      <div class="d-flex justify-content-between h5"><span>Итого</span><span id="cartTotal">0 ₽</span></div>
+      <button class="btn btn-warning w-100 mt-3">Оформить демо-заказ</button>
+    </div>
+  </div>
+
+  <div class="modal fade" id="accountModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 rounded-4 overflow-hidden">
+        <div class="modal-header bg-dark text-white">
+          <div>
+            <h5 class="modal-title">Личный кабинет</h5>
+            <div class="small text-white-50">Войдите, чтобы сохранить корзину и проекты</div>
+          </div>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <ul class="nav nav-pills mb-3" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#loginPane" type="button">Вход</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" data-bs-toggle="pill" data-bs-target="#registerPane" type="button">Регистрация</button>
+            </li>
+          </ul>
+          <div class="tab-content">
+            <div class="tab-pane fade show active" id="loginPane">
+              <label class="form-label">Телефон или логин</label>
+              <input class="form-control mb-3" id="loginUser" value="admin" autocomplete="username" />
+              <label class="form-label">Пароль</label>
+              <input type="password" class="form-control mb-3" id="loginPass" value="demo123456" autocomplete="current-password" />
+              <button class="btn btn-primary w-100" id="btnLogin">Войти в кабинет</button>
+              <div class="small text-muted mt-2">Демо-аккаунт: admin / demo123456.</div>
+            </div>
+            <div class="tab-pane fade" id="registerPane">
+              <label class="form-label">Имя</label>
+              <input class="form-control mb-3" id="regUser" placeholder="например, anna-demo" autocomplete="username" />
+              <label class="form-label">Пароль</label>
+              <input type="password" class="form-control mb-3" id="regPass" placeholder="минимум 8 символов" autocomplete="new-password" />
+              <button class="btn btn-success w-100" id="btnRegister">Создать аккаунт</button>
+              <div class="small text-muted mt-2">После регистрации можно войти в личный кабинет.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

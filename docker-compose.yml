@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   postgres:
     image: postgres:16
@@ -12,39 +10,177 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres/init_test_db.sql:/docker-entrypoint-initdb.d/02_furniture_test.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U furniture -d furniture"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: furniture-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 25s
+
+  minio:
+    image: minio/minio:latest
+    container_name: furniture-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: furniture-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c",
+        "sleep 5 && mc alias set local http://minio:9000 minioadmin minioadmin && mc mb local/furniture-assets --ignore-existing || true",
+      ]
+    restart: "no"
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    container_name: furniture-migrate
+    environment:
+      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
 
   catalog-service:
     build:
       context: .
       dockerfile: services/catalog_service/Dockerfile
-    environment:
-      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
     ports:
       - "8001:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
+      JWT_SECRET_KEY: demo_jwt_secret_local_only
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   cutting-service:
     build:
       context: .
       dockerfile: services/cutting_service/Dockerfile
-    environment:
-      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
     ports:
       - "8002:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
+      JWT_SECRET_KEY: demo_jwt_secret_local_only
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   planner-service:
     build:
       context: .
       dockerfile: services/planner_service/Dockerfile
-    environment:
-      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
     ports:
       - "8003:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
+      JWT_SECRET_KEY: demo_jwt_secret_local_only
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672/
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: services/auth_service/Dockerfile
+    ports:
+      - "8004:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
+      JWT_SECRET_KEY: demo_jwt_secret_local_only
+      AUTH_BOOTSTRAP_USERNAME: admin
+      AUTH_BOOTSTRAP_PASSWORD: demo123456
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  assets-service:
+    build:
+      context: .
+      dockerfile: services/assets_service/Dockerfile
+    ports:
+      - "8005:8000"
+    environment:
+      JWT_SECRET_KEY: demo_jwt_secret_local_only
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: furniture-assets
+      AWS_REGION: us-east-1
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
+
+  gateway-service:
+    build:
+      context: .
+      dockerfile: services/gateway_service/Dockerfile
+    ports:
+      - "8080:8000"
+    environment:
+      GATEWAY_CATALOG_URL: http://catalog-service:8000
+      GATEWAY_CUTTING_URL: http://cutting-service:8000
+      GATEWAY_PLANNER_URL: http://planner-service:8000
+      GATEWAY_AUTH_URL: http://auth-service:8000
+      GATEWAY_ASSETS_URL: http://assets-service:8000
+    depends_on:
+      - catalog-service
+      - cutting-service
+      - planner-service
+      - auth-service
+      - assets-service
 
 volumes:
   postgres_data:
+  minio_data:

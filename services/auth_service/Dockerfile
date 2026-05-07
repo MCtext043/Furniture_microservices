@@ -11,8 +11,8 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY common /app/common
 COPY services/__init__.py /app/services/__init__.py
-COPY services/cutting_service /app/services/cutting_service
+COPY services/auth_service /app/services/auth_service
 
 ENV PYTHONPATH=/app
 
-CMD ["uvicorn", "services.cutting_service.app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "services.auth_service.app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -2,7 +2,10 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from .db import Base, engine, get_session
+from common.jwt_auth import ensure_catalog_writer
+from common.messaging import publish_event
+
+from .db import get_session
 from .models import CartItem, Category, Product, ProductReview, WishlistItem
 from .schemas import (
     CartItemCreate,
@@ -34,15 +37,13 @@ app = FastAPI(
     ],
 )
 
-Base.metadata.create_all(bind=engine)
-
 
 @app.get("/health", tags=["system"])
 def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/categories", response_model=CategoryOut, status_code=201, tags=["categories"])
+@app.post("/categories", response_model=CategoryOut, status_code=201, tags=["categories"], dependencies=[Depends(ensure_catalog_writer)])
 def create_category(payload: CategoryCreate, session: Session = Depends(get_session)) -> Category:
     existing = session.scalar(select(Category).where(Category.name == payload.name))
     if existing:
@@ -67,7 +68,7 @@ def get_category(category_id: int, session: Session = Depends(get_session)) -> C
     return category
 
 
-@app.post("/products", response_model=ProductOut, status_code=201, tags=["products"])
+@app.post("/products", response_model=ProductOut, status_code=201, tags=["products"], dependencies=[Depends(ensure_catalog_writer)])
 def create_product(payload: ProductCreate, session: Session = Depends(get_session)) -> Product:
     existing_sku = session.scalar(select(Product).where(Product.sku == payload.sku))
     if existing_sku:
@@ -80,6 +81,15 @@ def create_product(payload: ProductCreate, session: Session = Depends(get_sessio
     session.add(product)
     session.commit()
     session.refresh(product)
+    publish_event(
+        "catalog.product.created",
+        {
+            "id": product.id,
+            "sku": product.sku,
+            "name": product.name,
+            "price": float(product.price),
+        },
+    )
     return product
 
 
@@ -148,7 +158,7 @@ def get_product(product_id: int, session: Session = Depends(get_session)) -> Pro
     return product
 
 
-@app.patch("/products/{product_id}", response_model=ProductOut, tags=["products"])
+@app.patch("/products/{product_id}", response_model=ProductOut, tags=["products"], dependencies=[Depends(ensure_catalog_writer)])
 def update_product(
     product_id: int,
     payload: ProductUpdate,
@@ -168,7 +178,7 @@ def update_product(
     return product
 
 
-@app.delete("/products/{product_id}", status_code=204, tags=["products"])
+@app.delete("/products/{product_id}", status_code=204, tags=["products"], dependencies=[Depends(ensure_catalog_writer)])
 def delete_product(product_id: int, session: Session = Depends(get_session)) -> None:
     product = session.get(Product, product_id)
     if not product:
@@ -177,7 +187,7 @@ def delete_product(product_id: int, session: Session = Depends(get_session)) -> 
     session.commit()
 
 
-@app.post("/products/{product_id}/reviews", response_model=ReviewOut, status_code=201, tags=["reviews"])
+@app.post("/products/{product_id}/reviews", response_model=ReviewOut, status_code=201, tags=["reviews"], dependencies=[Depends(ensure_catalog_writer)])
 def add_review(
     product_id: int,
     payload: ReviewCreate,
@@ -201,7 +211,7 @@ def list_reviews(product_id: int, session: Session = Depends(get_session)) -> li
     return list(session.scalars(select(ProductReview).where(ProductReview.product_id == product_id)))
 
 
-@app.post("/users/{user_id}/cart/items", response_model=CartItemOut, status_code=201, tags=["cart"])
+@app.post("/users/{user_id}/cart/items", response_model=CartItemOut, status_code=201, tags=["cart"], dependencies=[Depends(ensure_catalog_writer)])
 def add_cart_item(
     user_id: str,
     payload: CartItemCreate,
@@ -230,7 +240,7 @@ def list_cart_items(user_id: str, session: Session = Depends(get_session)) -> li
     return list(session.scalars(select(CartItem).where(CartItem.user_id == user_id)))
 
 
-@app.patch("/users/{user_id}/cart/items/{item_id}", response_model=CartItemOut, tags=["cart"])
+@app.patch("/users/{user_id}/cart/items/{item_id}", response_model=CartItemOut, tags=["cart"], dependencies=[Depends(ensure_catalog_writer)])
 def update_cart_item(
     user_id: str,
     item_id: int,
@@ -246,7 +256,7 @@ def update_cart_item(
     return item
 
 
-@app.delete("/users/{user_id}/cart/items/{item_id}", status_code=204, tags=["cart"])
+@app.delete("/users/{user_id}/cart/items/{item_id}", status_code=204, tags=["cart"], dependencies=[Depends(ensure_catalog_writer)])
 def delete_cart_item(user_id: str, item_id: int, session: Session = Depends(get_session)) -> None:
     item = session.get(CartItem, item_id)
     if not item or item.user_id != user_id:
@@ -260,6 +270,7 @@ def delete_cart_item(user_id: str, item_id: int, session: Session = Depends(get_
     response_model=WishlistItemOut,
     status_code=201,
     tags=["wishlist"],
+    dependencies=[Depends(ensure_catalog_writer)],
 )
 def add_wishlist_item(user_id: str, product_id: int, session: Session = Depends(get_session)) -> WishlistItem:
     product = session.get(Product, product_id)
@@ -282,7 +293,7 @@ def list_wishlist(user_id: str, session: Session = Depends(get_session)) -> list
     return list(session.scalars(select(WishlistItem).where(WishlistItem.user_id == user_id)))
 
 
-@app.delete("/users/{user_id}/wishlist/products/{product_id}", status_code=204, tags=["wishlist"])
+@app.delete("/users/{user_id}/wishlist/products/{product_id}", status_code=204, tags=["wishlist"], dependencies=[Depends(ensure_catalog_writer)])
 def delete_wishlist_item(user_id: str, product_id: int, session: Session = Depends(get_session)) -> None:
     item = session.scalar(
         select(WishlistItem).where(WishlistItem.user_id == user_id, WishlistItem.product_id == product_id)
