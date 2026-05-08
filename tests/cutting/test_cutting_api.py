@@ -92,3 +92,42 @@ def test_unplaced_parts_reported_for_oversized_details(cutting_client: TestClien
     assert body["unplaced_parts"][0]["name"] == "Сверхдлинная"
     assert body["unplaced_parts"][0]["quantity"] == 2
     _assert_no_overlap_per_sheet(body["sheets"])
+
+
+def test_part_name_does_not_affect_cutting_geometry(cutting_client: TestClient):
+    base_payload = {
+        "sheet_width": 1000,
+        "sheet_height": 600,
+        "parts": [
+            {"name": "A", "width": 400, "height": 300, "quantity": 2},
+            {"name": "B", "width": 300, "height": 200, "quantity": 3},
+        ],
+    }
+    verbose_payload = {
+        "sheet_width": 1000,
+        "sheet_height": 600,
+        "parts": [
+            {"name": "Очень длинное описание детали номер один", "width": 400, "height": 300, "quantity": 2},
+            {"name": "Очень длинное описание детали номер два", "width": 300, "height": 200, "quantity": 3},
+        ],
+    }
+
+    base = cutting_client.post("/optimize", json=base_payload)
+    verbose = cutting_client.post("/optimize", json=verbose_payload)
+    assert base.status_code == 200
+    assert verbose.status_code == 200
+    base_body = base.json()
+    verbose_body = verbose.json()
+
+    assert base_body["placed_count"] == verbose_body["placed_count"]
+    assert base_body["total_sheets"] == verbose_body["total_sheets"]
+    assert base_body["total_used_area"] == verbose_body["total_used_area"]
+    assert base_body["total_unused_area"] == verbose_body["total_unused_area"]
+
+    base_geom = sorted(
+        (p["sheet_index"], p["x"], p["y"], p["width"], p["height"]) for p in base_body["placements"]
+    )
+    verbose_geom = sorted(
+        (p["sheet_index"], p["x"], p["y"], p["width"], p["height"]) for p in verbose_body["placements"]
+    )
+    assert base_geom == verbose_geom

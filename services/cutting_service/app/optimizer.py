@@ -31,31 +31,56 @@ def optimize_sheet(sheet_width: int, sheet_height: int, parts: list[Part]) -> tu
         placed_on_sheet = 0
 
         for name, width, height in remaining:
-            if width > sheet_width or height > sheet_height:
+            candidate_sizes: list[tuple[int, int]] = [(width, height)]
+            if width != height:
+                candidate_sizes.append((height, width))
+
+            valid_sizes = [(w, h) for w, h in candidate_sizes if w <= sheet_width and h <= sheet_height]
+            if not valid_sizes:
                 impossible.append((name, width, height))
                 continue
 
-            if x + width > sheet_width:
-                x = 0
-                y += shelf_height
-                shelf_height = 0
+            best_fit: tuple[int, int, int, int] | None = None
+            chosen_w = 0
+            chosen_h = 0
+            chosen_shelf = 0
+            for cand_w, cand_h in valid_sizes:
+                nx = x
+                ny = y
+                nshelf = shelf_height
+                if nx + cand_w > sheet_width:
+                    nx = 0
+                    ny += nshelf
+                    nshelf = 0
+                if ny + cand_h > sheet_height:
+                    continue
+                score = ny + cand_h
+                score_width = nx + cand_w
+                if best_fit is None or (score, score_width) < (best_fit[0], best_fit[1]):
+                    best_fit = (score, score_width, nx, ny)
+                    chosen_w = cand_w
+                    chosen_h = cand_h
+                    chosen_shelf = nshelf
 
-            if y + height > sheet_height:
+            if best_fit is None:
                 next_remaining.append((name, width, height))
                 continue
 
+            nx = best_fit[2]
+            ny = best_fit[3]
             placements.append(
                 Placement(
                     name=name,
-                    x=x,
-                    y=y,
-                    width=width,
-                    height=height,
+                    x=nx,
+                    y=ny,
+                    width=chosen_w,
+                    height=chosen_h,
                     sheet_index=sheet_index,
                 )
             )
-            x += width
-            shelf_height = max(shelf_height, height)
+            x = nx + chosen_w
+            y = ny
+            shelf_height = max(chosen_shelf, chosen_h)
             placed_on_sheet += 1
 
         if placed_on_sheet == 0:

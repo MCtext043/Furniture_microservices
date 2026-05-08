@@ -15,6 +15,7 @@ const state = {
   roomConfig: { width: 6, length: 5, height: 2.8 },
   objects3d: [],
   drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0 },
+  cameraDrag: { active: false, startX: 0, startY: 0 },
   lastCutResult: null,
 };
 
@@ -47,6 +48,15 @@ const typePresets = {
   shelf: { title: "Стеллаж", color: "#B08968", texture: "wood" },
   table: { title: "Стол", color: "#4B5563", texture: "metal" },
   sofa: { title: "Диван", color: "#64748B", texture: "fabric" },
+};
+
+const texturePresets = {
+  wood_dark_oak: { title: "Темный дуб", material: "wood", color: "#6B4423" },
+  wood_oak: { title: "Светлый дуб", material: "wood", color: "#B68655" },
+  board_black: { title: "Черное ДСП", material: "board", color: "#222629" },
+  board_white: { title: "Белое ДСП", material: "board", color: "#E9ECEF" },
+  fabric_gray: { title: "Серая ткань", material: "fabric", color: "#6C757D" },
+  metal_graphite: { title: "Графитовый металл", material: "metal", color: "#495057" },
 };
 
 function apiBase() {
@@ -415,15 +425,31 @@ function renderParts() {
   );
 }
 
+function normalizePartsForCutting(parts, sheetW, sheetH) {
+  return parts.map((part) => {
+    const width = Number(part.width);
+    const height = Number(part.height);
+    const fitsDirect = width <= sheetW && height <= sheetH;
+    const fitsRotated = height <= sheetW && width <= sheetH;
+    if (!fitsDirect && fitsRotated) {
+      return { ...part, width: height, height: width };
+    }
+    return { ...part, width, height };
+  });
+}
+
 async function optimizeCutting(customParts = null, silent = false) {
-  const parts = customParts || state.cuttingParts;
-  if (!parts.length) {
+  const sourceParts = customParts || state.cuttingParts;
+  if (!sourceParts.length) {
     if (!silent) toast("Добавьте детали для расчета раскроя", false);
     return null;
   }
+  const sheetW = Number(document.getElementById("sheetW").value);
+  const sheetH = Number(document.getElementById("sheetH").value);
+  const parts = normalizePartsForCutting(sourceParts, sheetW, sheetH);
   const payload = {
-    sheet_width: Number(document.getElementById("sheetW").value),
-    sheet_height: Number(document.getElementById("sheetH").value),
+    sheet_width: sheetW,
+    sheet_height: sheetH,
     parts,
   };
   try {
@@ -451,16 +477,21 @@ function renderCutView(sheetW, sheetH, sheets) {
   view.innerHTML = sheets
     .map((sheet) => `
       <div class="border rounded p-2 mb-2 bg-white w-100">
-        <div class="small fw-semibold mb-2">Лист #${sheet.sheet_index + 1} · загрузка ${sheet.utilization_percent}%</div>
+        <div class="small fw-semibold mb-2 d-flex justify-content-between flex-wrap gap-1">
+          <span>Лист #${sheet.sheet_index + 1} · загрузка ${sheet.utilization_percent}%</span>
+          <span class="text-muted">Занято: ${sheet.utilized_area ?? 0} мм² · Свободно: ${sheet.unused_area ?? 0} мм²</span>
+        </div>
         <div class="position-relative w-100" style="min-height:180px; background:#fcfaf6; border:1px dashed #d8c2aa; border-radius:.5rem;">
           ${(sheet.placements || [])
             .map((p, i) => {
               const colors = ["#a16207", "#7c3aed", "#0f766e", "#be123c", "#2563eb", "#65a30d"];
+              const color = colors[i % colors.length];
+              const labelTop = Math.max(p.y * scaleY, 0.8);
               return `<div title="${escapeHtml(p.name)}" style="
                 position:absolute; left:${p.x * scaleX}%; top:${p.y * scaleY}%;
                 width:${Math.max(p.width * scaleX, 5)}%; height:${Math.max(p.height * scaleY, 6)}%;
-                background:${colors[i % colors.length]}; color:#fff; border:1px solid rgba(255,255,255,.75);
-                border-radius:.35rem; font-size:.65rem; padding:.15rem; overflow:hidden">${escapeHtml(p.name)}</div>`;
+                background:${color};" class="cut-rect"></div>
+                <div class="cut-rect-label" style="left:${p.x * scaleX}%; top:${labelTop}%; background:${color};">${escapeHtml(p.name)}</div>`;
             })
             .join("")}
         </div>
@@ -562,9 +593,9 @@ async function syncPlannerObjectsToBackend() {
 
 function createDemoObjects() {
   state.objects3d = [
-    { id: crypto.randomUUID(), type: "wardrobe", name: "Шкаф Verona", width: 1.4, depth: 0.6, height: 2.2, x: 5.0, z: 0.9, rotationY: 0 },
-    { id: crypto.randomUUID(), type: "sofa", name: "Диван Soft Cloud", width: 2.2, depth: 1.0, height: 0.9, x: 1.5, z: 3.5, rotationY: 90 },
-    { id: crypto.randomUUID(), type: "cabinet", name: "Остров Chef", width: 1.8, depth: 0.8, height: 0.9, x: 3.0, z: 2.2, rotationY: 0 },
+    { id: crypto.randomUUID(), type: "wardrobe", texture: "wood_dark_oak", name: "Шкаф Verona", width: 1.4, depth: 0.6, height: 2.2, x: 5.0, z: 0.9, rotationY: 0 },
+    { id: crypto.randomUUID(), type: "sofa", texture: "fabric_gray", name: "Диван Soft Cloud", width: 2.2, depth: 1.0, height: 0.9, x: 1.5, z: 3.5, rotationY: 90 },
+    { id: crypto.randomUUID(), type: "cabinet", texture: "board_black", name: "Остров Chef", width: 1.8, depth: 0.8, height: 0.9, x: 3.0, z: 2.2, rotationY: 0 },
   ];
 }
 
@@ -602,6 +633,16 @@ function getTextureByType(type) {
       ctx.lineTo(i * 16 + 40, 128);
       ctx.stroke();
     }
+  } else if (type === "board") {
+    ctx.fillStyle = "#5f6368";
+    ctx.fillRect(0, 0, 128, 128);
+    ctx.strokeStyle = "rgba(255,255,255,.18)";
+    for (let i = 0; i <= 8; i++) {
+      ctx.beginPath();
+      ctx.moveTo(0, i * 16);
+      ctx.lineTo(128, i * 16);
+      ctx.stroke();
+    }
   } else {
     ctx.fillStyle = "#64748b";
     ctx.fillRect(0, 0, 128, 128);
@@ -625,6 +666,14 @@ function roomUnitToWorldX(x) {
 
 function roomUnitToWorldZ(z) {
   return z - state.roomConfig.length / 2;
+}
+
+function resolveTexturePreset(item) {
+  return texturePresets[item.texture] || {
+    material: (typePresets[item.type] || typePresets.cabinet).texture,
+    color: (typePresets[item.type] || typePresets.cabinet).color,
+    title: "По типу",
+  };
 }
 
 function initRoom3D() {
@@ -659,7 +708,15 @@ function initRoom3D() {
   scene.add(roomGroup);
   scene.add(furnitureGroup);
 
-  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, host };
+  const orbit = {
+    theta: 0.78,
+    phi: 1.03,
+    radius: 11,
+    target: new THREE.Vector3(0, 1, 0),
+  };
+  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, host, orbit };
+  init3DPointerControls(renderer.domElement);
+  updateOrbitCamera();
   rebuildRoomGeometry();
   renderRoom3D();
 
@@ -676,7 +733,57 @@ function initRoom3D() {
     camera.aspect = w / height;
     camera.updateProjectionMatrix();
     renderer.setSize(w, height);
+    updateOrbitCamera();
   });
+}
+
+function updateOrbitCamera() {
+  if (!state.three) return;
+  const { orbit, camera } = state.three;
+  const sinPhi = Math.sin(orbit.phi);
+  const x = orbit.target.x + orbit.radius * sinPhi * Math.sin(orbit.theta);
+  const y = orbit.target.y + orbit.radius * Math.cos(orbit.phi);
+  const z = orbit.target.z + orbit.radius * sinPhi * Math.cos(orbit.theta);
+  camera.position.set(x, y, z);
+  camera.lookAt(orbit.target);
+}
+
+function init3DPointerControls(canvas) {
+  canvas.style.cursor = "grab";
+  canvas.addEventListener("pointerdown", (event) => {
+    state.cameraDrag.active = true;
+    state.cameraDrag.startX = event.clientX;
+    state.cameraDrag.startY = event.clientY;
+    canvas.style.cursor = "grabbing";
+    canvas.setPointerCapture(event.pointerId);
+  });
+  canvas.addEventListener("pointermove", (event) => {
+    if (!state.cameraDrag.active || !state.three) return;
+    const dx = event.clientX - state.cameraDrag.startX;
+    const dy = event.clientY - state.cameraDrag.startY;
+    state.cameraDrag.startX = event.clientX;
+    state.cameraDrag.startY = event.clientY;
+    state.three.orbit.theta -= dx * 0.01;
+    state.three.orbit.phi = Math.min(Math.max(state.three.orbit.phi + dy * 0.01, 0.22), Math.PI / 2 - 0.04);
+    updateOrbitCamera();
+  });
+  const stopDrag = () => {
+    state.cameraDrag.active = false;
+    canvas.style.cursor = "grab";
+  };
+  canvas.addEventListener("pointerup", stopDrag);
+  canvas.addEventListener("pointerleave", stopDrag);
+  canvas.addEventListener("pointercancel", stopDrag);
+  canvas.addEventListener(
+    "wheel",
+    (event) => {
+      if (!state.three) return;
+      event.preventDefault();
+      state.three.orbit.radius = Math.min(Math.max(state.three.orbit.radius + event.deltaY * 0.01, 3), 18);
+      updateOrbitCamera();
+    },
+    { passive: false }
+  );
 }
 
 function rebuildRoomGeometry() {
@@ -708,17 +815,17 @@ function renderRoom3D() {
   furnitureGroup.clear();
 
   state.objects3d.forEach((item) => {
-    const preset = typePresets[item.type] || typePresets.cabinet;
+    const texturePreset = resolveTexturePreset(item);
     const w = Math.max(Number(item.width) || 1, 0.35);
     const d = Math.max(Number(item.depth) || 1, 0.35);
     const h = Math.max(Number(item.height) || 1, 0.35);
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(w, h, d),
       new THREE.MeshStandardMaterial({
-        map: getTextureByType(preset.texture),
-        color: preset.color,
+        map: getTextureByType(texturePreset.material),
+        color: texturePreset.color,
         roughness: 0.65,
-        metalness: preset.texture === "metal" ? 0.22 : 0.06,
+        metalness: texturePreset.material === "metal" ? 0.22 : 0.06,
       })
     );
     mesh.position.set(roomUnitToWorldX(item.x), h / 2, roomUnitToWorldZ(item.z));
@@ -732,6 +839,8 @@ function renderRoom3D() {
 function renderRoomTopView() {
   const host = document.getElementById("roomPlan");
   const { width, length } = state.roomConfig;
+  host.style.aspectRatio = `${width} / ${length}`;
+  host.style.minHeight = `${Math.max(220, Math.round(length * 42))}px`;
   const viewW = host.clientWidth || 400;
   const viewH = host.clientHeight || 260;
   const scale = Math.min(viewW / width, viewH / length);
@@ -742,8 +851,8 @@ function renderRoomTopView() {
       const top = (item.z - item.depth / 2) * scale;
       const chipW = Math.max(item.width * scale, 24);
       const chipH = Math.max(item.depth * scale, 18);
-      const preset = typePresets[item.type] || typePresets.cabinet;
-      return `<div class="furniture-chip" data-drag-id="${item.id}" style="cursor:grab; left:${left}px; top:${top}px; width:${chipW}px; height:${chipH}px; background:${preset.color};">${escapeHtml(item.name)}</div>`;
+      const texturePreset = resolveTexturePreset(item);
+      return `<div class="furniture-chip" data-drag-id="${item.id}" style="cursor:grab; left:${left}px; top:${top}px; width:${chipW}px; height:${chipH}px; background:${texturePreset.color};">${escapeHtml(item.name)}</div>`;
     })
     .join("");
 
@@ -809,6 +918,7 @@ function applyRoomSize() {
 
 function addObject3DFromForm() {
   const type = document.getElementById("objType").value;
+  const texture = document.getElementById("objTexture").value;
   const name = document.getElementById("objName").value.trim() || "Новый объект";
   const width = Number(document.getElementById("objW").value);
   const depth = Number(document.getElementById("objD").value);
@@ -820,6 +930,7 @@ function addObject3DFromForm() {
   const item = {
     id: crypto.randomUUID(),
     type,
+    texture,
     name,
     width,
     depth,
@@ -912,54 +1023,164 @@ async function cutFrom3D() {
   toast("Раскрой из 3D выполнен");
 }
 
+function sheetCanvasForPdfmake(sheet, sheetWidthMm, sheetHeightMm) {
+  const maxW = 220;
+  const maxH = 130;
+  const ratio = Math.min(maxW / sheetWidthMm, maxH / sheetHeightMm);
+  const width = Math.max(Math.round(sheetWidthMm * ratio), 1);
+  const height = Math.max(Math.round(sheetHeightMm * ratio), 1);
+  const colors = ["#a16207", "#7c3aed", "#0f766e", "#be123c", "#2563eb", "#65a30d"];
+  const canvas = [{ type: "rect", x: 0, y: 0, w: width, h: height, lineColor: "#8a8f98", lineWidth: 1.2 }];
+
+  (sheet.placements || []).forEach((placement, idx) => {
+    const x = placement.x * ratio;
+    const y = placement.y * ratio;
+    const w = Math.max(placement.width * ratio, 1.2);
+    const h = Math.max(placement.height * ratio, 1.2);
+    const color = colors[idx % colors.length];
+    canvas.push({ type: "rect", x, y, w, h, color, lineColor: "#ffffff", lineWidth: 0.4 });
+  });
+
+  return { canvas, width };
+}
+
 function exportCutPdf() {
   const result = state.lastCutResult;
   if (!result) {
     toast("Сначала выполните раскрой", false);
     return;
   }
-  const jspdfNs = window.jspdf;
-  if (!jspdfNs?.jsPDF) {
-    toast("jsPDF не загружен", false);
+  if (!window.pdfMake) {
+    toast("Модуль PDF не загружен", false);
     return;
   }
-  const doc = new jspdfNs.jsPDF();
-  let y = 12;
-  doc.setFontSize(14);
-  doc.text("Furniture Cutting Report", 10, y);
-  y += 8;
-  doc.setFontSize(11);
-  doc.text(`Placed: ${result.placed_count}/${result.requested_count}`, 10, y);
-  y += 6;
-  doc.text(`Sheets: ${result.total_sheets}`, 10, y);
-  y += 6;
-  doc.text(`Used area: ${result.total_used_area} mm2`, 10, y);
-  y += 6;
-  doc.text(`Unused area: ${result.total_unused_area} mm2`, 10, y);
-  y += 8;
+  const sheetW = Number(document.getElementById("sheetW").value);
+  const sheetH = Number(document.getElementById("sheetH").value);
+  const content = [
+    { text: "Карта раскроя", style: "title" },
+    { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta" },
+    {
+      text: `Размещено: ${result.placed_count}/${result.requested_count} · Листов: ${result.total_sheets} · Занято: ${result.total_used_area} мм² · Свободно: ${result.total_unused_area} мм²`,
+      style: "meta",
+      margin: [0, 0, 0, 10],
+    },
+  ];
 
-  for (const sheet of result.sheets || []) {
-    if (y > 270) {
-      doc.addPage();
-      y = 12;
-    }
-    doc.setFontSize(12);
-    doc.text(`Sheet #${sheet.sheet_index + 1} (${sheet.utilization_percent}%)`, 10, y);
-    y += 6;
-    doc.setFontSize(10);
-    for (const placement of sheet.placements || []) {
-      if (y > 285) {
-        doc.addPage();
-        y = 12;
-      }
-      doc.text(`- ${placement.name}: ${placement.width}x${placement.height} at (${placement.x}, ${placement.y})`, 12, y);
-      y += 5;
-    }
-    y += 4;
+  (result.sheets || []).forEach((sheet, index) => {
+    const drawn = sheetCanvasForPdfmake(sheet, sheetW, sheetH);
+    const legendRows = (sheet.placements || []).map((p, i) => [
+      { text: `${i + 1}`, style: "small" },
+      { text: p.name, style: "small" },
+      { text: `${p.width}×${p.height} мм`, style: "small" },
+    ]);
+    content.push({
+      text: `Лист ${sheet.sheet_index + 1}: занято ${sheet.utilized_area ?? 0} мм² · свободно ${sheet.unused_area ?? 0} мм² · загрузка ${sheet.utilization_percent}%`,
+      style: "sheetTitle",
+      margin: [0, index ? 8 : 0, 0, 4],
+    });
+    content.push({
+      columns: [
+        { width: drawn.width + 10, stack: [{ canvas: drawn.canvas }] },
+        {
+          width: "*",
+          stack: legendRows.length
+            ? [{ table: { widths: [16, "*", 80], body: [[{ text: "№", style: "thead" }, { text: "Деталь", style: "thead" }, { text: "Размер", style: "thead" }], ...legendRows] }, layout: "lightHorizontalLines" }]
+            : [{ text: "На листе нет размещенных деталей", style: "small" }],
+        },
+      ],
+      columnGap: 12,
+      margin: [0, 0, 0, 6],
+    });
+  });
+
+  if (result.unplaced_parts?.length) {
+    content.push({ text: "Не размещено (деталь больше листа):", style: "sheetTitle", margin: [0, 8, 0, 4] });
+    content.push({
+      table: {
+        widths: [28, "*", 90, 50],
+        body: [
+          [{ text: "№", style: "thead" }, { text: "Деталь", style: "thead" }, { text: "Размер", style: "thead" }, { text: "Кол-во", style: "thead" }],
+          ...result.unplaced_parts.map((part, i) => [String(i + 1), part.name, `${part.width}×${part.height} мм`, String(part.quantity)]),
+        ],
+      },
+      layout: "lightHorizontalLines",
+    });
   }
 
-  doc.save("cutting-report.pdf");
-  toast("PDF раскроя экспортирован");
+  window.pdfMake
+    .createPdf({
+      pageSize: "A4",
+      pageMargins: [24, 24, 24, 24],
+      content,
+      styles: {
+        title: { fontSize: 20, bold: true, color: "#1f2937" },
+        meta: { fontSize: 10, color: "#4b5563" },
+        sheetTitle: { fontSize: 12, bold: true, color: "#111827" },
+        thead: { bold: true, fillColor: "#eef2ff", fontSize: 9 },
+        small: { fontSize: 9 },
+      },
+      defaultStyle: { font: "Roboto" },
+    })
+    .download("cutting-report.pdf");
+  toast("Карта раскроя сохранена");
+}
+
+function exportAssemblyPdf() {
+  const bom = buildBomFromObjects();
+  if (!bom.parts.length) {
+    toast("Добавьте объекты, чтобы собрать инструкцию", false);
+    return;
+  }
+  if (!window.pdfMake) {
+    toast("Модуль PDF не загружен", false);
+    return;
+  }
+  const objectsTableBody = [
+    [{ text: "№", style: "thead" }, { text: "Объект", style: "thead" }, { text: "Тип", style: "thead" }, { text: "Габариты, мм", style: "thead" }, { text: "Текстура", style: "thead" }],
+    ...state.objects3d.map((item, idx) => {
+      const textureTitle = (texturePresets[item.texture] || {}).title || "По типу";
+      const typeTitle = (typePresets[item.type] || {}).title || item.type;
+      return [String(idx + 1), item.name, typeTitle, `${Math.round(item.width * 1000)}×${Math.round(item.depth * 1000)}×${Math.round(item.height * 1000)}`, textureTitle];
+    }),
+  ];
+
+  const partsTableBody = [
+    [{ text: "№", style: "thead" }, { text: "Деталь", style: "thead" }, { text: "Размер, мм", style: "thead" }, { text: "Кол-во", style: "thead" }],
+    ...bom.parts.map((part, idx) => [String(idx + 1), part.name, `${part.width}×${part.height}`, String(part.quantity)]),
+  ];
+
+  const content = [
+    { text: "Инструкция по сборке", style: "title" },
+    { text: `Комната: ${state.roomConfig.width} × ${state.roomConfig.length} × ${state.roomConfig.height} м`, style: "meta" },
+    { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta", margin: [0, 0, 0, 10] },
+    { text: "1. Перечень объектов в проекте", style: "section" },
+    { table: { headerRows: 1, widths: [20, "*", 64, 78, 70], body: objectsTableBody }, layout: "lightHorizontalLines", margin: [0, 0, 0, 10] },
+    { text: "2. Детали для изготовления", style: "section" },
+    { table: { headerRows: 1, widths: [20, "*", 90, 50], body: partsTableBody }, layout: "lightHorizontalLines", margin: [0, 0, 0, 10] },
+    { text: "3. Порядок сборки", style: "section" },
+    {
+      ul: (bom.assembly.length ? bom.assembly : ["Подготовьте крепеж и выполняйте сборку по порядку объектов."]).map((row) => row),
+      margin: [0, 0, 0, 6],
+    },
+    { text: "Примечание: названия деталей/объектов служат только для идентификации и не влияют на геометрию раскроя.", style: "note" },
+  ];
+
+  window.pdfMake
+    .createPdf({
+      pageSize: "A4",
+      pageMargins: [24, 24, 24, 24],
+      content,
+      styles: {
+        title: { fontSize: 20, bold: true, color: "#1f2937" },
+        meta: { fontSize: 10, color: "#4b5563" },
+        section: { fontSize: 12, bold: true, color: "#111827", margin: [0, 6, 0, 4] },
+        thead: { bold: true, fillColor: "#eef2ff", fontSize: 9 },
+        note: { fontSize: 9, color: "#6b7280", italics: true },
+      },
+      defaultStyle: { font: "Roboto" },
+    })
+    .download("assembly-instruction.pdf");
+  toast("Инструкция по сборке сохранена");
 }
 
 function exportSceneGltf() {
@@ -1029,7 +1250,8 @@ async function boot() {
     toast("BOM обновлен");
   });
   document.getElementById("btnCutFrom3d").addEventListener("click", cutFrom3D);
-  document.getElementById("btnExportPdf").addEventListener("click", exportCutPdf);
+  document.getElementById("btnExportCutPdf").addEventListener("click", exportCutPdf);
+  document.getElementById("btnExportAssemblyPdf").addEventListener("click", exportAssemblyPdf);
   document.getElementById("btnExport3d").addEventListener("click", exportSceneGltf);
   document.getElementById("btnAssetLink").addEventListener("click", prepareAssetLink);
   document.getElementById("btnLogin").addEventListener("click", loginCustomer);
