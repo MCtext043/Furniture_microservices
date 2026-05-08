@@ -335,6 +335,33 @@ docker compose up --build -d
 
 ---
 
+## Подготовка к отправке на сервер
+
+В репозитории уже подготовлены серверные шаблоны:
+
+- `docker-compose.server.yml` — отдельный compose для server-deploy с параметрами из env.
+- `.env.server.example` — шаблон переменных (секреты, порты, доступы).
+- `scripts/deploy/deploy_server.sh` — скрипт проверки/сборки/запуска.
+
+### Быстрый старт (Linux сервер)
+
+```bash
+cp .env.server.example .env.server
+# заполните .env.server реальными значениями
+chmod +x scripts/deploy/deploy_server.sh
+./scripts/deploy/deploy_server.sh
+```
+
+Проверка после запуска:
+
+```bash
+curl http://127.0.0.1:8080/health
+```
+
+Если gateway будет за reverse proxy (Nginx/Caddy/Traefik), публикуйте наружу только HTTP(S) прокси и (опционально) админ-порты, а внутренние порты сервисов оставьте внутри сервера.
+
+---
+
 ## Тесты
 
 Тесты **только на PostgreSQL** (не SQLite). По умолчанию: БД `furniture_test` на `127.0.0.1:5432`.
