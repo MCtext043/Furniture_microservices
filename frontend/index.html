@@ -185,28 +185,67 @@
 
     <section class="mb-5" id="planner">
       <div class="row g-4 align-items-stretch">
-        <div class="col-lg-6">
+        <div class="col-xl-5">
           <div class="service-card p-4 h-100">
             <div class="muted-title">Планировщик</div>
-            <h2 class="section-title">Демо-комната клиента</h2>
-            <p class="text-muted">Создайте проект и добавьте несколько предметов мебели, чтобы увидеть простую план-схему.</p>
-            <div class="row g-2 mb-3">
-              <div class="col-md-7"><input class="form-control" id="projectName" value="Кухня-гостиная клиента"></div>
-              <div class="col-md-5"><input class="form-control" id="projectLocation" value="Москва"></div>
+            <h2 class="section-title">Конструктор комнаты и мебели</h2>
+            <p class="text-muted">Задайте размеры комнаты, добавьте объекты и перетаскивайте их в плане сверху. Из 3D можно собрать детали и отправить в раскрой.</p>
+
+            <div class="border rounded p-3 mb-3 bg-light-subtle">
+              <div class="small fw-semibold mb-2">Размеры комнаты (м)</div>
+              <div class="row g-2">
+                <div class="col-4"><input class="form-control form-control-sm" id="roomWidth" type="number" min="2" step="0.1" value="6"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="roomLength" type="number" min="2" step="0.1" value="5"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="roomHeight" type="number" min="2" step="0.1" value="2.8"></div>
+              </div>
+              <button class="btn btn-sm btn-outline-primary mt-2" id="btnApplyRoomSize">Применить размеры комнаты</button>
             </div>
-            <button class="btn btn-success me-2" id="btnCreateRoom">Создать проект</button>
-            <button class="btn btn-outline-secondary" id="btnAddFurniture">Добавить комплект мебели</button>
-            <div class="small text-muted mt-3" id="plannerHint">Проект ещё не создан.</div>
+
+            <div class="border rounded p-3 mb-3 bg-light-subtle">
+              <div class="small fw-semibold mb-2">Добавить объект в 3D</div>
+              <div class="row g-2">
+                <div class="col-6">
+                  <select class="form-select form-select-sm" id="objType">
+                    <option value="wardrobe">Шкаф</option>
+                    <option value="cabinet">Тумба</option>
+                    <option value="shelf">Стеллаж</option>
+                    <option value="table">Стол</option>
+                    <option value="sofa">Диван</option>
+                  </select>
+                </div>
+                <div class="col-6"><input class="form-control form-control-sm" id="objName" value="Новый объект"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="objW" type="number" min="0.3" step="0.1" value="1.2" placeholder="Ш"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="objD" type="number" min="0.3" step="0.1" value="0.6" placeholder="Г"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="objH" type="number" min="0.3" step="0.1" value="2.1" placeholder="В"></div>
+              </div>
+              <div class="d-flex gap-2 mt-2">
+                <button class="btn btn-sm btn-success" id="btnAddObject3d">Добавить объект</button>
+                <button class="btn btn-sm btn-outline-secondary" id="btnAddFurniture">Добавить демо-комплект</button>
+              </div>
+            </div>
+
+            <div class="d-flex gap-2 flex-wrap mb-2">
+              <button class="btn btn-sm btn-primary" id="btnCreateRoom">Создать проект в backend</button>
+              <button class="btn btn-sm btn-outline-primary" id="btnGenerateBom">Собрать детали/BOM</button>
+              <button class="btn btn-sm btn-outline-warning" id="btnCutFrom3d">Раскрой из 3D</button>
+              <button class="btn btn-sm btn-outline-dark" id="btnExportPdf">Экспорт раскроя PDF</button>
+              <button class="btn btn-sm btn-outline-dark" id="btnExport3d">Экспорт 3D (GLTF)</button>
+            </div>
+            <div class="small text-muted" id="plannerHint">Проект ещё не создан.</div>
           </div>
         </div>
-        <div class="col-lg-6">
+
+        <div class="col-xl-7">
           <div class="service-card p-4 h-100">
             <ul class="nav nav-pills mb-3" role="tablist">
               <li class="nav-item" role="presentation">
                 <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#room3dPane" type="button">3D помещение</button>
               </li>
               <li class="nav-item" role="presentation">
-                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#room2dPane" type="button">План сверху</button>
+                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#room2dPane" type="button">План сверху (drag&drop)</button>
+              </li>
+              <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="pill" data-bs-target="#bomPane" type="button">Детали и сборка</button>
               </li>
             </ul>
             <div class="tab-content">
@@ -214,12 +253,18 @@
                 <div class="viewer-3d" id="room3d">
                   <span class="badge text-bg-warning viewer-badge">Интерактивная 3D-демонстрация</span>
                 </div>
-                <div class="small text-muted mt-2">3D-сцена создаётся прямо на странице. После добавления комплекта мебель появится и в 3D, и на плане.</div>
+                <div class="small text-muted mt-2">Базовые текстуры назначаются по типу объекта (дерево/металл/ткань). Позиции синхронизируются с видом сверху.</div>
               </div>
               <div class="tab-pane fade" id="room2dPane">
                 <div class="room-plan" id="roomPlan"></div>
+                <div class="small text-muted mt-2">Перетаскивайте объекты мышью в плане сверху — 3D сцена обновляется автоматически.</div>
+              </div>
+              <div class="tab-pane fade" id="bomPane">
+                <div class="small text-muted mb-2">Черновой список деталей и сборки по типам объектов.</div>
+                <div id="bomList" class="small"></div>
               </div>
             </div>
+            <div class="alert alert-light border mt-3 small mb-0" id="plannerCutResult">Раскрой из 3D ещё не запускался.</div>
           </div>
         </div>
       </div>
@@ -301,6 +346,8 @@
   <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-  <script src="app.js?v=20260508-1"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/exporters/GLTFExporter.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="app.js?v=20260508-2"></script>
 </body>
 </html>
