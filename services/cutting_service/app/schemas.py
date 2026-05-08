@@ -20,12 +20,33 @@ class Placement(BaseModel):
     y: int
     width: int
     height: int
+    sheet_index: int = 0
+
+
+class SheetPlacement(BaseModel):
+    sheet_index: int
+    placements: list[Placement]
+    utilized_area: int
+    unused_area: int
+    utilization_percent: float
+
+
+class UnplacedPart(BaseModel):
+    name: str
+    width: int
+    height: int
+    quantity: int
 
 
 class CuttingResponse(BaseModel):
     placed_count: int
     requested_count: int
     utilization_percent: float
+    total_used_area: int
+    total_unused_area: int
+    total_sheets: int
+    sheets: list[SheetPlacement]
+    unplaced_parts: list[UnplacedPart]
     placements: list[Placement]
 
 

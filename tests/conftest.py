@@ -91,6 +91,7 @@ _TRUNCATE_PLANNER = text(
 @pytest.fixture(scope="module")
 def catalog_engine():
     from services.catalog_service.app.db import Base
+    from services.catalog_service.app import models as _catalog_models  # noqa: F401
 
     engine = create_engine(os.environ["DATABASE_URL"], future=True, pool_pre_ping=True)
     Base.metadata.create_all(bind=engine)
@@ -122,6 +123,7 @@ def catalog_client(catalog_engine):
 @pytest.fixture(scope="module")
 def cutting_engine():
     from services.cutting_service.app.db import Base
+    from services.cutting_service.app import models as _cutting_models  # noqa: F401
 
     engine = create_engine(os.environ["DATABASE_URL"], future=True, pool_pre_ping=True)
     Base.metadata.create_all(bind=engine)
@@ -153,6 +155,7 @@ def cutting_client(cutting_engine):
 @pytest.fixture(scope="module")
 def planner_engine():
     from services.planner_service.app.db import Base
+    from services.planner_service.app import models as _planner_models  # noqa: F401
 
     engine = create_engine(os.environ["DATABASE_URL"], future=True, pool_pre_ping=True)
     Base.metadata.create_all(bind=engine)

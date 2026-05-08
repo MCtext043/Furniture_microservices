@@ -13,6 +13,7 @@ const state = {
   furnitureCount: 0,
   roomItems: [],
   three: null,
+  cuttingParts: [],
 };
 
 const demoCategories = ["Кухни", "Шкафы", "Гостиные", "Спальни", "Офис", "Детские"];
@@ -31,7 +32,7 @@ const demoProducts = [
   ["Детская система Nova", "DEMO-KIDS-NOVA", "HappyRoom", "Детские", 96900, 3, "Кровать, шкаф и рабочая зона в одном стиле", "🚀", "linear-gradient(135deg,#36d1dc,#5b86e5)"],
 ];
 
-const demoParts = [
+const defaultCuttingParts = [
   { name: "Боковина шкафа", width: 600, height: 2200, quantity: 2 },
   { name: "Полка", width: 560, height: 400, quantity: 5 },
   { name: "Фасад", width: 480, height: 720, quantity: 4 },
@@ -372,52 +373,132 @@ function renderCart() {
 }
 
 function renderParts() {
-  document.getElementById("partsList").innerHTML = demoParts
-    .map((part) => `
+  const host = document.getElementById("partsList");
+  if (!state.cuttingParts.length) {
+    host.innerHTML = `<div class="alert alert-light border small mb-0">Список деталей пуст. Добавьте хотя бы одну деталь.</div>`;
+    return;
+  }
+  host.innerHTML = state.cuttingParts
+    .map((part, index) => `
       <div class="d-flex justify-content-between align-items-center border rounded p-2 mb-2 bg-light">
-        <div><strong>${part.name}</strong><div class="small text-muted">${part.width}×${part.height} мм</div></div>
-        <span class="badge text-bg-secondary">${part.quantity} шт.</span>
+        <div>
+          <strong>${escapeHtml(part.name)}</strong>
+          <div class="small text-muted">${part.width}×${part.height} мм</div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <button class="btn btn-sm btn-outline-secondary" data-part-minus="${index}">-</button>
+          <span class="badge text-bg-secondary">${part.quantity} шт.</span>
+          <button class="btn btn-sm btn-outline-secondary" data-part-plus="${index}">+</button>
+          <button class="btn btn-sm btn-outline-danger" data-part-remove="${index}">Удалить</button>
+        </div>
       </div>`)
     .join("");
+
+  host.querySelectorAll("[data-part-minus]").forEach((btn) =>
+    btn.addEventListener("click", () => changePartQty(Number(btn.dataset.partMinus), -1))
+  );
+  host.querySelectorAll("[data-part-plus]").forEach((btn) =>
+    btn.addEventListener("click", () => changePartQty(Number(btn.dataset.partPlus), 1))
+  );
+  host.querySelectorAll("[data-part-remove]").forEach((btn) =>
+    btn.addEventListener("click", () => removePart(Number(btn.dataset.partRemove)))
+  );
 }
 
 async function optimizeCutting() {
+  if (!state.cuttingParts.length) {
+    toast("Добавьте детали для расчёта раскроя", false);
+    return;
+  }
   const payload = {
     sheet_width: Number(document.getElementById("sheetW").value),
     sheet_height: Number(document.getElementById("sheetH").value),
-    parts: demoParts,
+    parts: state.cuttingParts,
   };
   try {
     const data = await api("POST", "/cutting/optimize", payload, true);
-    document.getElementById("cutStats").textContent = `${data.placed_count}/${data.requested_count} деталей, ${data.utilization_percent}% листа`;
-    renderCutView(payload.sheet_width, payload.sheet_height, data.placements || []);
+    document.getElementById("cutStats").textContent = `${data.placed_count}/${data.requested_count} деталей, ${data.total_sheets} лист(ов), ${data.utilization_percent}%`;
+    renderCutView(payload.sheet_width, payload.sheet_height, data.sheets || []);
+    renderCutExtra(data);
     toast("Раскрой рассчитан");
   } catch (error) {
     toast(`Раскрой недоступен: ${error.message}`, false);
   }
 }
 
-function renderCutView(sheetW, sheetH, placements) {
+function renderCutView(sheetW, sheetH, sheets) {
   const view = document.getElementById("cutView");
-  if (!placements.length) {
+  if (!sheets.length) {
     view.innerHTML = `<span class="text-muted">Сервис не вернул размещения.</span>`;
     return;
   }
   const scaleX = 100 / sheetW;
   const scaleY = 100 / sheetH;
-  view.innerHTML = `
-    <div class="position-relative w-100 h-100" style="min-height:240px">
-      ${placements
-        .map((p, i) => {
-          const colors = ["#a16207", "#7c3aed", "#0f766e", "#be123c", "#2563eb", "#65a30d"];
-          return `<div title="${escapeHtml(p.name)}" style="
-            position:absolute; left:${p.x * scaleX}%; top:${p.y * scaleY}%;
-            width:${Math.max(p.width * scaleX, 5)}%; height:${Math.max(p.height * scaleY, 6)}%;
-            background:${colors[i % colors.length]}; color:#fff; border:1px solid rgba(255,255,255,.75);
-            border-radius:.35rem; font-size:.7rem; padding:.2rem; overflow:hidden">${escapeHtml(p.name)}</div>`;
-        })
-        .join("")}
-    </div>`;
+  view.innerHTML = sheets
+    .map((sheet) => `
+      <div class="border rounded p-2 mb-2 bg-white w-100">
+        <div class="small fw-semibold mb-2">Лист #${sheet.sheet_index + 1} · загрузка ${sheet.utilization_percent}%</div>
+        <div class="position-relative w-100" style="min-height:180px; background:#fcfaf6; border:1px dashed #d8c2aa; border-radius:.5rem;">
+          ${(sheet.placements || [])
+            .map((p, i) => {
+              const colors = ["#a16207", "#7c3aed", "#0f766e", "#be123c", "#2563eb", "#65a30d"];
+              return `<div title="${escapeHtml(p.name)}" style="
+                position:absolute; left:${p.x * scaleX}%; top:${p.y * scaleY}%;
+                width:${Math.max(p.width * scaleX, 5)}%; height:${Math.max(p.height * scaleY, 6)}%;
+                background:${colors[i % colors.length]}; color:#fff; border:1px solid rgba(255,255,255,.75);
+                border-radius:.35rem; font-size:.65rem; padding:.15rem; overflow:hidden">${escapeHtml(p.name)}</div>`;
+            })
+            .join("")}
+        </div>
+      </div>`)
+    .join("");
+}
+
+function renderCutExtra(data) {
+  const host = document.getElementById("cutExtraInfo");
+  const areaInfo = `Занято: ${data.total_used_area} мм² · Свободно: ${data.total_unused_area} мм².`;
+  if (!data.unplaced_parts || !data.unplaced_parts.length) {
+    host.textContent = `${areaInfo} Все детали размещены по листам автоматически.`;
+    return;
+  }
+  host.innerHTML = `${areaInfo} Не размещены: ${data.unplaced_parts
+    .map((p) => `${escapeHtml(p.name)} (${p.width}×${p.height}) × ${p.quantity}`)
+    .join(", ")}`;
+}
+
+function addPartFromInputs() {
+  const name = document.getElementById("partName").value.trim();
+  const width = Number(document.getElementById("partWidth").value);
+  const height = Number(document.getElementById("partHeight").value);
+  const quantity = Number(document.getElementById("partQty").value);
+  if (!name || width <= 0 || height <= 0 || quantity <= 0) {
+    toast("Заполните название, размеры и количество детали", false);
+    return;
+  }
+  state.cuttingParts.push({ name, width, height, quantity });
+  renderParts();
+  document.getElementById("partName").value = "";
+  document.getElementById("partWidth").value = "";
+  document.getElementById("partHeight").value = "";
+  document.getElementById("partQty").value = "1";
+}
+
+function changePartQty(index, delta) {
+  const part = state.cuttingParts[index];
+  if (!part) return;
+  part.quantity = Math.max(1, part.quantity + delta);
+  renderParts();
+}
+
+function removePart(index) {
+  state.cuttingParts.splice(index, 1);
+  renderParts();
+}
+
+function resetPartsToDefault() {
+  state.cuttingParts = defaultCuttingParts.map((p) => ({ ...p }));
+  renderParts();
+  document.getElementById("cutExtraInfo").textContent = "";
 }
 
 async function createRoom() {
@@ -622,12 +703,15 @@ async function boot() {
     renderProducts();
   });
   document.getElementById("btnOptimize").addEventListener("click", optimizeCutting);
+  document.getElementById("btnAddPart").addEventListener("click", addPartFromInputs);
+  document.getElementById("btnResetParts").addEventListener("click", resetPartsToDefault);
   document.getElementById("btnCreateRoom").addEventListener("click", createRoom);
   document.getElementById("btnAddFurniture").addEventListener("click", addFurnitureSet);
   document.getElementById("btnAssetLink").addEventListener("click", prepareAssetLink);
   document.getElementById("btnLogin").addEventListener("click", loginCustomer);
   document.getElementById("btnRegister").addEventListener("click", registerCustomer);
 
+  state.cuttingParts = defaultCuttingParts.map((p) => ({ ...p }));
   renderParts();
   renderCart();
   renderRoom([]);

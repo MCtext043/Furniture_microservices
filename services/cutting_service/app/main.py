@@ -25,11 +25,29 @@ def healthcheck() -> dict[str, str]:
 
 @app.post("/optimize", response_model=CuttingResponse, dependencies=[Depends(ensure_cutting_runner)])
 def optimize(payload: CuttingRequest, session: Session = Depends(get_session)) -> CuttingResponse:
-    placements = optimize_sheet(payload.sheet_width, payload.sheet_height, payload.parts)
+    placements, unplaced_parts, total_sheets = optimize_sheet(payload.sheet_width, payload.sheet_height, payload.parts)
     requested_count = sum(part.quantity for part in payload.parts)
     used_area = sum(item.width * item.height for item in placements)
     sheet_area = payload.sheet_width * payload.sheet_height
-    utilization = round((used_area / sheet_area) * 100, 2) if sheet_area else 0
+    all_sheets_area = sheet_area * total_sheets
+    total_unused_area = max(all_sheets_area - used_area, 0)
+    utilization = round((used_area / all_sheets_area) * 100, 2) if all_sheets_area else 0
+
+    sheet_rows = []
+    for idx in range(total_sheets):
+        per_sheet = [p for p in placements if p.sheet_index == idx]
+        per_sheet_area = sum(item.width * item.height for item in per_sheet)
+        per_sheet_unused = max(sheet_area - per_sheet_area, 0)
+        per_sheet_util = round((per_sheet_area / sheet_area) * 100, 2) if sheet_area else 0
+        sheet_rows.append(
+            {
+                "sheet_index": idx,
+                "placements": per_sheet,
+                "utilized_area": per_sheet_area,
+                "unused_area": per_sheet_unused,
+                "utilization_percent": per_sheet_util,
+            }
+        )
 
     job = CuttingJob(
         sheet_width=payload.sheet_width,
@@ -54,6 +72,11 @@ def optimize(payload: CuttingRequest, session: Session = Depends(get_session)) -
         placed_count=len(placements),
         requested_count=requested_count,
         utilization_percent=utilization,
+        total_used_area=used_area,
+        total_unused_area=total_unused_area,
+        total_sheets=total_sheets,
+        sheets=sheet_rows,
+        unplaced_parts=unplaced_parts,
         placements=placements,
     )
 
