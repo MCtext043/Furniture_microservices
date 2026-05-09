@@ -66,7 +66,7 @@ function apiBase() {
 
 function defaultApiBase() {
   const host = window.location.hostname || "127.0.0.1";
-  return `http://${host}:8080`;
+  return `http://${host}:8001`;
 }
 
 function token() {
@@ -109,6 +109,20 @@ function toast(message, ok = true) {
 
 function escapeHtml(value) {
   return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function makeId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 async function api(method, path, body, withAuth = false) {
@@ -547,13 +561,15 @@ function resetPartsToDefault() {
 }
 
 async function createRoom() {
+  const projectName = document.getElementById("projectName")?.value?.trim() || "Проект клиента";
+  const projectLocation = document.getElementById("projectLocation")?.value?.trim() || "Онлайн";
   try {
     const project = await api(
       "POST",
       "/planner/projects",
       {
-        name: document.getElementById("projectName").value,
-        location: document.getElementById("projectLocation").value,
+        name: projectName,
+        location: projectLocation,
       },
       true
     );
@@ -593,9 +609,9 @@ async function syncPlannerObjectsToBackend() {
 
 function createDemoObjects() {
   state.objects3d = [
-    { id: crypto.randomUUID(), type: "wardrobe", texture: "wood_dark_oak", name: "Шкаф Verona", width: 1.4, depth: 0.6, height: 2.2, x: 5.0, z: 0.9, rotationY: 0 },
-    { id: crypto.randomUUID(), type: "sofa", texture: "fabric_gray", name: "Диван Soft Cloud", width: 2.2, depth: 1.0, height: 0.9, x: 1.5, z: 3.5, rotationY: 90 },
-    { id: crypto.randomUUID(), type: "cabinet", texture: "board_black", name: "Остров Chef", width: 1.8, depth: 0.8, height: 0.9, x: 3.0, z: 2.2, rotationY: 0 },
+    { id: makeId(), type: "wardrobe", texture: "wood_dark_oak", name: "Шкаф Verona", width: 1.4, depth: 0.6, height: 2.2, x: 5.0, z: 0.9, rotationY: 0 },
+    { id: makeId(), type: "sofa", texture: "fabric_gray", name: "Диван Soft Cloud", width: 2.2, depth: 1.0, height: 0.9, x: 1.5, z: 3.5, rotationY: 90 },
+    { id: makeId(), type: "cabinet", texture: "board_black", name: "Остров Chef", width: 1.8, depth: 0.8, height: 0.9, x: 3.0, z: 2.2, rotationY: 0 },
   ];
 }
 
@@ -928,7 +944,7 @@ function addObject3DFromForm() {
     return;
   }
   const item = {
-    id: crypto.randomUUID(),
+    id: makeId(),
     type,
     texture,
     name,
