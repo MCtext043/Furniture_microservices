@@ -22,8 +22,6 @@ const state = {
 const demoCategories = ["Кухни", "Шкафы", "Гостиные", "Спальни", "Офис", "Детские"];
 const demoProducts = [
   ["Кухня Nord Line", "DEMO-KITCHEN-NORD", "FurniPro", "Кухни", 184900, 4, "Полный кухонный гарнитур с матовыми фасадами", "🍽️", "linear-gradient(135deg,#bf7b45,#f1c27d)"],
-  ["Шкаф Verona 3D", "DEMO-WARD-VERONA", "WoodLine", "Шкафы", 69900, 8, "Трехстворчатый шкаф с зеркальной секцией", "🚪", "linear-gradient(135deg,#6c513f,#b89a7c)"],
-  ["Диван Soft Cloud", "DEMO-SOFA-CLOUD", "HomeArt", "Гостиные", 89900, 5, "Модульный диван для гостиной", "🛋️", "linear-gradient(135deg,#7b8794,#d7dde8)"],
   ["Кровать Loft Oak", "DEMO-BED-LOFT", "OakLab", "Спальни", 75900, 3, "Двуспальная кровать с ящиками хранения", "🛏️", "linear-gradient(135deg,#855e42,#d9b88f)"],
   ["Стол Manager Pro", "DEMO-DESK-MANAGER", "OfficeWood", "Офис", 35900, 12, "Рабочий стол с кабель-каналом", "💼", "linear-gradient(135deg,#293241,#98c1d9)"],
   ["Стеллаж Kids Castle", "DEMO-KIDS-CASTLE", "HappyRoom", "Детские", 28900, 7, "Цветной стеллаж для книг и игрушек", "🧸", "linear-gradient(135deg,#ff9a9e,#fad0c4)"],
@@ -34,6 +32,8 @@ const demoProducts = [
   ["Гардероб Family", "DEMO-WARD-FAMILY", "WoodLine", "Шкафы", 129900, 2, "Встроенный гардероб с индивидуальным наполнением", "👗", "linear-gradient(135deg,#42275a,#734b6d)"],
   ["Детская система Nova", "DEMO-KIDS-NOVA", "HappyRoom", "Детские", 96900, 3, "Кровать, шкаф и рабочая зона в одном стиле", "🚀", "linear-gradient(135deg,#36d1dc,#5b86e5)"],
 ];
+
+const RETIRED_DEMO_SKUS = ["DEMO-SOFA-CLOUD", "DEMO-WARD-VERONA"];
 
 const defaultCuttingParts = [
   { name: "Боковина шкафа", width: 600, height: 2200, quantity: 2 },
@@ -123,6 +123,96 @@ function makeId() {
   bytes[8] = (bytes[8] & 0x3f) | 0x80;
   const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function isLikelyCorruptText(value, { treatEmptyAsCorrupt = false } = {}) {
+  if (value == null) return treatEmptyAsCorrupt;
+  const s = String(value);
+  if (s.trim() === "") return treatEmptyAsCorrupt;
+  if (s.includes("\uFFFD")) return true;
+  const q = (s.match(/\?/g) || []).length;
+  if (q === 0) return false;
+  const coreLen = s.replace(/\s/g, "").length;
+  if (coreLen === 0) return true;
+  if (q >= Math.max(2, coreLen * 0.12)) return true;
+  if (q >= 1 && coreLen <= 8) return true;
+  return false;
+}
+
+function isLikelyCorruptCategoryName(name) {
+  return isLikelyCorruptText(name, { treatEmptyAsCorrupt: true });
+}
+
+function demoRowForSku(sku) {
+  return demoProducts.find((r) => r[1] === sku) || null;
+}
+
+function displayProductTitle(p) {
+  const row = demoRowForSku(p.sku);
+  if (row && isLikelyCorruptText(p.name)) return row[0];
+  return p.name;
+}
+
+function displayProductBrand(p) {
+  const row = demoRowForSku(p.sku);
+  if (row && isLikelyCorruptText(p.brand)) return row[2];
+  return p.brand;
+}
+
+function displayProductDescription(p) {
+  const row = demoRowForSku(p.sku);
+  const desc = p.description ?? "";
+  if (row && isLikelyCorruptText(desc)) return row[6];
+  return desc;
+}
+
+function inferDemoCategoryLabel(categoryId, products) {
+  if (categoryId == null) return null;
+  const tallies = new Map();
+  for (const p of products) {
+    if (p.category_id !== categoryId) continue;
+    const row = demoProducts.find((r) => r[1] === p.sku);
+    if (!row) continue;
+    const label = row[3];
+    tallies.set(label, (tallies.get(label) || 0) + 1);
+  }
+  if (!tallies.size) return null;
+  return [...tallies.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+async function repairCorruptCategoryNames(categories, products) {
+  const takenNames = new Set(
+    categories.filter((c) => !isLikelyCorruptCategoryName(c.name)).map((c) => c.name)
+  );
+  for (const cat of categories) {
+    if (!isLikelyCorruptCategoryName(cat.name)) continue;
+    const label = inferDemoCategoryLabel(cat.id, products);
+    if (!label || takenNames.has(label)) continue;
+    try {
+      await api("PATCH", `/catalog/categories/${cat.id}`, { name: label }, true);
+      takenNames.add(label);
+    } catch (error) {
+      console.warn("Category repair skipped:", cat.id, error);
+    }
+  }
+}
+
+async function repairCorruptDemoProducts(products) {
+  for (const p of products) {
+    const row = demoRowForSku(p.sku);
+    if (!row) continue;
+    const [dName, , dBrand, , , , dDesc] = row;
+    const patch = {};
+    if (isLikelyCorruptText(p.name)) patch.name = dName;
+    if (isLikelyCorruptText(p.brand)) patch.brand = dBrand;
+    if (isLikelyCorruptText(p.description ?? "")) patch.description = dDesc;
+    if (!Object.keys(patch).length) continue;
+    try {
+      await api("PATCH", `/catalog/products/${p.id}`, patch, true);
+    } catch (error) {
+      console.warn("Product repair skipped:", p.id, p.sku, error);
+    }
+  }
 }
 
 async function api(method, path, body, withAuth = false) {
@@ -223,8 +313,29 @@ function closeAccountModal() {
   if (modal) modal.hide();
 }
 
+async function removeRetiredDemoProducts() {
+  let products;
+  try {
+    products = await api("GET", "/catalog/products?limit=100");
+  } catch {
+    return;
+  }
+  for (const p of products) {
+    if (!RETIRED_DEMO_SKUS.includes(p.sku)) continue;
+    try {
+      await requestNoBody("DELETE", `/catalog/products/${p.id}`, true);
+    } catch (error) {
+      console.warn("Retired product delete skipped:", p.sku, error);
+    }
+  }
+}
+
 async function seedDemoData() {
-  const categories = await api("GET", "/catalog/categories");
+  await removeRetiredDemoProducts();
+  let categories = await api("GET", "/catalog/categories");
+  let products = await api("GET", "/catalog/products?limit=100");
+  await repairCorruptCategoryNames(categories, products);
+  categories = await api("GET", "/catalog/categories");
   const byName = new Map(categories.map((c) => [c.name, c]));
 
   for (const name of demoCategories) {
@@ -238,7 +349,7 @@ async function seedDemoData() {
     }
   }
 
-  const products = await api("GET", "/catalog/products?limit=100");
+  products = await api("GET", "/catalog/products?limit=100");
   const existingSku = new Set(products.map((p) => p.sku));
 
   for (const [name, sku, brand, catName, price, stock, description] of demoProducts) {
@@ -264,6 +375,9 @@ async function seedDemoData() {
       console.warn("Product seed skipped:", sku, error);
     }
   }
+
+  products = await api("GET", "/catalog/products?limit=100");
+  await repairCorruptDemoProducts(products);
 }
 
 async function loadCatalog() {
@@ -283,8 +397,16 @@ function demoMeta(product) {
   };
 }
 
+function demoCategoryLabelForCategoryId(categoryId) {
+  return inferDemoCategoryLabel(categoryId, state.products);
+}
+
 function categoryName(id) {
-  return state.categories.find((c) => c.id === id)?.name || "Каталог";
+  const raw = state.categories.find((c) => c.id === id)?.name;
+  if (raw && !isLikelyCorruptCategoryName(raw)) return raw;
+  const inferred = demoCategoryLabelForCategoryId(id);
+  if (inferred) return inferred;
+  return raw || "Каталог";
 }
 
 function renderCategories() {
@@ -295,7 +417,7 @@ function renderCategories() {
   for (const cat of state.categories) {
     const count = counts.get(cat.id) || 0;
     if (!count) continue;
-    buttons.push(`<button class="btn btn-sm category-pill ${state.activeCategory === String(cat.id) ? "active" : ""}" data-cat="${cat.id}">${escapeHtml(cat.name)} (${count})</button>`);
+    buttons.push(`<button class="btn btn-sm category-pill ${state.activeCategory === String(cat.id) ? "active" : ""}" data-cat="${cat.id}">${escapeHtml(categoryName(cat.id))} (${count})</button>`);
   }
   host.innerHTML = buttons.join("");
   host.querySelectorAll("[data-cat]").forEach((btn) => {
@@ -311,7 +433,11 @@ function filteredProducts() {
   const q = state.search.trim().toLowerCase();
   return state.products.filter((p) => {
     const catOk = state.activeCategory === "all" || String(p.category_id) === state.activeCategory;
-    const qOk = !q || `${p.name} ${p.brand} ${p.description}`.toLowerCase().includes(q);
+    const qOk =
+      !q ||
+      `${displayProductTitle(p)} ${displayProductBrand(p)} ${displayProductDescription(p)}`
+        .toLowerCase()
+        .includes(q);
     return catOk && qOk;
   });
 }
@@ -335,9 +461,9 @@ function renderProducts() {
                 <span class="badge text-bg-light">${escapeHtml(categoryName(p.category_id))}</span>
                 <span class="small text-muted">на складе: ${p.stock}</span>
               </div>
-              <h5>${escapeHtml(p.name)}</h5>
-              <div class="text-muted small mb-2">${escapeHtml(p.brand)}</div>
-              <p class="text-muted small flex-grow-1">${escapeHtml(p.description || "Современное мебельное решение для дома.")}</p>
+              <h5>${escapeHtml(displayProductTitle(p))}</h5>
+              <div class="text-muted small mb-2">${escapeHtml(displayProductBrand(p))}</div>
+              <p class="text-muted small flex-grow-1">${escapeHtml(displayProductDescription(p) || "Современное мебельное решение для дома.")}</p>
               <div class="d-flex justify-content-between align-items-center">
                 <span class="price fs-5">${money(Number(p.price))}</span>
                 <div class="btn-group">
@@ -363,7 +489,7 @@ async function addToCart(id) {
   renderCart();
   try {
     await api("POST", `/catalog/users/${DEMO_USER}/cart/items`, { product_id: id, quantity: 1 }, true);
-    toast(`${product.name} добавлен в корзину`);
+    toast(`${displayProductTitle(product)} добавлен в корзину`);
   } catch (error) {
     toast(`Витрина обновлена, но backend вернул: ${error.message}`, false);
   }
@@ -373,7 +499,7 @@ async function addToWishlist(id) {
   const product = state.products.find((p) => p.id === id);
   try {
     await requestNoBody("POST", `/catalog/users/${DEMO_USER}/wishlist/products/${id}`, true);
-    toast(`${product?.name || "Товар"} добавлен в избранное`);
+    toast(`${product ? displayProductTitle(product) : "Товар"} добавлен в избранное`);
   } catch (error) {
     toast(`Не удалось добавить в избранное: ${error.message}`, false);
   }
@@ -389,7 +515,7 @@ function renderCart() {
       .map((item) => `
         <div class="d-flex justify-content-between gap-3">
           <div>
-            <strong>${escapeHtml(item.name)}</strong>
+            <strong>${escapeHtml(displayProductTitle(item))}</strong>
             <div class="small text-muted">${item.qty} × ${money(Number(item.price))}</div>
           </div>
           <button class="btn btn-sm btn-outline-danger" data-remove="${item.id}">×</button>

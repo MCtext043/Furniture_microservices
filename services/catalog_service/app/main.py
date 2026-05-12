@@ -13,6 +13,7 @@ from .schemas import (
     CartItemUpdate,
     CategoryCreate,
     CategoryOut,
+    CategoryUpdate,
     ProductCreate,
     ProductFiltersOut,
     ProductOut,
@@ -65,6 +66,29 @@ def get_category(category_id: int, session: Session = Depends(get_session)) -> C
     category = session.get(Category, category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
+    return category
+
+
+@app.patch("/categories/{category_id}", response_model=CategoryOut, tags=["categories"], dependencies=[Depends(ensure_catalog_writer)])
+def update_category(
+    category_id: int,
+    payload: CategoryUpdate,
+    session: Session = Depends(get_session),
+) -> Category:
+    category = session.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    if payload.name is not None:
+        existing = session.scalar(
+            select(Category).where(Category.name == payload.name, Category.id != category_id)
+        )
+        if existing:
+            raise HTTPException(status_code=409, detail="Category already exists")
+        category.name = payload.name
+    if payload.parent_id is not None:
+        category.parent_id = payload.parent_id
+    session.commit()
+    session.refresh(category)
     return category
 
 

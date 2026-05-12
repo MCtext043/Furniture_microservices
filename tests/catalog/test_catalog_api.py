@@ -1,6 +1,18 @@
 from fastapi.testclient import TestClient
 
 
+def test_patch_category(catalog_client: TestClient):
+    cat = catalog_client.post("/categories", json={"name": "Офис"}).json()
+    cid = cat["id"]
+    res = catalog_client.patch(f"/categories/{cid}", json={"name": "Офисная мебель"})
+    assert res.status_code == 200
+    assert res.json()["name"] == "Офисная мебель"
+
+    catalog_client.post("/categories", json={"name": "Кухни"}).json()
+    conflict = catalog_client.patch(f"/categories/{cid}", json={"name": "Кухни"})
+    assert conflict.status_code == 409
+
+
 def test_create_and_filter_products(catalog_client: TestClient):
     category = catalog_client.post("/categories", json={"name": "Кухни"}).json()
 

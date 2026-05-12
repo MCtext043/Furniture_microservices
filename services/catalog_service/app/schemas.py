@@ -11,6 +11,11 @@ class CategoryOut(CategoryCreate):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CategoryUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    parent_id: int | None = None
+
+
 class ProductCreate(BaseModel):
     name: str = Field(min_length=2, max_length=180)
     sku: str = Field(min_length=2, max_length=64)
