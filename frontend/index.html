@@ -35,7 +35,11 @@
     .price { color: var(--brand); font-weight: 800; }
     .service-card { border: 1px solid #eadccc; border-radius: 1.25rem; background: #fff; box-shadow: 0 12px 30px rgba(71, 48, 29, .08); }
     .room-plan { min-height: 260px; border: 10px solid #d9c2aa; background: repeating-linear-gradient(45deg, #fbf6ef 0 12px, #f3e7d7 12px 24px); position: relative; overflow: hidden; border-radius: .75rem; margin-inline: auto; transition: min-height .2s ease, aspect-ratio .2s ease; }
-    .furniture-chip { position: absolute; border-radius: .65rem; background: rgba(122,79,43,.86); color: #fff; font-size: .75rem; padding: .4rem .55rem; box-shadow: 0 8px 20px rgba(0,0,0,.18); }
+    .furniture-chip-wrap { position: absolute; pointer-events: none; }
+    .furniture-chip { position: absolute; left: 50%; top: 50%; transform-origin: center center; border-radius: .65rem; background: rgba(122,79,43,.86); color: #fff; font-size: .75rem; box-shadow: 0 8px 20px rgba(0,0,0,.18); pointer-events: auto; display: flex; align-items: flex-start; justify-content: space-between; padding: .35rem .4rem; }
+    .furniture-chip-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: .25rem; }
+    .furniture-rotate-handle { position: absolute; top: -0.35rem; right: -0.35rem; width: 1.35rem; height: 1.35rem; border: 0; border-radius: 50%; background: #fff; color: #7a4f2b; font-size: .72rem; line-height: 1; cursor: grab; box-shadow: 0 2px 8px rgba(0,0,0,.22); pointer-events: auto; padding: 0; }
+    .furniture-rotate-handle:active { cursor: grabbing; background: #fef3c7; }
     .viewer-3d { min-height: 360px; border-radius: .9rem; overflow: hidden; background: linear-gradient(180deg, #111827, #384152); position: relative; }
     .viewer-3d canvas { display: block; width: 100%; height: 360px; }
     .viewer-badge { position: absolute; top: .75rem; left: .75rem; z-index: 2; }
@@ -157,8 +161,8 @@
               <div class="small fw-semibold mb-2">Добавить деталь</div>
               <div class="row g-2">
                 <div class="col-12"><input class="form-control form-control-sm" id="partName" placeholder="Название детали"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="partWidth" type="number" min="1" placeholder="Ширина"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="partHeight" type="number" min="1" placeholder="Высота"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="partWidth" type="number" min="1" placeholder="Ширина, мм"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="partHeight" type="number" min="1" placeholder="Высота, мм"></div>
                 <div class="col-4"><input class="form-control form-control-sm" id="partQty" type="number" min="1" value="1" placeholder="Кол-во"></div>
               </div>
               <div class="d-flex gap-2 mt-2">
@@ -194,11 +198,11 @@
             <p class="text-muted">Задайте размеры комнаты, добавьте объекты и перетаскивайте их в плане сверху. Из 3D можно собрать детали и отправить в раскрой.</p>
 
             <div class="border rounded p-3 mb-3 bg-light-subtle">
-              <div class="small fw-semibold mb-2">Размеры комнаты (м)</div>
+              <div class="small fw-semibold mb-2">Размеры комнаты (мм)</div>
               <div class="row g-2">
-                <div class="col-4"><input class="form-control form-control-sm" id="roomWidth" type="number" min="2" step="0.1" value="6"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="roomLength" type="number" min="2" step="0.1" value="5"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="roomHeight" type="number" min="2" step="0.1" value="2.8"></div>
+                <div class="col-4"><label class="form-label small text-muted mb-0">Ширина</label><input class="form-control form-control-sm" id="roomWidth" type="number" min="2000" step="100" value="6000"></div>
+                <div class="col-4"><label class="form-label small text-muted mb-0">Длина</label><input class="form-control form-control-sm" id="roomLength" type="number" min="2000" step="100" value="5000"></div>
+                <div class="col-4"><label class="form-label small text-muted mb-0">Высота</label><input class="form-control form-control-sm" id="roomHeight" type="number" min="2000" step="100" value="2800"></div>
               </div>
               <button class="btn btn-sm btn-outline-primary mt-2" id="btnApplyRoomSize">Применить размеры комнаты</button>
             </div>
@@ -216,9 +220,9 @@
                   </select>
                 </div>
                 <div class="col-6"><input class="form-control form-control-sm" id="objName" value="Новый объект"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="objW" type="number" min="0.3" step="0.1" value="1.2" placeholder="Ш"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="objD" type="number" min="0.3" step="0.1" value="0.6" placeholder="Г"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="objH" type="number" min="0.3" step="0.1" value="2.1" placeholder="В"></div>
+                <div class="col-4"><label class="form-label small text-muted mb-0">Ш, мм</label><input class="form-control form-control-sm" id="objW" type="number" min="300" step="10" value="1200"></div>
+                <div class="col-4"><label class="form-label small text-muted mb-0">Г, мм</label><input class="form-control form-control-sm" id="objD" type="number" min="300" step="10" value="600"></div>
+                <div class="col-4"><label class="form-label small text-muted mb-0">В, мм</label><input class="form-control form-control-sm" id="objH" type="number" min="300" step="10" value="2100"></div>
                 <div class="col-12">
                   <select class="form-select form-select-sm" id="objTexture">
                     <option value="wood_dark_oak">Темный дуб</option>
@@ -240,6 +244,7 @@
               <button class="btn btn-sm btn-primary" id="btnCreateRoom">Создать проект в backend</button>
               <button class="btn btn-sm btn-outline-primary" id="btnGenerateBom">Список деталей</button>
               <button class="btn btn-sm btn-outline-warning" id="btnCutFrom3d">Рассчитать раскрой из комнаты</button>
+              <button class="btn btn-sm btn-outline-dark" id="btnExportBasis">Экспорт в Базис (.js)</button>
               <button class="btn btn-sm btn-outline-dark" id="btnExportCutPdf">Скачать карту раскроя (PDF)</button>
               <button class="btn btn-sm btn-outline-dark" id="btnExportAssemblyPdf">Скачать инструкцию сборки (PDF)</button>
               <button class="btn btn-sm btn-outline-dark" id="btnExport3d">Скачать 3D-модель комнаты</button>
@@ -270,7 +275,7 @@
               </div>
               <div class="tab-pane fade" id="room2dPane">
                 <div class="room-plan" id="roomPlan"></div>
-                <div class="small text-muted mt-2">Перетаскивайте объекты мышью в плане сверху — 3D сцена обновляется автоматически.</div>
+                <div class="small text-muted mt-2">Перетаскивайте объекты мышью. Кнопка ↻ — удерживайте и вращайте на любой угол.</div>
               </div>
               <div class="tab-pane fade" id="bomPane">
                 <div class="small text-muted mb-2">Черновой список деталей и сборки по типам объектов.</div>
@@ -362,6 +367,6 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/exporters/GLTFExporter.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script src="app.js?v=20260509-4"></script>
+  <script src="app.js?v=20260530-3"></script>
 </body>
 </html>

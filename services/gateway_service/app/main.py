@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
+
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 
 def _env_url(name: str, default: str) -> str:
@@ -87,3 +90,7 @@ def _register_proxy(prefix: str, base_url: str) -> None:
 
 for segment, target in BACKENDS.items():
     _register_proxy(segment, target)
+
+FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend"
+if FRONTEND_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

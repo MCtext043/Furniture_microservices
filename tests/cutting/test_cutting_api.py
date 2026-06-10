@@ -94,6 +94,47 @@ def test_unplaced_parts_reported_for_oversized_details(cutting_client: TestClien
     _assert_no_overlap_per_sheet(body["sheets"])
 
 
+def test_part_rotation_improves_packing(cutting_client: TestClient):
+    payload = {
+        "sheet_width": 1000,
+        "sheet_height": 800,
+        "parts": [
+            {"name": "Длинная", "width": 700, "height": 300, "quantity": 2},
+            {"name": "Короткая", "width": 400, "height": 250, "quantity": 2},
+        ],
+    }
+    response = cutting_client.post("/optimize", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["placed_count"] == 4
+    assert body["total_sheets"] == 2
+    rotated = [p for p in body["placements"] if p.get("rotated")]
+    assert rotated, "Optimizer should rotate at least one part for a tighter layout"
+    _assert_no_overlap_per_sheet(body["sheets"])
+
+
+def test_maxrects_fills_gaps_instead_of_simple_rows(cutting_client: TestClient):
+    response = cutting_client.post(
+        "/optimize",
+        json={
+            "sheet_width": 1000,
+            "sheet_height": 600,
+            "parts": [
+                {"name": "Большая", "width": 600, "height": 350, "quantity": 1},
+                {"name": "Средняя", "width": 400, "height": 250, "quantity": 1},
+                {"name": "Узкая", "width": 400, "height": 350, "quantity": 1},
+                {"name": "Нижняя", "width": 600, "height": 250, "quantity": 1},
+            ],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["placed_count"] == 4
+    assert body["total_sheets"] == 1
+    assert body["utilization_percent"] == 100
+    _assert_no_overlap_per_sheet(body["sheets"])
+
+
 def test_part_name_does_not_affect_cutting_geometry(cutting_client: TestClient):
     base_payload = {
         "sheet_width": 1000,

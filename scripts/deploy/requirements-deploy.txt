@@ -1,0 +1,2 @@
+# Deploy dependencies (run: pip install -r scripts/deploy/requirements-deploy.txt)
+paramiko>=3.5.0

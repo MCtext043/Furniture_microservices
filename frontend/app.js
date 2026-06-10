@@ -12,9 +12,10 @@ const state = {
   projectId: null,
   three: null,
   cuttingParts: [],
-  roomConfig: { width: 6, length: 5, height: 2.8 },
+  roomConfig: { width: 6000, length: 5000, height: 2800 },
   objects3d: [],
   drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0 },
+  rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0 },
   cameraDrag: { active: false, startX: 0, startY: 0 },
   lastCutResult: null,
 };
@@ -65,8 +66,12 @@ function apiBase() {
 }
 
 function defaultApiBase() {
-  const host = window.location.hostname || "127.0.0.1";
-  return `http://${host}:8001`;
+  const { protocol, hostname, port } = window.location;
+  if (port === "8080" || port === "8001" || port === "8002") {
+    return `${protocol}//${hostname}${port ? `:${port}` : ""}`;
+  }
+  const host = hostname || "127.0.0.1";
+  return `http://${host}:8080`;
 }
 
 function token() {
@@ -565,17 +570,45 @@ function renderParts() {
   );
 }
 
-function normalizePartsForCutting(parts, sheetW, sheetH) {
-  return parts.map((part) => {
-    const width = Number(part.width);
-    const height = Number(part.height);
-    const fitsDirect = width <= sheetW && height <= sheetH;
-    const fitsRotated = height <= sheetW && width <= sheetH;
-    if (!fitsDirect && fitsRotated) {
-      return { ...part, width: height, height: width };
-    }
-    return { ...part, width, height };
-  });
+function normalizeAngle(deg) {
+  let angle = Number(deg) || 0;
+  angle %= 360;
+  if (angle < 0) angle += 360;
+  return angle;
+}
+
+function getObjectPlanSize(item) {
+  const width = Number(item.width) || 0;
+  const depth = Number(item.depth) || 0;
+  const rad = (normalizeAngle(item.rotationY) * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  return {
+    planW: width * cos + depth * sin,
+    planD: width * sin + depth * cos,
+  };
+}
+
+function getObjectManufacturingSize(item) {
+  return {
+    width: Number(item.width),
+    depth: Number(item.depth),
+    height: Number(item.height),
+  };
+}
+
+function clampObjectPosition(item, roomWidth, roomLength) {
+  const { planW, planD } = getObjectPlanSize(item);
+  item.x = Math.min(Math.max(item.x, planW / 2), roomWidth - planW / 2);
+  item.z = Math.min(Math.max(item.z, planD / 2), roomLength - planD / 2);
+}
+
+function normalizePartsForCutting(parts) {
+  return parts.map((part) => ({
+    ...part,
+    width: Number(part.width),
+    height: Number(part.height),
+  }));
 }
 
 async function optimizeCutting(customParts = null, silent = false) {
@@ -586,7 +619,7 @@ async function optimizeCutting(customParts = null, silent = false) {
   }
   const sheetW = Number(document.getElementById("sheetW").value);
   const sheetH = Number(document.getElementById("sheetH").value);
-  const parts = normalizePartsForCutting(sourceParts, sheetW, sheetH);
+  const parts = normalizePartsForCutting(sourceParts);
   const payload = {
     sheet_width: sheetW,
     sheet_height: sheetH,
@@ -627,11 +660,12 @@ function renderCutView(sheetW, sheetH, sheets) {
               const colors = ["#a16207", "#7c3aed", "#0f766e", "#be123c", "#2563eb", "#65a30d"];
               const color = colors[i % colors.length];
               const labelTop = Math.max(p.y * scaleY, 0.8);
-              return `<div title="${escapeHtml(p.name)}" style="
+              const rotatedMark = p.rotated ? " ↻" : "";
+              return `<div title="${escapeHtml(p.name)}${p.rotated ? " (повёрнута на 90°)" : ""}" style="
                 position:absolute; left:${p.x * scaleX}%; top:${p.y * scaleY}%;
                 width:${Math.max(p.width * scaleX, 5)}%; height:${Math.max(p.height * scaleY, 6)}%;
                 background:${color};" class="cut-rect"></div>
-                <div class="cut-rect-label" style="left:${p.x * scaleX}%; top:${labelTop}%; background:${color};">${escapeHtml(p.name)}</div>`;
+                <div class="cut-rect-label" style="left:${p.x * scaleX}%; top:${labelTop}%; background:${color};">${escapeHtml(p.name)}${rotatedMark}</div>`;
             })
             .join("")}
         </div>
@@ -735,9 +769,9 @@ async function syncPlannerObjectsToBackend() {
 
 function createDemoObjects() {
   state.objects3d = [
-    { id: makeId(), type: "wardrobe", texture: "wood_dark_oak", name: "Шкаф Verona", width: 1.4, depth: 0.6, height: 2.2, x: 5.0, z: 0.9, rotationY: 0 },
-    { id: makeId(), type: "sofa", texture: "fabric_gray", name: "Диван Soft Cloud", width: 2.2, depth: 1.0, height: 0.9, x: 1.5, z: 3.5, rotationY: 90 },
-    { id: makeId(), type: "cabinet", texture: "board_black", name: "Остров Chef", width: 1.8, depth: 0.8, height: 0.9, x: 3.0, z: 2.2, rotationY: 0 },
+    { id: makeId(), type: "wardrobe", texture: "wood_dark_oak", name: "Шкаф Verona", width: 1400, depth: 600, height: 2200, x: 5000, z: 900, rotationY: 0 },
+    { id: makeId(), type: "sofa", texture: "fabric_gray", name: "Диван Soft Cloud", width: 2200, depth: 1000, height: 900, x: 1500, z: 3500, rotationY: 90 },
+    { id: makeId(), type: "cabinet", texture: "board_black", name: "Остров Chef", width: 1800, depth: 800, height: 900, x: 3000, z: 2200, rotationY: 0 },
   ];
 }
 
@@ -829,9 +863,9 @@ function initRoom3D() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x1f2937);
 
-  const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
-  camera.position.set(7, 5.5, 7.5);
-  camera.lookAt(0, 1, 0);
+  const camera = new THREE.PerspectiveCamera(45, width / height, 1, 50000);
+  camera.position.set(7000, 5500, 7500);
+  camera.lookAt(0, 1000, 0);
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -853,8 +887,8 @@ function initRoom3D() {
   const orbit = {
     theta: 0.78,
     phi: 1.03,
-    radius: 11,
-    target: new THREE.Vector3(0, 1, 0),
+    radius: 11000,
+    target: new THREE.Vector3(0, 1000, 0),
   };
   state.three = { scene, camera, renderer, roomGroup, furnitureGroup, host, orbit };
   init3DPointerControls(renderer.domElement);
@@ -921,7 +955,7 @@ function init3DPointerControls(canvas) {
     (event) => {
       if (!state.three) return;
       event.preventDefault();
-      state.three.orbit.radius = Math.min(Math.max(state.three.orbit.radius + event.deltaY * 0.01, 3), 18);
+      state.three.orbit.radius = Math.min(Math.max(state.three.orbit.radius + event.deltaY * 10, 3000), 18000);
       updateOrbitCamera();
     },
     { passive: false }
@@ -935,18 +969,18 @@ function rebuildRoomGeometry() {
 
   const { width, length, height } = state.roomConfig;
   const floor = new THREE.Mesh(
-    new THREE.BoxGeometry(width, 0.06, length),
+    new THREE.BoxGeometry(width, 60, length),
     new THREE.MeshStandardMaterial({ color: 0xd8c2a8, roughness: 0.95 })
   );
-  floor.position.y = -0.03;
+  floor.position.y = -30;
   roomGroup.add(floor);
 
   const wallMat = new THREE.MeshStandardMaterial({ color: 0xf4eadf, roughness: 0.95 });
-  const wallBack = new THREE.Mesh(new THREE.BoxGeometry(width, height, 0.05), wallMat);
+  const wallBack = new THREE.Mesh(new THREE.BoxGeometry(width, height, 50), wallMat);
   wallBack.position.set(0, height / 2, -length / 2);
   roomGroup.add(wallBack);
 
-  const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(0.05, height, length), wallMat);
+  const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(50, height, length), wallMat);
   wallLeft.position.set(-width / 2, height / 2, 0);
   roomGroup.add(wallLeft);
 }
@@ -958,9 +992,9 @@ function renderRoom3D() {
 
   state.objects3d.forEach((item) => {
     const texturePreset = resolveTexturePreset(item);
-    const w = Math.max(Number(item.width) || 1, 0.35);
-    const d = Math.max(Number(item.depth) || 1, 0.35);
-    const h = Math.max(Number(item.height) || 1, 0.35);
+    const w = Math.max(Number(item.width) || 350, 350);
+    const d = Math.max(Number(item.depth) || 350, 350);
+    const h = Math.max(Number(item.height) || 350, 350);
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(w, h, d),
       new THREE.MeshStandardMaterial({
@@ -982,28 +1016,43 @@ function renderRoomTopView() {
   const host = document.getElementById("roomPlan");
   const { width, length } = state.roomConfig;
   host.style.aspectRatio = `${width} / ${length}`;
-  host.style.minHeight = `${Math.max(220, Math.round(length * 42))}px`;
+  host.style.minHeight = `${Math.max(220, Math.round((length / 1000) * 42))}px`;
   const viewW = host.clientWidth || 400;
   const viewH = host.clientHeight || 260;
   const scale = Math.min(viewW / width, viewH / length);
 
   host.innerHTML = state.objects3d
     .map((item) => {
-      const left = (item.x - item.width / 2) * scale;
-      const top = (item.z - item.depth / 2) * scale;
+      const { planW, planD } = getObjectPlanSize(item);
+      const left = (item.x - planW / 2) * scale;
+      const top = (item.z - planD / 2) * scale;
       const chipW = Math.max(item.width * scale, 24);
       const chipH = Math.max(item.depth * scale, 18);
+      const rotation = normalizeAngle(item.rotationY);
       const texturePreset = resolveTexturePreset(item);
-      return `<div class="furniture-chip" data-drag-id="${item.id}" style="cursor:grab; left:${left}px; top:${top}px; width:${chipW}px; height:${chipH}px; background:${texturePreset.color};">${escapeHtml(item.name)}</div>`;
+      return `
+        <div class="furniture-chip-wrap" style="left:${left}px; top:${top}px; width:${Math.max(planW * scale, 24)}px; height:${Math.max(planD * scale, 18)}px;">
+          <div class="furniture-chip" data-drag-id="${item.id}" style="cursor:grab; left:50%; top:50%; width:${chipW}px; height:${chipH}px; background:${texturePreset.color}; transform: translate(-50%, -50%) rotate(${rotation}deg);">
+            <span class="furniture-chip-label">${escapeHtml(item.name)}</span>
+            <button type="button" class="furniture-rotate-handle" data-rotate-id="${item.id}" title="Удерживайте и вращайте">↻</button>
+          </div>
+        </div>`;
     })
     .join("");
 
   host.querySelectorAll("[data-drag-id]").forEach((el) => {
-    el.addEventListener("pointerdown", (ev) => beginDrag(ev, el.dataset.dragId));
+    el.addEventListener("pointerdown", (ev) => {
+      if (ev.target.closest("[data-rotate-id]")) return;
+      beginDrag(ev, el.dataset.dragId);
+    });
+  });
+  host.querySelectorAll("[data-rotate-id]").forEach((el) => {
+    el.addEventListener("pointerdown", (ev) => beginRotate(ev, el.dataset.rotateId));
   });
 }
 
 function beginDrag(ev, id) {
+  if (state.rotate.active) return;
   const item = state.objects3d.find((obj) => obj.id === id);
   if (!item) return;
   state.drag.active = true;
@@ -1013,9 +1062,36 @@ function beginDrag(ev, id) {
   state.drag.baseX = item.x;
   state.drag.baseZ = item.z;
   ev.currentTarget.setPointerCapture(ev.pointerId);
+  ev.preventDefault();
+}
+
+function beginRotate(ev, id) {
+  ev.stopPropagation();
+  ev.preventDefault();
+  const item = state.objects3d.find((obj) => obj.id === id);
+  if (!item) return;
+  const host = document.getElementById("roomPlan");
+  const hostRect = host.getBoundingClientRect();
+  const { width, length } = state.roomConfig;
+  const viewW = host.clientWidth || 400;
+  const viewH = host.clientHeight || 260;
+  const scale = Math.min(viewW / width, viewH / length);
+  const centerX = hostRect.left + item.x * scale;
+  const centerY = hostRect.top + item.z * scale;
+  state.rotate.active = true;
+  state.rotate.id = id;
+  state.rotate.centerX = centerX;
+  state.rotate.centerY = centerY;
+  state.rotate.startAngle = Math.atan2(ev.clientY - centerY, ev.clientX - centerX);
+  state.rotate.baseRotation = normalizeAngle(item.rotationY);
+  ev.currentTarget.setPointerCapture(ev.pointerId);
 }
 
 function handleDragMove(ev) {
+  if (state.rotate.active) {
+    handleRotateMove(ev);
+    return;
+  }
   if (!state.drag.active) return;
   const host = document.getElementById("roomPlan");
   const { width, length } = state.roomConfig;
@@ -1028,13 +1104,33 @@ function handleDragMove(ev) {
   const item = state.objects3d.find((obj) => obj.id === state.drag.id);
   if (!item) return;
 
-  item.x = Math.min(Math.max(state.drag.baseX + dx, item.width / 2), width - item.width / 2);
-  item.z = Math.min(Math.max(state.drag.baseZ + dz, item.depth / 2), length - item.depth / 2);
+  item.x = state.drag.baseX + dx;
+  item.z = state.drag.baseZ + dz;
+  clampObjectPosition(item, width, length);
+  renderRoomTopView();
+  renderRoom3D();
+}
+
+function handleRotateMove(ev) {
+  const item = state.objects3d.find((obj) => obj.id === state.rotate.id);
+  if (!item) return;
+  const angle = Math.atan2(ev.clientY - state.rotate.centerY, ev.clientX - state.rotate.centerX);
+  const delta = ((angle - state.rotate.startAngle) * 180) / Math.PI;
+  item.rotationY = Math.round(normalizeAngle(state.rotate.baseRotation + delta) * 10) / 10;
+  clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
   renderRoomTopView();
   renderRoom3D();
 }
 
 function endDrag() {
+  if (state.rotate.active) {
+    state.rotate.active = false;
+    state.rotate.id = null;
+    renderRoomTopView();
+    renderRoom3D();
+    renderBom();
+    return;
+  }
   state.drag.active = false;
   state.drag.id = null;
 }
@@ -1043,14 +1139,13 @@ function applyRoomSize() {
   const width = Number(document.getElementById("roomWidth").value);
   const length = Number(document.getElementById("roomLength").value);
   const height = Number(document.getElementById("roomHeight").value);
-  if (width < 2 || length < 2 || height < 2) {
-    toast("Размеры комнаты должны быть >= 2 м", false);
+  if (width < 2000 || length < 2000 || height < 2000) {
+    toast("Размеры комнаты должны быть не менее 2000 мм", false);
     return;
   }
   state.roomConfig = { width, length, height };
   for (const item of state.objects3d) {
-    item.x = Math.min(Math.max(item.x, item.width / 2), width - item.width / 2);
-    item.z = Math.min(Math.max(item.z, item.depth / 2), length - item.depth / 2);
+    clampObjectPosition(item, width, length);
   }
   rebuildRoomGeometry();
   renderRoomTopView();
@@ -1066,9 +1161,10 @@ function addObject3DFromForm() {
   const depth = Number(document.getElementById("objD").value);
   const height = Number(document.getElementById("objH").value);
   if (width <= 0 || depth <= 0 || height <= 0) {
-    toast("Габариты объекта должны быть > 0", false);
+    toast("Габариты объекта должны быть > 0 мм", false);
     return;
   }
+  const { planW, planD } = getObjectPlanSize({ width, depth, height, rotationY: 0 });
   const item = {
     id: makeId(),
     type,
@@ -1077,8 +1173,8 @@ function addObject3DFromForm() {
     width,
     depth,
     height,
-    x: Math.min(Math.max(state.roomConfig.width * 0.5, width / 2), state.roomConfig.width - width / 2),
-    z: Math.min(Math.max(state.roomConfig.length * 0.5, depth / 2), state.roomConfig.length - depth / 2),
+    x: Math.min(Math.max(state.roomConfig.width * 0.5, planW / 2), state.roomConfig.width - planW / 2),
+    z: Math.min(Math.max(state.roomConfig.length * 0.5, planD / 2), state.roomConfig.length - planD / 2),
     rotationY: 0,
   };
   state.objects3d.push(item);
@@ -1101,9 +1197,7 @@ function buildBomFromObjects() {
   };
 
   for (const item of state.objects3d) {
-    const w = Math.round(item.width * 1000);
-    const d = Math.round(item.depth * 1000);
-    const h = Math.round(item.height * 1000);
+    const { width: w, depth: d, height: h } = getObjectManufacturingSize(item);
 
     if (item.type === "wardrobe" || item.type === "shelf") {
       pushPart("Боковина", d, h, 2);
@@ -1267,6 +1361,106 @@ function exportCutPdf() {
   toast("Карта раскроя сохранена");
 }
 
+function jsString(value) {
+  return JSON.stringify(String(value));
+}
+
+function buildBasisCabinetScript(item, offsetX, offsetZ) {
+  const { width: w, depth: d, height: h } = getObjectManufacturingSize(item);
+  const name = item.name.replace(/'/g, "\\'");
+  const lines = [
+    `  // ${name} (${w}×${d}×${h} мм)`,
+    `  (function() {`,
+    `    var ox = ${Math.round(offsetX)};`,
+    `    var oz = ${Math.round(offsetZ)};`,
+    `    var W = ${Math.round(w)};`,
+    `    var D = ${Math.round(d)};`,
+    `    var H = ${Math.round(h)};`,
+    `    var TH = ActiveMaterial.Thickness;`,
+  ];
+
+  if (item.type === "wardrobe" || item.type === "shelf" || item.type === "cabinet") {
+    const shelfCount = item.type === "cabinet" ? 0 : Math.max(2, Math.round(h / 500));
+    const doorCount = item.type === "wardrobe" ? 2 : item.type === "cabinet" ? 1 : 0;
+    lines.push(
+      `    AddHorizPanel(ox, oz, ox + W, oz + D, 0).Name = ${jsString(name + " — дно")};`,
+      `    AddHorizPanel(ox, oz, ox + W, oz + D, H - TH).Name = ${jsString(name + " — крышка")};`,
+      `    AddVertPanel(oz, 0, oz + D, H, ox).Name = ${jsString(name + " — боковина левая")};`,
+      `    AddVertPanel(oz, 0, oz + D, H, ox + W - TH).Name = ${jsString(name + " — боковина правая")};`,
+      `    AddFrontPanel(ox, 0, ox + W, H, oz).Name = ${jsString(name + " — задняя стенка")};`
+    );
+    if (shelfCount > 0) {
+      lines.push(`    var gap = (H - 2 * TH) / (${shelfCount} + 1);`);
+      lines.push(`    for (var i = 1; i <= ${shelfCount}; i++) {`);
+      lines.push(`      var y = i * gap;`);
+      lines.push(`      AddHorizPanel(ox + TH, oz + TH, ox + W - TH, oz + D - TH, y).Name = ${jsString(name + " — полка")} + " " + i;`);
+      lines.push(`    }`);
+    }
+    if (doorCount === 1) {
+      lines.push(`    AddFrontPanel(ox, 0, ox + W, H - TH, oz + D - TH).Name = ${jsString(name + " — фасад")};`);
+    } else if (doorCount === 2) {
+      lines.push(`    var doorW = (W - TH) / 2;`);
+      lines.push(`    AddFrontPanel(ox, 0, ox + doorW, H - TH, oz + D - TH).Name = ${jsString(name + " — дверца 1")};`);
+      lines.push(`    AddFrontPanel(ox + doorW, 0, ox + W, H - TH, oz + D - TH).Name = ${jsString(name + " — дверца 2")};`);
+    }
+  } else if (item.type === "table") {
+    lines.push(
+      `    AddHorizPanel(ox, oz, ox + W, oz + D, H - TH).Name = ${jsString(name + " — столешница")};`,
+      `    AddVertPanel(oz, 0, oz + 80, H, ox + 40).Name = ${jsString(name + " — опора 1")};`,
+      `    AddVertPanel(oz, 0, oz + 80, H, ox + W - 40 - TH).Name = ${jsString(name + " — опора 2")};`,
+      `    AddVertPanel(oz + D - 80, 0, oz + D, H, ox + 40).Name = ${jsString(name + " — опора 3")};`,
+      `    AddVertPanel(oz + D - 80, 0, oz + D, H, ox + W - 40 - TH).Name = ${jsString(name + " — опора 4")};`
+    );
+  } else {
+    lines.push(
+      `    AddHorizPanel(ox, oz, ox + W, oz + D, 0).Name = ${jsString(name + " — основание")};`,
+      `    AddFrontPanel(ox, 0, ox + W, H, oz).Name = ${jsString(name + " — корпус")};`
+    );
+  }
+
+  lines.push(`  })();`);
+  return lines.join("\n");
+}
+
+function exportBasisScript() {
+  if (!state.objects3d.length) {
+    toast("Добавьте объекты в планировщик для экспорта в Базис", false);
+    return;
+  }
+
+  const blocks = state.objects3d.map((item, index) => {
+    const offsetX = Math.round(item.x - getObjectManufacturingSize(item).width / 2);
+    const offsetZ = Math.round(item.z - getObjectManufacturingSize(item).depth / 2) + index * 120;
+    return buildBasisCabinetScript(item, offsetX, offsetZ);
+  });
+
+  const cutComment = state.lastCutResult
+    ? `\n// Раскрой: ${state.lastCutResult.placed_count}/${state.lastCutResult.requested_count} деталей, ${state.lastCutResult.total_sheets} лист(ов)\n`
+    : "\n// Раскрой ещё не рассчитан — запустите расчёт перед экспортом\n";
+
+  const script = [
+    "// WoodCraft Market → БАЗИС-Мебельщик",
+    "// Как открыть: Скрипты → Выбрать этот файл → Запустить",
+    "// Все размеры в миллиметрах",
+    cutComment,
+    "Undo.changing();",
+    "try {",
+    ...blocks,
+    "  alert('Импорт завершён: корпуса построены.');",
+    "} finally {",
+    "  Undo.commit();",
+    "}",
+  ].join("\n");
+
+  const blob = new Blob([script], { type: "text/javascript;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "woodcraft-basis-import.js";
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast("Скрипт для Базис сохранён — запустите его через меню «Скрипты»");
+}
+
 function exportAssemblyPdf() {
   const bom = buildBomFromObjects();
   if (!bom.parts.length) {
@@ -1282,7 +1476,7 @@ function exportAssemblyPdf() {
     ...state.objects3d.map((item, idx) => {
       const textureTitle = (texturePresets[item.texture] || {}).title || "По типу";
       const typeTitle = (typePresets[item.type] || {}).title || item.type;
-      return [String(idx + 1), item.name, typeTitle, `${Math.round(item.width * 1000)}×${Math.round(item.depth * 1000)}×${Math.round(item.height * 1000)}`, textureTitle];
+      return [String(idx + 1), item.name, typeTitle, `${Math.round(item.width)}×${Math.round(item.depth)}×${Math.round(item.height)}`, textureTitle];
     }),
   ];
 
@@ -1293,7 +1487,7 @@ function exportAssemblyPdf() {
 
   const content = [
     { text: "Инструкция по сборке", style: "title" },
-    { text: `Комната: ${state.roomConfig.width} × ${state.roomConfig.length} × ${state.roomConfig.height} м`, style: "meta" },
+    { text: `Комната: ${state.roomConfig.width} × ${state.roomConfig.length} × ${state.roomConfig.height} мм`, style: "meta" },
     { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta", margin: [0, 0, 0, 10] },
     { text: "1. Перечень объектов в проекте", style: "section" },
     { table: { headerRows: 1, widths: [20, "*", 64, 78, 70], body: objectsTableBody }, layout: "lightHorizontalLines", margin: [0, 0, 0, 10] },
@@ -1392,6 +1586,7 @@ async function boot() {
     toast("BOM обновлен");
   });
   document.getElementById("btnCutFrom3d").addEventListener("click", cutFrom3D);
+  document.getElementById("btnExportBasis").addEventListener("click", exportBasisScript);
   document.getElementById("btnExportCutPdf").addEventListener("click", exportCutPdf);
   document.getElementById("btnExportAssemblyPdf").addEventListener("click", exportAssemblyPdf);
   document.getElementById("btnExport3d").addEventListener("click", exportSceneGltf);

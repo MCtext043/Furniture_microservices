@@ -1,0 +1,7 @@
+deploy/local.env
+.env
+.env.server
+__pycache__/
+.venv/
+venv/
+*.pyc

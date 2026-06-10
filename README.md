@@ -337,28 +337,50 @@ docker compose up --build -d
 
 ## Подготовка к отправке на сервер
 
-В репозитории уже подготовлены серверные шаблоны:
+Как в проекте [Adam](https://github.com/MCtext043/Adam): каталог `deploy/` и выгрузка с Windows через `scp` + `ssh`.
 
-- `docker-compose.server.yml` — отдельный compose для server-deploy с параметрами из env.
-- `.env.server.example` — шаблон переменных (секреты, порты, доступы).
-- `scripts/deploy/deploy_server.sh` — скрипт проверки/сборки/запуска.
+**Сайт на VPS:** http://45.11.26.79:8001/ (порт **8001**; порт 80 занят другим проектом).
 
-### Быстрый старт (Linux сервер)
+### С Windows (рекомендуется)
 
-```bash
-cp .env.server.example .env.server
-# заполните .env.server реальными значениями
-chmod +x scripts/deploy/deploy_server.sh
-./scripts/deploy/deploy_server.sh
+1. Один раз: `copy deploy\local.env.example deploy\local.env` и задайте пароли.
+2. Выгрузка:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\upload-to-server.ps1
 ```
 
-Проверка после запуска:
+Только фронт (быстро):
 
-```bash
-curl http://127.0.0.1:8080/health
+```powershell
+powershell -ExecutionPolicy Bypass -File deploy\upload-to-server.ps1 -Fast
 ```
 
-Если gateway будет за reverse proxy (Nginx/Caddy/Traefik), публикуйте наружу только HTTP(S) прокси и (опционально) админ-порты, а внутренние порты сервисов оставьте внутри сервера.
+Пароль SSH вводится при запросе `scp` / `ssh` (как в Adam).
+
+### На сервере вручную
+
+```bash
+cd /opt/furniture   # или /root/furniture
+cp deploy/server.env.sample .env && nano .env
+chmod +x deploy/install-server.sh
+./deploy/install-server.sh
+```
+
+Диагностика: `bash deploy/diagnose-server.sh`
+
+Проверка:
+
+```bash
+curl http://127.0.0.1:8001/health
+```
+
+Файлы:
+
+- `deploy/upload-to-server.ps1` — упаковка и выгрузка с ПК
+- `deploy/install-server.sh` — сборка и запуск на сервере
+- `deploy/server.env.sample` — шаблон `.env`
+- `docker-compose.server.yml` — compose для VPS
 
 ---
 

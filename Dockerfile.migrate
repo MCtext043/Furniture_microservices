@@ -13,7 +13,9 @@ COPY alembic.ini /app/alembic.ini
 COPY alembic /app/alembic
 COPY common /app/common
 COPY services /app/services
+COPY deploy/alembic-upgrade.sh /app/deploy/alembic-upgrade.sh
+RUN chmod +x /app/deploy/alembic-upgrade.sh
 
 ENV PYTHONPATH=/app
 
-CMD ["python", "-m", "alembic", "upgrade", "head"]
+CMD ["/app/deploy/alembic-upgrade.sh"]

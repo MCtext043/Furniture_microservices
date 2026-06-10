@@ -21,6 +21,7 @@ class Placement(BaseModel):
     width: int
     height: int
     sheet_index: int = 0
+    rotated: bool = False
 
 
 class SheetPlacement(BaseModel):

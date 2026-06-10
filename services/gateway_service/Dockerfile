@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY services/__init__.py /app/services/__init__.py
 COPY services/gateway_service /app/services/gateway_service
+COPY frontend /app/frontend
 
 ENV PYTHONPATH=/app
 

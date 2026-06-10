@@ -10,9 +10,9 @@ def test_create_project_and_add_furniture(planner_client: TestClient):
         f"/projects/{project_id}/furniture",
         json={
             "name": "Угловой шкаф",
-            "width": 1.2,
-            "depth": 0.6,
-            "height": 2.4,
+            "width": 1200,
+            "depth": 600,
+            "height": 2400,
             "x": 0.0,
             "y": 0.0,
             "z": 0.0,

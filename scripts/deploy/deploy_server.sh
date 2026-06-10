@@ -17,7 +17,7 @@ echo "[1/4] Checking Docker Compose config..."
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" config >/dev/null
 
 echo "[2/4] Building images..."
-docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" build
+docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" build gateway-service cutting-service
 
 echo "[3/4] Starting stack..."
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" up -d
@@ -27,5 +27,6 @@ docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" ps
 
 echo ""
 echo "Deployment done."
+echo "Site (frontend + API): http://127.0.0.1:\${GATEWAY_PORT:-8080}/"
 echo "Gateway health check:"
 echo "  curl http://127.0.0.1:\${GATEWAY_PORT:-8080}/health"
