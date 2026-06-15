@@ -1,7 +1,7 @@
+const APP_MODE = window.APP_MODE || "user";
 const LS_API = "furniture_gateway_url";
 const LS_TOKEN = "furniture_jwt";
 const LS_CUSTOMER = "furniture_customer_name";
-const DEMO_USER = "demo-buyer";
 
 const state = {
   categories: [],
@@ -9,6 +9,7 @@ const state = {
   activeCategory: "all",
   search: "",
   cart: [],
+  roles: [],
   projectId: null,
   three: null,
   cuttingParts: [],
@@ -81,6 +82,39 @@ function token() {
 function setToken(value) {
   value ? localStorage.setItem(LS_TOKEN, value) : localStorage.removeItem(LS_TOKEN);
   updateAccountButton();
+}
+
+function hasRole(role) {
+  return state.roles.includes("admin") || state.roles.includes(role);
+}
+
+function isAdmin() {
+  return hasRole("admin");
+}
+
+function canManageCatalog() {
+  return isAdmin() || hasRole("catalog:write");
+}
+
+function canRunCutting() {
+  return isAdmin() || hasRole("cutting:run");
+}
+
+function cartUserId() {
+  return customerName() || "guest";
+}
+
+async function refreshAuth() {
+  state.roles = [];
+  if (!token()) return;
+  try {
+    const me = await api("GET", "/auth/me", undefined, true);
+    state.roles = me.roles || [];
+    if (me.username) setCustomerName(me.username);
+  } catch {
+    setToken("");
+    state.roles = [];
+  }
 }
 
 function customerName() {
@@ -265,16 +299,14 @@ async function requestNoBody(method, path, withAuth = false) {
 }
 
 async function autoLogin() {
-  if (token() && (await validateToken())) return;
+  if (APP_MODE !== "admin") return;
+  if (token() && (await validateToken())) {
+    await refreshAuth();
+    return;
+  }
   setToken("");
   setCustomerName("");
-  try {
-    const data = await api("POST", "/auth/token", { username: "admin", password: "demo123456" });
-    setToken(data.access_token);
-    setCustomerName("admin");
-  } catch (error) {
-    console.warn("Demo login failed:", error);
-  }
+  state.roles = [];
 }
 
 async function loginCustomer() {
@@ -288,8 +320,17 @@ async function loginCustomer() {
     const data = await api("POST", "/auth/token", { username, password });
     setToken(data.access_token);
     setCustomerName(username);
+    await refreshAuth();
     closeAccountModal();
+    if (APP_MODE === "admin" && !canManageCatalog() && !canRunCutting()) {
+      setToken("");
+      setCustomerName("");
+      state.roles = [];
+      toast("Нет прав администратора. Используйте учётную запись admin.", false);
+      return;
+    }
     toast(`Добро пожаловать, ${username}`);
+    if (APP_MODE === "admin") bootAdminPanel();
   } catch (error) {
     toast(`Не удалось войти: ${error.message}`, false);
   }
@@ -388,10 +429,13 @@ async function seedDemoData() {
 async function loadCatalog() {
   state.categories = await api("GET", "/catalog/categories");
   state.products = await api("GET", "/catalog/products?limit=100&sort_by=name");
-  document.getElementById("statProducts").textContent = state.products.length;
-  document.getElementById("statCategories").textContent = state.categories.length;
+  const statP = document.getElementById("statProducts");
+  const statC = document.getElementById("statCategories");
+  if (statP) statP.textContent = state.products.length;
+  if (statC) statC.textContent = state.categories.length;
   renderCategories();
-  renderProducts();
+  if (APP_MODE === "admin") renderAdminCatalogTable();
+  else renderProducts();
 }
 
 function demoMeta(product) {
@@ -449,14 +493,25 @@ function filteredProducts() {
 
 function renderProducts() {
   const host = document.getElementById("productGrid");
+  if (!host) return;
   const products = filteredProducts();
   if (!products.length) {
     host.innerHTML = `<div class="col-12 text-center text-muted py-5">По вашему запросу ничего не найдено.</div>`;
     return;
   }
+  const adminActions = APP_MODE === "admin";
   host.innerHTML = products
     .map((p) => {
       const meta = demoMeta(p);
+      const actionButtons = adminActions
+        ? `<div class="btn-group">
+            <button class="btn btn-outline-primary btn-sm" data-edit="${p.id}">Изменить</button>
+            <button class="btn btn-outline-danger btn-sm" data-del="${p.id}">Скрыть</button>
+          </div>`
+        : `<div class="btn-group">
+            <button class="btn btn-outline-secondary btn-sm" data-wish="${p.id}">♡</button>
+            <button class="btn btn-primary btn-sm" data-cart="${p.id}">В корзину</button>
+          </div>`;
       return `
         <div class="col-md-6 col-xl-4">
           <article class="card product-card h-100">
@@ -471,10 +526,7 @@ function renderProducts() {
               <p class="text-muted small flex-grow-1">${escapeHtml(displayProductDescription(p) || "Современное мебельное решение для дома.")}</p>
               <div class="d-flex justify-content-between align-items-center">
                 <span class="price fs-5">${money(Number(p.price))}</span>
-                <div class="btn-group">
-                  <button class="btn btn-outline-secondary btn-sm" data-wish="${p.id}">♡</button>
-                  <button class="btn btn-primary btn-sm" data-cart="${p.id}">В корзину</button>
-                </div>
+                ${actionButtons}
               </div>
             </div>
           </article>
@@ -482,18 +534,28 @@ function renderProducts() {
     })
     .join("");
 
-  host.querySelectorAll("[data-cart]").forEach((btn) => btn.addEventListener("click", () => addToCart(Number(btn.dataset.cart))));
-  host.querySelectorAll("[data-wish]").forEach((btn) => btn.addEventListener("click", () => addToWishlist(Number(btn.dataset.wish))));
+  if (adminActions) {
+    host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openProductEditor(Number(btn.dataset.edit))));
+    host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", () => deactivateProduct(Number(btn.dataset.del))));
+  } else {
+    host.querySelectorAll("[data-cart]").forEach((btn) => btn.addEventListener("click", () => addToCart(Number(btn.dataset.cart))));
+    host.querySelectorAll("[data-wish]").forEach((btn) => btn.addEventListener("click", () => addToWishlist(Number(btn.dataset.wish))));
+  }
 }
 
 async function addToCart(id) {
+  if (!customerName()) {
+    toast("Войдите, чтобы добавить товар в корзину", false);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
+    return;
+  }
   const product = state.products.find((p) => p.id === id);
   if (!product) return;
   const existing = state.cart.find((item) => item.id === id);
   existing ? existing.qty++ : state.cart.push({ ...product, qty: 1 });
   renderCart();
   try {
-    await api("POST", `/catalog/users/${DEMO_USER}/cart/items`, { product_id: id, quantity: 1 }, true);
+    await api("POST", `/catalog/users/${cartUserId()}/cart/items`, { product_id: id, quantity: 1 }, true);
     toast(`${displayProductTitle(product)} добавлен в корзину`);
   } catch (error) {
     toast(`Витрина обновлена, но backend вернул: ${error.message}`, false);
@@ -501,9 +563,14 @@ async function addToCart(id) {
 }
 
 async function addToWishlist(id) {
+  if (!customerName()) {
+    toast("Войдите, чтобы сохранить в избранное", false);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
+    return;
+  }
   const product = state.products.find((p) => p.id === id);
   try {
-    await requestNoBody("POST", `/catalog/users/${DEMO_USER}/wishlist/products/${id}`, true);
+    await requestNoBody("POST", `/catalog/users/${cartUserId()}/wishlist/products/${id}`, true);
     toast(`${product ? displayProductTitle(product) : "Товар"} добавлен в избранное`);
   } catch (error) {
     toast(`Не удалось добавить в избранное: ${error.message}`, false);
@@ -632,6 +699,7 @@ async function optimizeCutting(customParts = null, silent = false) {
     renderCutView(payload.sheet_width, payload.sheet_height, data.sheets || []);
     renderCutExtra(data);
     if (!silent) toast("Раскрой рассчитан");
+    if (APP_MODE === "admin") renderCuttingJobs();
     return data;
   } catch (error) {
     if (!silent) toast(`Раскрой недоступен: ${error.message}`, false);
@@ -721,7 +789,12 @@ function resetPartsToDefault() {
 }
 
 async function createRoom() {
-  const projectName = document.getElementById("projectName")?.value?.trim() || "Проект клиента";
+  if (!customerName()) {
+    toast("Войдите, чтобы сохранить проект", false);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
+    return;
+  }
+  const projectName = document.getElementById("projectName")?.value?.trim() || `Проект ${customerName()}`;
   const projectLocation = document.getElementById("projectLocation")?.value?.trim() || "Онлайн";
   try {
     const project = await api(
@@ -1232,15 +1305,194 @@ function renderBom() {
   const host = document.getElementById("bomList");
   const bom = buildBomFromObjects();
   if (!bom.parts.length) {
-    host.innerHTML = `<div class="text-muted">Добавьте объекты в 3D, чтобы получить детали и сборку.</div>`;
+    if (host) host.innerHTML = `<div class="text-muted">Добавьте объекты в 3D, чтобы получить детали и сборку.</div>`;
+    renderCostEstimate(bom);
     return bom;
   }
-  host.innerHTML = `
-    <div class="mb-2"><strong>Детали для изготовления:</strong></div>
-    <ul class="mb-3">${bom.parts.map((part) => `<li>${escapeHtml(part.name)} — ${part.width}×${part.height} мм × ${part.quantity}</li>`).join("")}</ul>
-    <div class="mb-2"><strong>Черновой список сборки:</strong></div>
-    <ul>${bom.assembly.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>`;
+  if (host) {
+    host.innerHTML = `
+      <div class="mb-2"><strong>Детали для изготовления:</strong></div>
+      <ul class="mb-3">${bom.parts.map((part) => `<li>${escapeHtml(part.name)} — ${part.width}×${part.height} мм × ${part.quantity}</li>`).join("")}</ul>
+      <div class="mb-2"><strong>Черновой список сборки:</strong></div>
+      <ul>${bom.assembly.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>`;
+  }
+  renderCostEstimate(bom);
   return bom;
+}
+
+const LDSP_PRICE_M2 = 3200;
+const EDGE_PRICE_M = 180;
+const LABOR_RATE = 0.38;
+const OBJECT_BASE_PRICES = { wardrobe: 45000, cabinet: 18000, shelf: 12000, table: 22000, sofa: 35000 };
+
+function estimateObjectRetailCost(item) {
+  const base = OBJECT_BASE_PRICES[item.type] || 15000;
+  const volumeFactor = (item.width * item.depth * item.height) / (1200 * 600 * 2100);
+  return Math.round(base * Math.max(volumeFactor, 0.6));
+}
+
+function estimateProjectCost(bom) {
+  let materialCost = 0;
+  let edgeCost = 0;
+  for (const part of bom.parts) {
+    const areaM2 = (part.width * part.height * part.quantity) / 1_000_000;
+    materialCost += areaM2 * LDSP_PRICE_M2;
+    edgeCost += ((part.width + part.height) * 2 * part.quantity) / 1000 * EDGE_PRICE_M;
+  }
+  const laborCost = Math.round((materialCost + edgeCost) * LABOR_RATE);
+  const furnitureCost = state.objects3d.reduce((sum, item) => sum + estimateObjectRetailCost(item), 0);
+  const subtotal = Math.round(materialCost + edgeCost + laborCost + furnitureCost);
+  return { materialCost: Math.round(materialCost), edgeCost: Math.round(edgeCost), laborCost, furnitureCost, total: subtotal };
+}
+
+function renderCostEstimate(bom = null) {
+  const host = document.getElementById("costEstimate");
+  if (!host) return;
+  const data = bom || buildBomFromObjects();
+  if (!data.parts.length && !state.objects3d.length) {
+    host.innerHTML = `<div class="text-muted">Добавьте мебель в комнату — здесь появится ориентировочная стоимость проекта.</div>`;
+    return;
+  }
+  const cost = estimateProjectCost(data);
+  host.innerHTML = `
+    <div class="row g-3">
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Материалы (ЛДСП)</div><div class="fw-semibold">${money(cost.materialCost)}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Кромка</div><div class="fw-semibold">${money(cost.edgeCost)}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Работа</div><div class="fw-semibold">${money(cost.laborCost)}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Мебель в проекте</div><div class="fw-semibold">${money(cost.furnitureCost)}</div></div></div>
+    </div>
+    <div class="mt-3 p-3 border rounded bg-white">
+      <div class="small text-muted">Итоговая ориентировочная стоимость</div>
+      <div class="cost-highlight">${money(cost.total)}</div>
+      <div class="small text-muted mt-1">Расчёт для клиента. Точная развёртка и раскрой — в панели администратора.</div>
+    </div>`;
+}
+
+function openProductEditor(productId) {
+  const product = state.products.find((p) => p.id === productId);
+  if (!product) return;
+  document.getElementById("editProductId").value = product.id;
+  document.getElementById("editProductName").value = displayProductTitle(product);
+  document.getElementById("editProductSku").value = product.sku;
+  document.getElementById("editProductBrand").value = displayProductBrand(product);
+  document.getElementById("editProductPrice").value = product.price;
+  document.getElementById("editProductStock").value = product.stock;
+  document.getElementById("editProductDesc").value = displayProductDescription(product) || "";
+  const catSelect = document.getElementById("editProductCategory");
+  catSelect.innerHTML = state.categories.map((c) => `<option value="${c.id}" ${c.id === product.category_id ? "selected" : ""}>${escapeHtml(categoryName(c.id))}</option>`).join("");
+  document.getElementById("productEditorTitle").textContent = "Редактировать товар";
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("productEditorModal")).show();
+}
+
+function openNewProductEditor() {
+  document.getElementById("editProductId").value = "";
+  document.getElementById("editProductName").value = "";
+  document.getElementById("editProductSku").value = `SKU-${Date.now()}`;
+  document.getElementById("editProductBrand").value = "";
+  document.getElementById("editProductPrice").value = "10000";
+  document.getElementById("editProductStock").value = "5";
+  document.getElementById("editProductDesc").value = "";
+  const catSelect = document.getElementById("editProductCategory");
+  catSelect.innerHTML = state.categories.map((c) => `<option value="${c.id}">${escapeHtml(categoryName(c.id))}</option>`).join("");
+  document.getElementById("productEditorTitle").textContent = "Новый товар";
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("productEditorModal")).show();
+}
+
+async function saveProductEditor() {
+  const id = document.getElementById("editProductId").value;
+  const payload = {
+    name: document.getElementById("editProductName").value.trim(),
+    sku: document.getElementById("editProductSku").value.trim(),
+    brand: document.getElementById("editProductBrand").value.trim(),
+    description: document.getElementById("editProductDesc").value.trim(),
+    price: Number(document.getElementById("editProductPrice").value),
+    stock: Number(document.getElementById("editProductStock").value),
+    category_id: Number(document.getElementById("editProductCategory").value),
+    is_active: true,
+  };
+  try {
+    if (id) {
+      await api("PATCH", `/catalog/products/${id}`, payload, true);
+      toast("Товар обновлён");
+    } else {
+      await api("POST", "/catalog/products", payload, true);
+      toast("Товар добавлен");
+    }
+    bootstrap.Modal.getInstance(document.getElementById("productEditorModal")).hide();
+    await loadCatalog();
+    renderAdminCatalogTable();
+  } catch (error) {
+    toast(`Ошибка сохранения: ${error.message}`, false);
+  }
+}
+
+async function deactivateProduct(productId) {
+  if (!confirm("Скрыть товар из каталога?")) return;
+  try {
+    await requestNoBody("DELETE", `/catalog/products/${productId}`, true);
+    toast("Товар скрыт");
+    await loadCatalog();
+    renderAdminCatalogTable();
+  } catch (error) {
+    toast(`Ошибка: ${error.message}`, false);
+  }
+}
+
+function renderAdminCatalogTable() {
+  const host = document.getElementById("adminCatalogTable");
+  if (!host) return;
+  host.innerHTML = `
+    <table class="table table-sm admin-table">
+      <thead><tr><th>ID</th><th>Название</th><th>SKU</th><th>Цена</th><th>Склад</th><th></th></tr></thead>
+      <tbody>
+        ${state.products.map((p) => `
+          <tr>
+            <td>${p.id}</td>
+            <td>${escapeHtml(displayProductTitle(p))}</td>
+            <td class="small text-muted">${escapeHtml(p.sku)}</td>
+            <td>${money(Number(p.price))}</td>
+            <td>${p.stock}</td>
+            <td class="text-end">
+              <button class="btn btn-sm btn-outline-primary" data-edit="${p.id}">Изменить</button>
+              <button class="btn btn-sm btn-outline-danger" data-del="${p.id}">Скрыть</button>
+            </td>
+          </tr>`).join("")}
+      </tbody>
+    </table>`;
+  host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openProductEditor(Number(btn.dataset.edit))));
+  host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", () => deactivateProduct(Number(btn.dataset.del))));
+}
+
+async function renderCuttingJobs() {
+  const host = document.getElementById("cuttingJobsList");
+  if (!host) return;
+  try {
+    const jobs = await api("GET", "/cutting/jobs");
+    if (!jobs.length) {
+      host.innerHTML = `<div class="text-muted small">История раскроев пуста.</div>`;
+      return;
+    }
+    host.innerHTML = `
+      <table class="table table-sm admin-table">
+        <thead><tr><th>#</th><th>Лист</th><th>Деталей</th><th>Загрузка</th></tr></thead>
+        <tbody>${jobs.map((j) => `<tr><td>${j.id}</td><td>${j.sheet_width}×${j.sheet_height} мм</td><td>${j.placed_count}/${j.parts_count}</td><td>${j.utilization_percent}%</td></tr>`).join("")}</tbody>
+      </table>`;
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function bootAdminPanel() {
+  const gate = document.getElementById("adminGate");
+  const content = document.getElementById("adminContent");
+  if (!gate || !content) return;
+  await refreshAuth();
+  const allowed = canManageCatalog() || canRunCutting();
+  gate.classList.toggle("d-none", allowed);
+  content.classList.toggle("d-none", !allowed);
+  if (!allowed) return;
+  renderAdminCatalogTable();
+  await renderCuttingJobs();
 }
 
 async function cutFrom3D() {
@@ -1560,47 +1812,58 @@ function setBackendStatus(ok, message) {
   document.getElementById("backendStatus").textContent = message;
 }
 
+function bindClick(id, handler) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("click", handler);
+}
+
 async function boot() {
-  document.getElementById("apiBase").value = localStorage.getItem(LS_API) || defaultApiBase();
-  document.getElementById("saveApiBase").addEventListener("click", () => {
+  const apiBaseInput = document.getElementById("apiBase");
+  if (apiBaseInput) apiBaseInput.value = localStorage.getItem(LS_API) || defaultApiBase();
+  bindClick("saveApiBase", () => {
     localStorage.setItem(LS_API, document.getElementById("apiBase").value.trim());
     location.reload();
   });
-  document.getElementById("searchInput").addEventListener("input", (event) => {
-    state.search = event.target.value;
-    renderProducts();
-  });
-  document.getElementById("btnOptimize").addEventListener("click", () => optimizeCutting());
-  document.getElementById("btnAddPart").addEventListener("click", addPartFromInputs);
-  document.getElementById("btnResetParts").addEventListener("click", resetPartsToDefault);
+  const searchInput = document.getElementById("searchInput");
+  if (searchInput) {
+    searchInput.addEventListener("input", (event) => {
+      state.search = event.target.value;
+      renderProducts();
+    });
+  }
 
-  document.getElementById("btnApplyRoomSize").addEventListener("click", applyRoomSize);
-  document.getElementById("btnAddObject3d").addEventListener("click", () => {
-    addObject3DFromForm();
-    renderBom();
-  });
-  document.getElementById("btnCreateRoom").addEventListener("click", createRoom);
-  document.getElementById("btnAddFurniture").addEventListener("click", addFurnitureSet);
-  document.getElementById("btnGenerateBom").addEventListener("click", () => {
-    renderBom();
-    toast("BOM обновлен");
-  });
-  document.getElementById("btnCutFrom3d").addEventListener("click", cutFrom3D);
-  document.getElementById("btnExportBasis").addEventListener("click", exportBasisScript);
-  document.getElementById("btnExportCutPdf").addEventListener("click", exportCutPdf);
-  document.getElementById("btnExportAssemblyPdf").addEventListener("click", exportAssemblyPdf);
-  document.getElementById("btnExport3d").addEventListener("click", exportSceneGltf);
-  document.getElementById("btnAssetLink").addEventListener("click", prepareAssetLink);
-  document.getElementById("btnLogin").addEventListener("click", loginCustomer);
-  document.getElementById("btnRegister").addEventListener("click", registerCustomer);
+  bindClick("btnOptimize", () => optimizeCutting());
+  bindClick("btnAddPart", addPartFromInputs);
+  bindClick("btnResetParts", resetPartsToDefault);
+  bindClick("btnApplyRoomSize", applyRoomSize);
+  bindClick("btnAddObject3d", () => { addObject3DFromForm(); renderBom(); });
+  bindClick("btnCreateRoom", createRoom);
+  bindClick("btnAddFurniture", addFurnitureSet);
+  bindClick("btnGenerateBom", () => { renderBom(); toast("Список деталей обновлён"); });
+  bindClick("btnEstimateCost", () => { renderBom(); toast("Стоимость пересчитана"); });
+  bindClick("btnCutFrom3d", cutFrom3D);
+  bindClick("btnExportBasis", exportBasisScript);
+  bindClick("btnExportCutPdf", exportCutPdf);
+  bindClick("btnExportAssemblyPdf", exportAssemblyPdf);
+  bindClick("btnExport3d", exportSceneGltf);
+  bindClick("btnAssetLink", prepareAssetLink);
+  bindClick("btnLogin", loginCustomer);
+  bindClick("btnRegister", registerCustomer);
+  bindClick("btnAdminLogin", loginCustomer);
+  bindClick("btnSaveProduct", saveProductEditor);
+  bindClick("btnAddProduct", openNewProductEditor);
+  bindClick("btnSeedDemo", async () => { await seedDemoData(); await loadCatalog(); renderAdminCatalogTable(); toast("Демо-данные загружены"); });
+  bindClick("btnRefreshJobs", renderCuttingJobs);
 
   document.addEventListener("pointermove", handleDragMove);
   document.addEventListener("pointerup", endDrag);
   document.addEventListener("pointercancel", endDrag);
 
-  state.cuttingParts = defaultCuttingParts.map((p) => ({ ...p }));
+  if (APP_MODE === "admin") {
+    state.cuttingParts = defaultCuttingParts.map((p) => ({ ...p }));
+    renderParts();
+  }
   createDemoObjects();
-  renderParts();
   renderCart();
   renderRoomTopView();
   renderBom();
@@ -1609,13 +1872,20 @@ async function boot() {
 
   try {
     await api("GET", "/health");
-    await autoLogin();
-    await seedDemoData();
+    if (APP_MODE === "admin") {
+      await autoLogin();
+      await bootAdminPanel();
+      if (canManageCatalog()) await seedDemoData();
+      setBackendStatus(true, "Панель администратора подключена");
+    } else {
+      if (token()) await refreshAuth();
+      setBackendStatus(true, "Магазин подключен");
+    }
     await loadCatalog();
-    setBackendStatus(true, "Витрина подключена, тестовые данные загружены");
   } catch (error) {
     setBackendStatus(false, "Backend недоступен");
-    document.getElementById("productGrid").innerHTML = `<div class="col-12"><div class="alert alert-warning">Не удалось подключиться к backend: ${escapeHtml(error.message)}</div></div>`;
+    const grid = document.getElementById("productGrid");
+    if (grid) grid.innerHTML = `<div class="col-12"><div class="alert alert-warning">Не удалось подключиться к backend: ${escapeHtml(error.message)}</div></div>`;
   }
 }
 

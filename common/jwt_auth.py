@@ -79,6 +79,28 @@ def ensure_catalog_writer(auth: AuthContext = Depends(get_auth_context)) -> None
         raise HTTPException(status_code=403, detail="Insufficient role for catalog write")
 
 
+def ensure_shop_user(auth: AuthContext = Depends(get_auth_context)) -> None:
+    """Cart and wishlist for any signed-in customer."""
+    if not auth.enforced:
+        return
+    claims = auth.claims
+    if claims is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not _has_privileged_role(claims, ("user", "catalog:write")):
+        raise HTTPException(status_code=403, detail="Insufficient role for shop actions")
+
+
+def ensure_planner_user(auth: AuthContext = Depends(get_auth_context)) -> None:
+    """Room projects for customers and production staff."""
+    if not auth.enforced:
+        return
+    claims = auth.claims
+    if claims is None:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    if not _has_privileged_role(claims, ("user", "planner:write")):
+        raise HTTPException(status_code=403, detail="Insufficient role for planner actions")
+
+
 def ensure_planner_writer(auth: AuthContext = Depends(get_auth_context)) -> None:
     if not auth.enforced:
         return

@@ -43,8 +43,21 @@ elseif ($ResetDb) { Write-Host "Mode:   FULL + RESET_DB (wipes PostgreSQL volume
 else { Write-Host "Mode:   FULL (all services)" -ForegroundColor Yellow }
 Write-Host ""
 
+function Normalize-ShellScripts {
+    param([string]$Root)
+    Get-ChildItem -Path (Join-Path $Root "deploy") -Filter "*.sh" -File -ErrorAction SilentlyContinue | ForEach-Object {
+        $text = [IO.File]::ReadAllText($_.FullName)
+        $fixed = $text -replace "`r`n", "`n" -replace "`r", "`n"
+        if ($fixed -ne $text) {
+            [IO.File]::WriteAllText($_.FullName, $fixed, $utf8NoBom)
+            Write-Host "Normalized LF: $($_.Name)" -ForegroundColor DarkGray
+        }
+    }
+}
+
 Push-Location $repoRoot
 try {
+    Normalize-ShellScripts -Root $repoRoot
     Write-Host "[1/4] Creating archive..."
     tar -czf $archive `
         --exclude="./.git" `

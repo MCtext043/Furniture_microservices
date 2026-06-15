@@ -15,6 +15,11 @@ tar -xzf "${ARCHIVE}" -C "${REMOTE_DIR}"
 
 cd "${REMOTE_DIR}"
 
+# Windows uploads may leave CRLF in shell scripts; fix before running.
+find deploy -name '*.sh' -type f -print0 2>/dev/null | while IFS= read -r -d '' script; do
+  sed -i 's/\r$//' "${script}"
+done
+
 if [[ -f "${SECRETS}" ]]; then
   echo "Applying deploy/local.env as server .env ..."
   cp "${SECRETS}" .env

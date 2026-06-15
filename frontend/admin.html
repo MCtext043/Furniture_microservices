@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WoodCraft Admin — производство</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="styles.css" rel="stylesheet" />
+</head>
+<body>
+  <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+    <div class="container">
+      <a class="navbar-brand" href="#top">WoodCraft Admin</a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+        <span class="navbar-toggler-icon"></span>
+      </button>
+      <div class="collapse navbar-collapse" id="nav">
+        <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
+          <li class="nav-item"><a class="nav-link" href="#catalog-admin">Каталог</a></li>
+          <li class="nav-item"><a class="nav-link" href="#cutting">Раскрой</a></li>
+          <li class="nav-item"><a class="nav-link" href="#planner">Проекты</a></li>
+          <li class="nav-item"><a class="nav-link" href="index.html">Витрина</a></li>
+          <li class="nav-item">
+            <button class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#accountModal" id="accountBtn">Войти</button>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <div id="adminGate" class="admin-gate">
+    <div class="service-card p-5 text-center" style="max-width: 420px;">
+      <h2 class="section-title">Панель администратора</h2>
+      <p class="text-muted">Войдите под учётной записью admin для управления каталогом и раскроем.</p>
+      <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#accountModal">Войти</button>
+    </div>
+  </div>
+
+  <div id="adminContent" class="d-none">
+    <header class="hero-admin d-flex align-items-center text-white" id="top">
+      <div class="container py-4">
+        <div class="d-flex align-items-center gap-2 mb-2">
+          <span class="status-dot" id="backendDot"></span>
+          <strong id="backendStatus">Подключение...</strong>
+        </div>
+        <h1 class="h2 fw-bold mb-1">Производство и каталог</h1>
+        <p class="mb-0 opacity-75">Редактирование товаров, расчёт раскроя и развёртка деталей.</p>
+      </div>
+    </header>
+
+    <main class="container py-5">
+      <section class="mb-5" id="catalog-admin">
+        <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+          <div>
+            <div class="muted-title">Каталог</div>
+            <h2 class="section-title mb-1">Управление товарами</h2>
+          </div>
+          <div class="d-flex gap-2">
+            <button class="btn btn-outline-secondary btn-sm" id="btnSeedDemo">Загрузить демо-данные</button>
+            <button class="btn btn-primary btn-sm" id="btnAddProduct">Добавить товар</button>
+          </div>
+        </div>
+        <div class="service-card p-3 mb-4">
+          <div class="d-flex flex-wrap gap-2 mb-3" id="categoryPills"></div>
+          <div class="input-group mb-3" style="max-width: 360px">
+            <span class="input-group-text">Поиск</span>
+            <input class="form-control" id="searchInput" placeholder="название, SKU..." />
+          </div>
+          <div id="adminCatalogTable"></div>
+        </div>
+      </section>
+
+      <section class="mb-5" id="cutting">
+        <div class="row g-4">
+          <div class="col-lg-5">
+            <div class="service-card p-4 h-100">
+              <div class="muted-title">Производство</div>
+              <h2 class="section-title">Расчёт раскроя</h2>
+              <div class="row g-2">
+                <div class="col-6"><label class="form-label small">Ширина листа, мм</label><input class="form-control" id="sheetW" type="number" value="2800"></div>
+                <div class="col-6"><label class="form-label small">Высота листа, мм</label><input class="form-control" id="sheetH" type="number" value="2070"></div>
+              </div>
+              <div class="mt-3 border rounded p-3 bg-light-subtle">
+                <div class="row g-2">
+                  <div class="col-12"><input class="form-control form-control-sm" id="partName" placeholder="Название детали"></div>
+                  <div class="col-4"><input class="form-control form-control-sm" id="partWidth" type="number" min="1" placeholder="Ш, мм"></div>
+                  <div class="col-4"><input class="form-control form-control-sm" id="partHeight" type="number" min="1" placeholder="В, мм"></div>
+                  <div class="col-4"><input class="form-control form-control-sm" id="partQty" type="number" min="1" value="1"></div>
+                </div>
+                <div class="d-flex gap-2 mt-2">
+                  <button class="btn btn-sm btn-outline-primary" id="btnAddPart">Добавить</button>
+                  <button class="btn btn-sm btn-outline-secondary" id="btnResetParts">Демо-набор</button>
+                </div>
+              </div>
+              <div class="mt-3" id="partsList"></div>
+              <button class="btn btn-primary mt-3" id="btnOptimize">Рассчитать раскрой</button>
+              <div class="mt-3">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                  <span class="small fw-semibold">История раскроев</span>
+                  <button class="btn btn-sm btn-outline-secondary" id="btnRefreshJobs">Обновить</button>
+                </div>
+                <div id="cuttingJobsList"></div>
+              </div>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="service-card p-4 h-100">
+              <div class="d-flex justify-content-between align-items-center mb-3">
+                <h5 class="mb-0">Схема размещения</h5>
+                <span class="badge text-bg-success" id="cutStats">готово</span>
+              </div>
+              <div class="cut-sheet" id="cutView"><span class="text-muted">Схема появится после расчёта</span></div>
+              <div class="mt-3 small text-muted" id="cutExtraInfo"></div>
+              <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-sm btn-outline-dark" id="btnExportCutPdf">PDF карта раскроя</button>
+                <button class="btn btn-sm btn-outline-dark" id="btnExportBasis">Экспорт в Базис</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-5" id="planner">
+        <div class="row g-4">
+          <div class="col-xl-5">
+            <div class="service-card p-4">
+              <div class="muted-title">Проекты</div>
+              <h2 class="section-title">Планировщик (производство)</h2>
+              <p class="text-muted small">Соберите комнату и отправьте детали в раскрой.</p>
+              <div class="row g-2 mb-3">
+                <div class="col-4"><input class="form-control form-control-sm" id="roomWidth" type="number" value="6000"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="roomLength" type="number" value="5000"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="roomHeight" type="number" value="2800"></div>
+              </div>
+              <button class="btn btn-sm btn-outline-primary mb-2" id="btnApplyRoomSize">Размеры комнаты</button>
+              <div class="row g-2 mb-2">
+                <div class="col-6"><select class="form-select form-select-sm" id="objType"><option value="wardrobe">Шкаф</option><option value="cabinet">Тумба</option><option value="shelf">Стеллаж</option><option value="table">Стол</option><option value="sofa">Диван</option></select></div>
+                <div class="col-6"><input class="form-control form-control-sm" id="objName" value="Объект"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="objW" type="number" value="1200"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="objD" type="number" value="600"></div>
+                <div class="col-4"><input class="form-control form-control-sm" id="objH" type="number" value="2100"></div>
+                <div class="col-12"><select class="form-select form-select-sm" id="objTexture"><option value="wood_dark_oak">Темный дуб</option><option value="wood_oak">Светлый дуб</option><option value="board_black">Черное ДСП</option><option value="board_white">Белое ДСП</option></select></div>
+              </div>
+              <div class="d-flex flex-wrap gap-2">
+                <button class="btn btn-sm btn-success" id="btnAddObject3d">Добавить</button>
+                <button class="btn btn-sm btn-outline-secondary" id="btnAddFurniture">Демо</button>
+                <button class="btn btn-sm btn-primary" id="btnCreateRoom">Сохранить проект</button>
+                <button class="btn btn-sm btn-warning" id="btnCutFrom3d">Раскрой из 3D</button>
+                <button class="btn btn-sm btn-outline-dark" id="btnExport3d">GLTF</button>
+              </div>
+              <div class="small text-muted mt-2" id="plannerHint">Проект не создан.</div>
+              <div class="alert alert-light border mt-2 small mb-0" id="plannerCutResult">Раскрой из 3D ещё не запускался.</div>
+            </div>
+          </div>
+          <div class="col-xl-7">
+            <div class="service-card p-4">
+              <ul class="nav nav-pills mb-3">
+                <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#room3dPane" type="button">3D</button></li>
+                <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#room2dPane" type="button">План</button></li>
+                <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#bomPane" type="button">Детали</button></li>
+              </ul>
+              <div class="tab-content">
+                <div class="tab-pane fade show active" id="room3dPane"><div class="viewer-3d" id="room3d"></div></div>
+                <div class="tab-pane fade" id="room2dPane"><div class="room-plan" id="roomPlan"></div></div>
+                <div class="tab-pane fade" id="bomPane"><div id="bomList" class="small"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="mb-5" id="assets">
+        <div class="service-card p-4">
+          <h2 class="section-title h5">3D и материалы</h2>
+          <button class="btn btn-outline-primary btn-sm" id="btnAssetLink">Подготовить ссылку на загрузку</button>
+          <div class="alert alert-light border mt-3 small mb-0" id="assetResult">Ссылка не запрошена.</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="modal fade" id="accountModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header bg-dark text-white">
+          <h5 class="modal-title">Вход администратора</h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body p-4">
+          <input class="form-control mb-3" id="loginUser" value="admin" autocomplete="username" />
+          <input type="password" class="form-control mb-3" id="loginPass" placeholder="Пароль администратора" autocomplete="current-password" />
+          <button class="btn btn-primary w-100" id="btnAdminLogin">Войти</button>
+          <div class="small text-muted mt-2">Учётная запись admin с правами каталога и раскроя.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="productEditorModal" tabindex="-1">
+    <div class="modal-dialog">
+      <div class="modal-content">
+        <div class="modal-header"><h5 class="modal-title" id="productEditorTitle">Товар</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+        <div class="modal-body">
+          <input type="hidden" id="editProductId" />
+          <div class="mb-2"><label class="form-label small">Название</label><input class="form-control" id="editProductName" /></div>
+          <div class="mb-2"><label class="form-label small">SKU</label><input class="form-control" id="editProductSku" /></div>
+          <div class="mb-2"><label class="form-label small">Бренд</label><input class="form-control" id="editProductBrand" /></div>
+          <div class="row g-2 mb-2">
+            <div class="col-6"><label class="form-label small">Цена</label><input class="form-control" id="editProductPrice" type="number" /></div>
+            <div class="col-6"><label class="form-label small">Склад</label><input class="form-control" id="editProductStock" type="number" /></div>
+          </div>
+          <div class="mb-2"><label class="form-label small">Категория</label><select class="form-select" id="editProductCategory"></select></div>
+          <div class="mb-2"><label class="form-label small">Описание</label><textarea class="form-control" id="editProductDesc" rows="2"></textarea></div>
+        </div>
+        <div class="modal-footer"><button class="btn btn-primary" id="btnSaveProduct">Сохранить</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+  <script>window.APP_MODE = "admin";</script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/exporters/GLTFExporter.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
+  <script src="app.js?v=20260607-admin-split"></script>
+</body>
+</html>

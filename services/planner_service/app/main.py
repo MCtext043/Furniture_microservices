@@ -2,7 +2,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from common.jwt_auth import ensure_planner_writer
+from common.jwt_auth import ensure_planner_user
 from common.messaging import publish_event
 
 from .db import get_session
@@ -22,7 +22,7 @@ def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/projects", response_model=ProjectOut, status_code=201, dependencies=[Depends(ensure_planner_writer)])
+@app.post("/projects", response_model=ProjectOut, status_code=201, dependencies=[Depends(ensure_planner_user)])
 def create_project(payload: ProjectCreate, session: Session = Depends(get_session)) -> RoomProject:
     project = RoomProject(**payload.model_dump())
     session.add(project)
@@ -41,7 +41,7 @@ def list_projects(session: Session = Depends(get_session)) -> list[RoomProject]:
     "/projects/{project_id}/furniture",
     response_model=FurnitureOut,
     status_code=201,
-    dependencies=[Depends(ensure_planner_writer)],
+    dependencies=[Depends(ensure_planner_user)],
 )
 def add_furniture(
     project_id: int,

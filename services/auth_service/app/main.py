@@ -105,8 +105,7 @@ def healthcheck() -> dict[str, str]:
 def register_user(payload: RegisterRequest, session: Session = Depends(get_session)) -> User:
     if session.scalar(select(User).where(User.username == payload.username)):
         raise HTTPException(status_code=409, detail="Username already taken")
-    demo_roles = ["user", "catalog:write", "planner:write", "cutting:run", "assets:write"]
-    user = User(username=payload.username, password_hash=_hash_password(payload.password), roles=demo_roles)
+    user = User(username=payload.username, password_hash=_hash_password(payload.password), roles=["user"])
     session.add(user)
     session.commit()
     session.refresh(user)
