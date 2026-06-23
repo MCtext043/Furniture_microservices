@@ -64,9 +64,23 @@ const texturePresets = {
   metal_graphite: { title: "Графитовый металл", material: "metal", color: "#495057" },
 };
 
+function sameOriginApiBase() {
+  const { protocol, hostname, port } = window.location;
+  const gatewayPorts = new Set(["8080", "8001", "8002", "8000"]);
+  if (gatewayPorts.has(port)) {
+    return `${protocol}//${hostname}${port ? `:${port}` : ""}`;
+  }
+  return null;
+}
+
 function apiBase() {
+  const onPage = sameOriginApiBase();
+  if (onPage) return onPage.replace(/\/$/, "");
   const input = document.getElementById("apiBase");
-  return (input?.value || localStorage.getItem(LS_API) || defaultApiBase()).replace(/\/$/, "");
+  if (input?.value?.trim()) return input.value.trim().replace(/\/$/, "");
+  const stored = localStorage.getItem(LS_API);
+  if (stored?.trim()) return stored.trim().replace(/\/$/, "");
+  return defaultApiBase().replace(/\/$/, "");
 }
 
 function defaultApiBase() {
@@ -147,6 +161,14 @@ function toast(message, ok = true) {
   el.innerHTML = `<div class="d-flex"><div class="toast-body">${escapeHtml(message)}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
   host.appendChild(el);
   setTimeout(() => el.remove(), 4500);
+}
+
+function formatApiError(error) {
+  const raw = String(error?.message || error || "");
+  if (raw.includes("Invalid credentials")) {
+    return "Неверный логин или пароль. На сервере используйте admin и пароль из deploy/local.env (AUTH_BOOTSTRAP_PASSWORD).";
+  }
+  return raw.replace(/^"|"$/g, "");
 }
 
 function escapeHtml(value) {
@@ -262,11 +284,24 @@ async function api(method, path, body, withAuth = false) {
   if (body !== undefined) headers["Content-Type"] = "application/json";
   if (withAuth && token()) headers.Authorization = `Bearer ${token()}`;
 
-  const response = await fetch(`${apiBase()}${path}`, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let response;
+  try {
+    response = await fetch(`${apiBase()}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Таймаут API (${apiBase()}). Проверьте, что Docker запущен.`);
+    }
+    throw new Error(`Нет связи с API ${apiBase()}: ${error.message || error}`);
+  } finally {
+    clearTimeout(timeout);
+  }
   const text = await response.text();
   let payload = null;
   try {
@@ -335,7 +370,7 @@ async function loginCustomer() {
     toast(`Добро пожаловать, ${username}`);
     if (APP_MODE === "admin") bootAdminPanel();
   } catch (error) {
-    toast(`Не удалось войти: ${error.message}`, false);
+    toast(`Не удалось войти: ${formatApiError(error)}`, false);
   }
 }
 
@@ -2006,7 +2041,10 @@ async function boot() {
   } catch (error) {
     setBackendStatus(false, "Backend недоступен");
     const grid = document.getElementById("productGrid");
-    if (grid) grid.innerHTML = `<div class="col-12"><div class="alert alert-warning">Не удалось подключиться к backend: ${escapeHtml(error.message)}</div></div>`;
+    const hint = formatApiError(error);
+    if (grid) {
+      grid.innerHTML = `<div class="col-12"><div class="alert alert-warning">Не удалось подключиться к backend (${escapeHtml(apiBase())}): ${escapeHtml(hint)}</div></div>`;
+    }
   }
 }
 

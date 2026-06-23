@@ -67,6 +67,10 @@ else
   echo "[5/6] Starting all services..."
   ./deploy/free-gateway-port.sh
   "${COMPOSE[@]}" up -d --build --force-recreate --remove-orphans
+
+  echo "Syncing admin password from .env..."
+  chmod +x deploy/sync-admin-password.sh
+  ./deploy/sync-admin-password.sh
 fi
 
 echo "[6/6] Status:"

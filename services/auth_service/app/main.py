@@ -67,15 +67,20 @@ def bootstrap_admin(session: Session) -> None:
     raw_password = os.getenv("AUTH_BOOTSTRAP_PASSWORD", "").strip()
     if not username or not raw_password:
         return
-    existing = session.scalar(select(User).where(User.username == username))
-    if existing:
-        return
     raw_roles_csv = os.getenv(
         "AUTH_BOOTSTRAP_ROLES",
         "admin,catalog:write,planner:write,cutting:run,assets:write",
     )
     roles_list = [r.strip() for r in raw_roles_csv.split(",") if r.strip()]
     password_hash = _hash_password(raw_password)
+
+    existing = session.scalar(select(User).where(User.username == username))
+    if existing:
+        existing.password_hash = password_hash
+        existing.roles = roles_list
+        session.commit()
+        return
+
     session.add(User(username=username, password_hash=password_hash, roles=roles_list))
     session.commit()
 

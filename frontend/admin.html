@@ -213,7 +213,7 @@
           <input class="form-control mb-3" id="loginUser" value="admin" autocomplete="username" />
           <input type="password" class="form-control mb-3" id="loginPass" placeholder="Пароль администратора" autocomplete="current-password" />
           <button class="btn btn-primary w-100" id="btnAdminLogin">Войти</button>
-          <div class="small text-muted mt-2">Учётная запись admin с правами каталога и раскроя.</div>
+          <div class="small text-muted mt-2">Логин: <strong>admin</strong>. Пароль — из <code>deploy/local.env</code> (<code>AUTH_BOOTSTRAP_PASSWORD</code>, сейчас обычно <strong>IVAN123</strong>).</div>
         </div>
       </div>
     </div>
@@ -247,6 +247,6 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/exporters/GLTFExporter.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script src="app.js?v=20260607-admin-split"></script>
+  <script src="app.js?v=20260616-escape-fix"></script>
 </body>
 </html>
