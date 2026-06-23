@@ -82,3 +82,38 @@ class ProductFiltersOut(BaseModel):
     min_price: float
     max_price: float
     brands: list[str]
+
+
+class DeliverySettingsOut(BaseModel):
+    free_delivery_threshold: float
+    delivery_price_per_km: float
+    warehouse_address: str
+    warehouse_lat: float | None = None
+    warehouse_lon: float | None = None
+
+
+class DeliverySettingsPublicOut(BaseModel):
+    free_delivery_threshold: float
+    delivery_price_per_km: float
+
+
+class DeliverySettingsUpdate(BaseModel):
+    free_delivery_threshold: float = Field(gt=0)
+    delivery_price_per_km: float = Field(ge=0)
+    warehouse_address: str = Field(min_length=5, max_length=500)
+
+
+class DeliveryQuoteRequest(BaseModel):
+    address: str = Field(min_length=5, max_length=500)
+    subtotal: float = Field(ge=0)
+
+
+class DeliveryQuoteOut(BaseModel):
+    subtotal: float
+    delivery_fee: float
+    distance_km: float
+    free_delivery: bool
+    free_delivery_threshold: float
+    delivery_price_per_km: float
+    amount_until_free_delivery: float
+    grand_total: float

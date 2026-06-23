@@ -10,6 +10,9 @@ const state = {
   search: "",
   cart: [],
   roles: [],
+  deliverySettings: null,
+  deliveryQuote: null,
+  deliveryAddress: "",
   projectId: null,
   three: null,
   cuttingParts: [],
@@ -553,6 +556,7 @@ async function addToCart(id) {
   if (!product) return;
   const existing = state.cart.find((item) => item.id === id);
   existing ? existing.qty++ : state.cart.push({ ...product, qty: 1 });
+  state.deliveryQuote = null;
   renderCart();
   try {
     await api("POST", `/catalog/users/${cartUserId()}/cart/items`, { product_id: id, quantity: 1 }, true);
@@ -577,11 +581,87 @@ async function addToWishlist(id) {
   }
 }
 
+function cartSubtotal() {
+  return state.cart.reduce((sum, item) => sum + Number(item.price) * item.qty, 0);
+}
+
+async function loadDeliverySettings() {
+  if (APP_MODE !== "user") return;
+  try {
+    state.deliverySettings = await api("GET", "/catalog/delivery/settings");
+  } catch {
+    state.deliverySettings = { free_delivery_threshold: 3000, delivery_price_per_km: 45 };
+  }
+}
+
+async function quoteDelivery() {
+  const addressEl = document.getElementById("deliveryAddress");
+  const address = (addressEl?.value || state.deliveryAddress || "").trim();
+  if (!state.cart.length) {
+    toast("Корзина пуста", false);
+    return;
+  }
+  if (address.length < 5) {
+    toast("Укажите адрес доставки (город, улица, дом)", false);
+    return;
+  }
+  state.deliveryAddress = address;
+  const subtotal = cartSubtotal();
+  try {
+    state.deliveryQuote = await api("POST", "/catalog/delivery/quote", { address, subtotal });
+    renderCart();
+    toast("Стоимость доставки рассчитана");
+  } catch (error) {
+    state.deliveryQuote = null;
+    renderCart();
+    toast(`Не удалось рассчитать доставку: ${error.message}`, false);
+  }
+}
+
+async function loadDeliverySettingsAdmin() {
+  if (APP_MODE !== "admin" || !canManageCatalog()) return;
+  try {
+    const data = await api("GET", "/catalog/settings/delivery", undefined, true);
+    document.getElementById("freeDeliveryThreshold").value = data.free_delivery_threshold;
+    document.getElementById("deliveryPricePerKm").value = data.delivery_price_per_km;
+    document.getElementById("warehouseAddress").value = data.warehouse_address || "";
+    const hint = document.getElementById("warehouseCoordsHint");
+    if (hint) {
+      hint.textContent = data.warehouse_lat
+        ? `Координаты склада: ${data.warehouse_lat.toFixed(5)}, ${data.warehouse_lon.toFixed(5)}`
+        : "Координаты склада будут определены при сохранении адреса.";
+    }
+  } catch (error) {
+    toast(`Не удалось загрузить настройки доставки: ${error.message}`, false);
+  }
+}
+
+async function saveDeliverySettingsAdmin() {
+  const payload = {
+    free_delivery_threshold: Number(document.getElementById("freeDeliveryThreshold").value),
+    delivery_price_per_km: Number(document.getElementById("deliveryPricePerKm").value),
+    warehouse_address: document.getElementById("warehouseAddress").value.trim(),
+  };
+  if (payload.free_delivery_threshold <= 0 || payload.warehouse_address.length < 5) {
+    toast("Проверьте порог бесплатной доставки и адрес склада", false);
+    return;
+  }
+  try {
+    await api("PUT", "/catalog/settings/delivery", payload, true);
+    toast("Настройки доставки сохранены");
+    await loadDeliverySettingsAdmin();
+  } catch (error) {
+    toast(`Ошибка сохранения: ${error.message}`, false);
+  }
+}
+
 function renderCart() {
   document.getElementById("cartCount").textContent = state.cart.reduce((sum, item) => sum + item.qty, 0);
   const host = document.getElementById("cartItems");
+  if (!host) return;
   if (!state.cart.length) {
     host.innerHTML = `<div class="text-muted">Корзина пуста. Добавьте мебель из каталога.</div>`;
+    state.deliveryQuote = null;
   } else {
     host.innerHTML = state.cart
       .map((item) => `
@@ -597,11 +677,48 @@ function renderCart() {
   host.querySelectorAll("[data-remove]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.cart = state.cart.filter((item) => item.id !== Number(btn.dataset.remove));
+      state.deliveryQuote = null;
       renderCart();
     });
   });
-  const total = state.cart.reduce((sum, item) => sum + Number(item.price) * item.qty, 0);
-  document.getElementById("cartTotal").textContent = money(total);
+
+  const subtotal = cartSubtotal();
+  const subtotalEl = document.getElementById("cartSubtotal");
+  if (subtotalEl) subtotalEl.textContent = money(subtotal);
+
+  const threshold = state.deliverySettings?.free_delivery_threshold ?? 3000;
+  const rate = state.deliverySettings?.delivery_price_per_km ?? 45;
+  const hintEl = document.getElementById("deliveryHint");
+  if (hintEl) {
+    hintEl.textContent = subtotal >= threshold
+      ? `Доставка бесплатна — заказ от ${money(threshold)}.`
+      : `Доставка ${money(rate)}/км. Бесплатно от ${money(threshold)} (ещё ${money(Math.max(threshold - subtotal, 0))}).`;
+  }
+
+  const deliveryLine = document.getElementById("cartDeliveryLine");
+  const deliveryExtra = document.getElementById("cartDeliveryExtra");
+  const totalEl = document.getElementById("cartTotal");
+  const quote = state.deliveryQuote;
+
+  if (deliveryLine) {
+    if (!quote) {
+      deliveryLine.textContent = "—";
+    } else if (quote.free_delivery) {
+      deliveryLine.textContent = "Бесплатно";
+    } else {
+      deliveryLine.textContent = money(quote.delivery_fee);
+    }
+  }
+  if (deliveryExtra) {
+    if (!quote) {
+      deliveryExtra.textContent = "Укажите адрес и нажмите «Рассчитать доставку».";
+    } else {
+      deliveryExtra.textContent = `≈ ${quote.distance_km} км от склада · тариф ${money(quote.delivery_price_per_km)}/км`;
+    }
+  }
+  if (totalEl) {
+    totalEl.textContent = money(quote ? quote.grand_total : subtotal);
+  }
 }
 
 function renderParts() {
@@ -1493,6 +1610,7 @@ async function bootAdminPanel() {
   if (!allowed) return;
   renderAdminCatalogTable();
   await renderCuttingJobs();
+  await loadDeliverySettingsAdmin();
 }
 
 async function cutFrom3D() {
@@ -1852,6 +1970,8 @@ async function boot() {
   bindClick("btnAdminLogin", loginCustomer);
   bindClick("btnSaveProduct", saveProductEditor);
   bindClick("btnAddProduct", openNewProductEditor);
+  bindClick("btnSaveDeliverySettings", saveDeliverySettingsAdmin);
+  bindClick("btnQuoteDelivery", quoteDelivery);
   bindClick("btnSeedDemo", async () => { await seedDemoData(); await loadCatalog(); renderAdminCatalogTable(); toast("Демо-данные загружены"); });
   bindClick("btnRefreshJobs", renderCuttingJobs);
 
@@ -1879,6 +1999,7 @@ async function boot() {
       setBackendStatus(true, "Панель администратора подключена");
     } else {
       if (token()) await refreshAuth();
+      await loadDeliverySettings();
       setBackendStatus(true, "Магазин подключен");
     }
     await loadCatalog();

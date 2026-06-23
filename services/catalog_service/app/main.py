@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 from common.jwt_auth import ensure_catalog_writer, ensure_shop_user
 from common.messaging import publish_event
 
-from .db import get_session
-from .models import CartItem, Category, Product, ProductReview, WishlistItem
+from .db import SessionLocal, get_session
+from .delivery import GeoPoint, calculate_delivery_quote, estimate_road_distance_km, geocode_address
+from .models import CartItem, Category, Product, ProductReview, ShopSettings, WishlistItem
 from .schemas import (
     CartItemCreate,
     CartItemOut,
@@ -14,6 +15,11 @@ from .schemas import (
     CategoryCreate,
     CategoryOut,
     CategoryUpdate,
+    DeliveryQuoteOut,
+    DeliveryQuoteRequest,
+    DeliverySettingsOut,
+    DeliverySettingsPublicOut,
+    DeliverySettingsUpdate,
     ProductCreate,
     ProductFiltersOut,
     ProductOut,
@@ -35,8 +41,41 @@ app = FastAPI(
         {"name": "reviews", "description": "Отзывы к товарам"},
         {"name": "cart", "description": "Корзина пользователя"},
         {"name": "wishlist", "description": "Избранные товары пользователя"},
+        {"name": "delivery", "description": "Доставка и настройки магазина"},
     ],
 )
+
+
+def _get_or_create_shop_settings(session: Session) -> ShopSettings:
+    row = session.scalar(select(ShopSettings).order_by(ShopSettings.id).limit(1))
+    if row is None:
+        row = ShopSettings(
+            free_delivery_threshold=3000,
+            delivery_price_per_km=45,
+            warehouse_address="Москва, ул. Складская, 1",
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+    return row
+
+
+async def _warehouse_point(settings: ShopSettings) -> GeoPoint:
+    if settings.warehouse_lat is not None and settings.warehouse_lon is not None:
+        return GeoPoint(lat=float(settings.warehouse_lat), lon=float(settings.warehouse_lon))
+    if not settings.warehouse_address.strip():
+        raise HTTPException(status_code=503, detail="Адрес склада не настроен администратором")
+    point = await geocode_address(settings.warehouse_address)
+    return point
+
+
+@app.on_event("startup")
+def ensure_shop_settings_row() -> None:
+    session = SessionLocal()
+    try:
+        _get_or_create_shop_settings(session)
+    finally:
+        session.close()
 
 
 @app.get("/health", tags=["system"])
@@ -326,3 +365,92 @@ def delete_wishlist_item(user_id: str, product_id: int, session: Session = Depen
         raise HTTPException(status_code=404, detail="Wishlist item not found")
     session.delete(item)
     session.commit()
+
+
+@app.get("/delivery/settings", response_model=DeliverySettingsPublicOut, tags=["delivery"])
+def get_delivery_settings_public(session: Session = Depends(get_session)) -> DeliverySettingsPublicOut:
+    settings = _get_or_create_shop_settings(session)
+    return DeliverySettingsPublicOut(
+        free_delivery_threshold=float(settings.free_delivery_threshold),
+        delivery_price_per_km=float(settings.delivery_price_per_km),
+    )
+
+
+@app.get(
+    "/settings/delivery",
+    response_model=DeliverySettingsOut,
+    tags=["delivery"],
+    dependencies=[Depends(ensure_catalog_writer)],
+)
+def get_delivery_settings_admin(session: Session = Depends(get_session)) -> DeliverySettingsOut:
+    settings = _get_or_create_shop_settings(session)
+    return DeliverySettingsOut(
+        free_delivery_threshold=float(settings.free_delivery_threshold),
+        delivery_price_per_km=float(settings.delivery_price_per_km),
+        warehouse_address=settings.warehouse_address,
+        warehouse_lat=settings.warehouse_lat,
+        warehouse_lon=settings.warehouse_lon,
+    )
+
+
+@app.put(
+    "/settings/delivery",
+    response_model=DeliverySettingsOut,
+    tags=["delivery"],
+    dependencies=[Depends(ensure_catalog_writer)],
+)
+async def update_delivery_settings(
+    payload: DeliverySettingsUpdate,
+    session: Session = Depends(get_session),
+) -> DeliverySettingsOut:
+    settings = _get_or_create_shop_settings(session)
+    settings.free_delivery_threshold = payload.free_delivery_threshold
+    settings.delivery_price_per_km = payload.delivery_price_per_km
+    settings.warehouse_address = payload.warehouse_address.strip()
+    try:
+        warehouse = await geocode_address(settings.warehouse_address)
+        settings.warehouse_lat = warehouse.lat
+        settings.warehouse_lon = warehouse.lon
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    session.commit()
+    session.refresh(settings)
+    return DeliverySettingsOut(
+        free_delivery_threshold=float(settings.free_delivery_threshold),
+        delivery_price_per_km=float(settings.delivery_price_per_km),
+        warehouse_address=settings.warehouse_address,
+        warehouse_lat=settings.warehouse_lat,
+        warehouse_lon=settings.warehouse_lon,
+    )
+
+
+@app.post("/delivery/quote", response_model=DeliveryQuoteOut, tags=["delivery"])
+async def quote_delivery(payload: DeliveryQuoteRequest, session: Session = Depends(get_session)) -> DeliveryQuoteOut:
+    settings = _get_or_create_shop_settings(session)
+    try:
+        warehouse = await _warehouse_point(settings)
+        destination = await geocode_address(payload.address)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Сервис геокодирования временно недоступен") from exc
+
+    distance_km = estimate_road_distance_km(warehouse, destination)
+    quote = calculate_delivery_quote(
+        subtotal=payload.subtotal,
+        distance_km=distance_km,
+        free_delivery_threshold=float(settings.free_delivery_threshold),
+        delivery_price_per_km=float(settings.delivery_price_per_km),
+    )
+    return DeliveryQuoteOut(
+        subtotal=quote.subtotal,
+        delivery_fee=quote.delivery_fee,
+        distance_km=quote.distance_km,
+        free_delivery=quote.free_delivery,
+        free_delivery_threshold=quote.free_delivery_threshold,
+        delivery_price_per_km=quote.delivery_price_per_km,
+        amount_until_free_delivery=quote.amount_until_free_delivery,
+        grand_total=quote.grand_total,
+    )

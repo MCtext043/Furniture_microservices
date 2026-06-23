@@ -176,10 +176,18 @@
       <h5 class="offcanvas-title">Корзина</h5>
       <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
     </div>
-    <div class="offcanvas-body">
-      <div id="cartItems" class="vstack gap-3"></div>
-      <hr />
-      <div class="d-flex justify-content-between h5"><span>Итого</span><span id="cartTotal">0 ₽</span></div>
+    <div class="offcanvas-body d-flex flex-column">
+      <div id="cartItems" class="vstack gap-3 flex-grow-1"></div>
+      <div class="border-top pt-3 mt-3">
+        <label class="form-label small fw-semibold" for="deliveryAddress">Адрес доставки</label>
+        <textarea class="form-control form-control-sm mb-2" id="deliveryAddress" rows="2" placeholder="Город, улица, дом"></textarea>
+        <button class="btn btn-sm btn-outline-primary w-100 mb-2" id="btnQuoteDelivery">Рассчитать доставку</button>
+        <div class="small text-muted mb-3" id="deliveryHint">Загрузка условий доставки...</div>
+        <div class="d-flex justify-content-between small mb-1"><span>Товары</span><span id="cartSubtotal">0 ₽</span></div>
+        <div class="d-flex justify-content-between small mb-1"><span>Доставка</span><span id="cartDeliveryLine">—</span></div>
+        <div class="small text-muted mb-2" id="cartDeliveryExtra"></div>
+        <div class="d-flex justify-content-between h5 mb-0"><span>Итого</span><span id="cartTotal">0 ₽</span></div>
+      </div>
     </div>
   </div>
 

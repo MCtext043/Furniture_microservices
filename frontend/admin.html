@@ -49,6 +49,29 @@
     </header>
 
     <main class="container py-5">
+      <section class="mb-5" id="delivery-admin">
+        <div class="service-card p-4">
+          <div class="muted-title">Доставка</div>
+          <h2 class="section-title h4 mb-3">Настройки доставки</h2>
+          <div class="row g-3">
+            <div class="col-md-4">
+              <label class="form-label small">Бесплатная доставка от, ₽</label>
+              <input class="form-control" id="freeDeliveryThreshold" type="number" min="1" step="100" value="3000" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Тариф, ₽/км</label>
+              <input class="form-control" id="deliveryPricePerKm" type="number" min="0" step="1" value="45" />
+            </div>
+            <div class="col-md-12">
+              <label class="form-label small">Адрес склада (откуда считаем расстояние)</label>
+              <input class="form-control" id="warehouseAddress" placeholder="Москва, ул. Складская, 1" />
+              <div class="small text-muted mt-1" id="warehouseCoordsHint"></div>
+            </div>
+          </div>
+          <button class="btn btn-primary mt-3" id="btnSaveDeliverySettings">Сохранить настройки доставки</button>
+        </div>
+      </section>
+
       <section class="mb-5" id="catalog-admin">
         <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
           <div>

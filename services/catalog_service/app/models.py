@@ -55,3 +55,16 @@ class WishlistItem(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[str] = mapped_column(String(80), index=True)
     product_id: Mapped[int] = mapped_column(ForeignKey("catalog_products.id"), index=True)
+
+
+class ShopSettings(Base):
+    """Singleton shop configuration (first row is used)."""
+
+    __tablename__ = "catalog_shop_settings"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    free_delivery_threshold: Mapped[float] = mapped_column(Numeric(10, 2), default=3000)
+    delivery_price_per_km: Mapped[float] = mapped_column(Numeric(10, 2), default=45)
+    warehouse_address: Mapped[str] = mapped_column(String(500), default="")
+    warehouse_lat: Mapped[float | None] = mapped_column(nullable=True)
+    warehouse_lon: Mapped[float | None] = mapped_column(nullable=True)
