@@ -1129,13 +1129,31 @@ function initRoom3D() {
   animate();
 
   window.addEventListener("resize", () => {
-    if (!state.three) return;
-    const w = host.clientWidth || 640;
-    camera.aspect = w / height;
-    camera.updateProjectionMatrix();
-    renderer.setSize(w, height);
-    updateOrbitCamera();
+    refreshRoom3DLayout();
   });
+}
+
+function refreshRoom3DLayout() {
+  if (!state.three) return;
+  const { host, camera, renderer } = state.three;
+  const height = 360;
+  const width = host.clientWidth || 640;
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  renderer.setSize(width, height);
+  updateOrbitCamera();
+}
+
+function ensureRoom3D() {
+  const host = document.getElementById("room3d");
+  if (!host || !window.THREE) return;
+  const init = () => {
+    if (!state.three) initRoom3D();
+    else refreshRoom3DLayout();
+    renderRoomTopView();
+    renderRoom3D();
+  };
+  requestAnimationFrame(() => requestAnimationFrame(init));
 }
 
 function updateOrbitCamera() {
@@ -1646,6 +1664,7 @@ async function bootAdminPanel() {
   renderAdminCatalogTable();
   await renderCuttingJobs();
   await loadDeliverySettingsAdmin();
+  ensureRoom3D();
 }
 
 async function cutFrom3D() {
@@ -1950,7 +1969,13 @@ async function prepareAssetLink() {
       true
     );
     document.getElementById("assetResult").innerHTML = `
-      <strong>Ссылка подготовлена.</strong> В реальном кабинете дизайнер загрузил бы 3D-модель в хранилище.<br>
+      <strong>Ссылка для загрузки подготовлена</strong> (действует ${data.expires_seconds} сек).<br>
+      <span class="text-muted">Готовой модели с этим именем нет — это пустой слот в MinIO. Получить GLB:</span>
+      <ul class="mb-2 mt-2">
+        <li>кнопка <strong>GLTF</strong> в планировщике — экспорт текущей сцены;</li>
+        <li>любой файл <code>.glb</code> / <code>.gltf</code> — загрузить по ссылке ниже (curl, Postman или <a href="http://127.0.0.1:9001" target="_blank" rel="noopener">MinIO Console</a>).</li>
+      </ul>
+      <div class="small mb-2"><strong>upload_url:</strong> <a href="${data.upload_url}" target="_blank" rel="noopener">открыть presigned PUT</a></div>
       <span class="small text-muted">Bucket: ${escapeHtml(data.bucket)}, key: ${escapeHtml(data.object_key)}</span>`;
     toast("Хранилище готово принять 3D-модель");
   } catch (error) {
@@ -2020,9 +2045,9 @@ async function boot() {
   }
   createDemoObjects();
   renderCart();
-  renderRoomTopView();
+  if (document.getElementById("roomPlan")) renderRoomTopView();
   renderBom();
-  initRoom3D();
+  if (APP_MODE !== "admin") initRoom3D();
   updateAccountButton();
 
   try {
@@ -2030,6 +2055,7 @@ async function boot() {
     if (APP_MODE === "admin") {
       await autoLogin();
       await bootAdminPanel();
+      ensureRoom3D();
       if (canManageCatalog()) await seedDemoData();
       setBackendStatus(true, "Панель администратора подключена");
     } else {
