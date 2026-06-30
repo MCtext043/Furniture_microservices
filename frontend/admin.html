@@ -17,6 +17,7 @@
       <div class="collapse navbar-collapse" id="nav">
         <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
           <li class="nav-item"><a class="nav-link" href="#catalog-admin">Каталог</a></li>
+          <li class="nav-item"><a class="nav-link" href="#crm">CRM</a></li>
           <li class="nav-item"><a class="nav-link" href="#cutting">Раскрой</a></li>
           <li class="nav-item"><a class="nav-link" href="#planner">Проекты</a></li>
           <li class="nav-item"><a class="nav-link" href="index.html">Витрина</a></li>
@@ -93,6 +94,31 @@
         </div>
       </section>
 
+      <section class="mb-5" id="crm">
+        <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
+          <div>
+            <div class="muted-title">CRM</div>
+            <h2 class="section-title mb-1">Заказы на производство</h2>
+            <p class="text-muted small mb-0">Сравнение потребности заказа с остатками на складе — что докупить.</p>
+          </div>
+          <button class="btn btn-outline-secondary btn-sm" id="btnSeedCrm">Загрузить демо CRM</button>
+        </div>
+        <div class="row g-4">
+          <div class="col-lg-5">
+            <div class="service-card p-4 h-100">
+              <h3 class="h6 mb-3">Склад материалов</h3>
+              <div id="crmWarehouseTable" class="small text-muted">Загрузка...</div>
+            </div>
+          </div>
+          <div class="col-lg-7">
+            <div class="service-card p-4">
+              <h3 class="h6 mb-3">Заказы</h3>
+              <div id="crmOrdersPanel" class="small text-muted">Загрузка...</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section class="mb-5" id="cutting">
         <div class="row g-4">
           <div class="col-lg-5">
@@ -136,7 +162,6 @@
               <div class="mt-3 small text-muted" id="cutExtraInfo"></div>
               <div class="d-flex gap-2 mt-3">
                 <button class="btn btn-sm btn-outline-dark" id="btnExportCutPdf">PDF карта раскроя</button>
-                <button class="btn btn-sm btn-outline-dark" id="btnExportBasis">Экспорт в Базис</button>
               </div>
             </div>
           </div>
@@ -162,14 +187,16 @@
                 <div class="col-4"><input class="form-control form-control-sm" id="objW" type="number" value="1200"></div>
                 <div class="col-4"><input class="form-control form-control-sm" id="objD" type="number" value="600"></div>
                 <div class="col-4"><input class="form-control form-control-sm" id="objH" type="number" value="2100"></div>
-                <div class="col-12"><select class="form-select form-select-sm" id="objTexture"><option value="wood_dark_oak">Темный дуб</option><option value="wood_oak">Светлый дуб</option><option value="board_black">Черное ДСП</option><option value="board_white">Белое ДСП</option></select></div>
+                <div class="col-12"><select class="form-select form-select-sm" id="objTexture"><option value="wood_dark_oak">Темный дуб</option><option value="wood_oak">Светлый дуб</option><option value="mdf_matte">МДФ матовый</option><option value="board_white">Белое ДСП</option><option value="board_black">Черное ДСП</option><option value="laminate_grey">Ламинат</option><option value="countertop">Столешница</option></select></div>
               </div>
               <div class="d-flex flex-wrap gap-2">
                 <button class="btn btn-sm btn-success" id="btnAddObject3d">Добавить</button>
                 <button class="btn btn-sm btn-outline-secondary" id="btnAddFurniture">Демо</button>
                 <button class="btn btn-sm btn-primary" id="btnCreateRoom">Сохранить проект</button>
                 <button class="btn btn-sm btn-warning" id="btnCutFrom3d">Раскрой из 3D</button>
+                <button class="btn btn-sm btn-outline-dark" id="btnExportBasis">Базис</button>
                 <button class="btn btn-sm btn-outline-dark" id="btnExport3d">GLTF</button>
+                <button class="btn btn-sm btn-outline-dark" id="btnExportDbs">DBS</button>
               </div>
               <div class="small text-muted mt-2" id="plannerHint">Проект не создан.</div>
               <div class="alert alert-light border mt-2 small mb-0" id="plannerCutResult">Раскрой из 3D ещё не запускался.</div>
@@ -232,7 +259,16 @@
             <div class="col-6"><label class="form-label small">Цена</label><input class="form-control" id="editProductPrice" type="number" /></div>
             <div class="col-6"><label class="form-label small">Склад</label><input class="form-control" id="editProductStock" type="number" /></div>
           </div>
-          <div class="mb-2"><label class="form-label small">Категория</label><select class="form-select" id="editProductCategory"></select></div>
+          <div class="mb-2">
+            <label class="form-label small">Категория</label>
+            <select class="form-select" id="editProductCategory"></select>
+            <div id="editProductCategoryHint" class="small text-warning mt-1 d-none">
+              Нет категорий.
+              <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="btnQuickCategory">Создать категорию</button>
+              или
+              <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="btnSeedFromModal">загрузить демо-данные</button>.
+            </div>
+          </div>
           <div class="mb-2"><label class="form-label small">Описание</label><textarea class="form-control" id="editProductDesc" rows="2"></textarea></div>
         </div>
         <div class="modal-footer"><button class="btn btn-primary" id="btnSaveProduct">Сохранить</button></div>
@@ -243,10 +279,18 @@
   <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
   <script>window.APP_MODE = "admin";</script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/exporters/GLTFExporter.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script src="app.js?v=20260616-admin-3d"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="three-bootstrap.js?v=20260630-gltf"></script>
+  <script defer src="textures3d.js?v=20260616-pbr"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
+  <script defer src="app.js?v=20260616-pbr-dbs"></script>
 </body>
 </html>

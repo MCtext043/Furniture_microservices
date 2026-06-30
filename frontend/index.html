@@ -118,8 +118,11 @@
                   <select class="form-select form-select-sm" id="objTexture">
                     <option value="wood_dark_oak">Темный дуб</option>
                     <option value="wood_oak">Светлый дуб</option>
-                    <option value="board_black">Черное ДСП</option>
+                    <option value="mdf_matte">МДФ матовый</option>
                     <option value="board_white">Белое ДСП</option>
+                    <option value="board_black">Черное ДСП</option>
+                    <option value="laminate_grey">Ламинат</option>
+                    <option value="countertop">Столешница</option>
                     <option value="fabric_gray">Серая ткань</option>
                     <option value="metal_graphite">Графитовый металл</option>
                   </select>
@@ -137,6 +140,7 @@
               <button class="btn btn-sm btn-warning" id="btnEstimateCost">Рассчитать стоимость</button>
               <button class="btn btn-sm btn-outline-dark" id="btnExportAssemblyPdf">Инструкция (PDF)</button>
               <button class="btn btn-sm btn-outline-dark" id="btnExport3d">Скачать 3D</button>
+              <button class="btn btn-sm btn-outline-dark" id="btnExportDbs">DBS</button>
             </div>
             <div class="small text-muted" id="plannerHint">Войдите, чтобы сохранить проект на сервере.</div>
           </div>
@@ -223,10 +227,18 @@
   <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
   <script>window.APP_MODE = "user";</script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/exporters/GLTFExporter.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script src="app.js?v=20260616-admin-3d"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="three-bootstrap.js?v=20260630-gltf"></script>
+  <script defer src="textures3d.js?v=20260616-pbr"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
+  <script defer src="app.js?v=20260616-pbr-dbs"></script>
 </body>
 </html>

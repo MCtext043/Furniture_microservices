@@ -117,3 +117,73 @@ class DeliveryQuoteOut(BaseModel):
     delivery_price_per_km: float
     amount_until_free_delivery: float
     grand_total: float
+
+
+class CrmMaterialCreate(BaseModel):
+    name: str = Field(min_length=2, max_length=120)
+    unit: str = Field(default="шт", max_length=20)
+
+
+class CrmMaterialUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=120)
+    unit: str | None = Field(default=None, max_length=20)
+
+
+class CrmMaterialOut(CrmMaterialCreate):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CrmWarehouseStockOut(BaseModel):
+    material_id: int
+    material_name: str
+    unit: str
+    quantity: float
+
+
+class CrmWarehouseStockUpdate(BaseModel):
+    quantity: float = Field(ge=0)
+
+
+class CrmOrderMaterialLineIn(BaseModel):
+    material_id: int
+    required_qty: float = Field(gt=0)
+
+
+class CrmOrderMaterialLine(CrmOrderMaterialLineIn):
+    material_name: str
+    unit: str
+
+
+class CrmOrderCreate(BaseModel):
+    title: str = Field(min_length=2, max_length=180)
+    customer: str = Field(default="", max_length=120)
+    status: str = Field(default="new", max_length=32)
+    notes: str = ""
+    materials: list[CrmOrderMaterialLineIn] = Field(min_length=1)
+
+
+class CrmOrderOut(BaseModel):
+    id: int
+    title: str
+    customer: str
+    status: str
+    notes: str
+    materials: list[CrmOrderMaterialLine]
+
+
+class CrmProcurementLine(BaseModel):
+    material_id: int
+    material_name: str
+    unit: str
+    required_qty: float
+    in_stock_qty: float
+    to_buy_qty: float
+
+
+class CrmOrderProcurementOut(BaseModel):
+    order_id: int
+    title: str
+    customer: str
+    status: str
+    lines: list[CrmProcurementLine]

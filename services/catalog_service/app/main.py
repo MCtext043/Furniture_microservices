@@ -42,8 +42,14 @@ app = FastAPI(
         {"name": "cart", "description": "Корзина пользователя"},
         {"name": "wishlist", "description": "Избранные товары пользователя"},
         {"name": "delivery", "description": "Доставка и настройки магазина"},
+        {"name": "crm", "description": "CRM производства: заказы, склад, закупки"},
     ],
 )
+
+
+from .crm_routes import router as crm_router
+
+app.include_router(crm_router)
 
 
 def _get_or_create_shop_settings(session: Session) -> ShopSettings:

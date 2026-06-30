@@ -68,3 +68,42 @@ class ShopSettings(Base):
     warehouse_address: Mapped[str] = mapped_column(String(500), default="")
     warehouse_lat: Mapped[float | None] = mapped_column(nullable=True)
     warehouse_lon: Mapped[float | None] = mapped_column(nullable=True)
+
+
+class CrmMaterial(Base):
+    __tablename__ = "crm_materials"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
+    unit: Mapped[str] = mapped_column(String(20), default="шт")
+
+
+class CrmWarehouseStock(Base):
+    __tablename__ = "crm_warehouse_stock"
+
+    material_id: Mapped[int] = mapped_column(ForeignKey("crm_materials.id"), primary_key=True)
+    quantity: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+
+    material: Mapped[CrmMaterial] = relationship()
+
+
+class CrmProductionOrder(Base):
+    __tablename__ = "crm_production_orders"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String(180), index=True)
+    customer: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(32), default="new", index=True)
+    notes: Mapped[str] = mapped_column(Text, default="")
+
+
+class CrmOrderMaterial(Base):
+    __tablename__ = "crm_order_materials"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("crm_production_orders.id"), index=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("crm_materials.id"), index=True)
+    required_qty: Mapped[float] = mapped_column(Numeric(12, 2))
+
+    material: Mapped[CrmMaterial] = relationship()
+    order: Mapped[CrmProductionOrder] = relationship()

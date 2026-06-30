@@ -22,6 +22,7 @@ const state = {
   rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0 },
   cameraDrag: { active: false, startX: 0, startY: 0 },
   lastCutResult: null,
+  crm: { orders: [], warehouse: [] },
 };
 
 const demoCategories = ["Кухни", "Шкафы", "Гостиные", "Спальни", "Офис", "Детские"];
@@ -59,9 +60,12 @@ const texturePresets = {
   wood_dark_oak: { title: "Темный дуб", material: "wood", color: "#6B4423" },
   wood_oak: { title: "Светлый дуб", material: "wood", color: "#B68655" },
   board_black: { title: "Черное ДСП", material: "board", color: "#222629" },
-  board_white: { title: "Белое ДСП", material: "board", color: "#E9ECEF" },
+  board_white: { title: "Белое ДСП", material: "board", color: "#F4F5F7" },
   fabric_gray: { title: "Серая ткань", material: "fabric", color: "#6C757D" },
   metal_graphite: { title: "Графитовый металл", material: "metal", color: "#495057" },
+  mdf_matte: { title: "МДФ матовый", material: "mdf", color: "#E8E4DE" },
+  laminate_grey: { title: "Ламинат серый", material: "laminate", color: "#9CA3AF" },
+  countertop: { title: "Столешница", material: "stone", color: "#D1C7BD" },
 };
 
 function sameOriginApiBase() {
@@ -310,8 +314,14 @@ async function api(method, path, body, withAuth = false) {
     payload = text;
   }
   if (!response.ok) {
-    const detail = payload?.detail ? JSON.stringify(payload.detail) : text || response.statusText;
-    throw new Error(detail);
+    const detail = payload?.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : detail
+          ? JSON.stringify(detail)
+          : text || response.statusText;
+    throw new Error(message);
   }
   return payload;
 }
@@ -1008,57 +1018,16 @@ function addFurnitureSet() {
   toast("Демо-комплект добавлен");
 }
 
-function getTextureByType(type) {
+function getTextureByType(type, variant = "default") {
+  return window.Texture3D?.getTextureByType(type, variant) || null;
+}
+
+function createSurfaceMaterial(type, variant, colorHex) {
   if (!window.THREE) return null;
-  const canvas = document.createElement("canvas");
-  canvas.width = 128;
-  canvas.height = 128;
-  const ctx = canvas.getContext("2d");
-  if (type === "wood") {
-    ctx.fillStyle = "#9b6b43";
-    ctx.fillRect(0, 0, 128, 128);
-    for (let i = 0; i < 12; i++) {
-      ctx.strokeStyle = i % 2 ? "#7b4f2f" : "#b88456";
-      ctx.beginPath();
-      ctx.moveTo(0, i * 12 + (i % 3));
-      ctx.bezierCurveTo(32, i * 12 + 6, 96, i * 12 - 4, 128, i * 12 + 3);
-      ctx.stroke();
-    }
-  } else if (type === "metal") {
-    ctx.fillStyle = "#9ca3af";
-    ctx.fillRect(0, 0, 128, 128);
-    ctx.strokeStyle = "#d1d5db";
-    for (let i = 0; i < 8; i++) {
-      ctx.beginPath();
-      ctx.moveTo(i * 16, 0);
-      ctx.lineTo(i * 16 + 40, 128);
-      ctx.stroke();
-    }
-  } else if (type === "board") {
-    ctx.fillStyle = "#5f6368";
-    ctx.fillRect(0, 0, 128, 128);
-    ctx.strokeStyle = "rgba(255,255,255,.18)";
-    for (let i = 0; i <= 8; i++) {
-      ctx.beginPath();
-      ctx.moveTo(0, i * 16);
-      ctx.lineTo(128, i * 16);
-      ctx.stroke();
-    }
-  } else {
-    ctx.fillStyle = "#64748b";
-    ctx.fillRect(0, 0, 128, 128);
-    ctx.fillStyle = "rgba(255,255,255,.25)";
-    for (let y = 0; y < 8; y++) {
-      for (let x = 0; x < 8; x++) {
-        if ((x + y) % 2 === 0) ctx.fillRect(x * 16, y * 16, 8, 8);
-      }
-    }
+  if (window.Texture3D?.createSurfaceMaterial) {
+    return window.Texture3D.createSurfaceMaterial(type, variant, colorHex);
   }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(1.5, 1.5);
-  return tex;
+  return new THREE.MeshStandardMaterial({ color: colorHex });
 }
 
 function roomUnitToWorldX(x) {
@@ -1095,14 +1064,28 @@ function initRoom3D() {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(width, height);
+  if (THREE.ACESFilmicToneMapping) {
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.08;
+  }
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   host.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
   host.appendChild(renderer.domElement);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.75);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.48);
   scene.add(ambient);
-  const light = new THREE.DirectionalLight(0xffffff, 0.95);
-  light.position.set(3, 7, 4);
+  const light = new THREE.DirectionalLight(0xfff4e6, 1.15);
+  light.position.set(4000, 9000, 5000);
+  light.castShadow = true;
+  light.shadow.mapSize.set(2048, 2048);
   scene.add(light);
+  const fill = new THREE.DirectionalLight(0xc7d2fe, 0.42);
+  fill.position.set(-5000, 3000, -2000);
+  scene.add(fill);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.25);
+  rim.position.set(0, 4000, -6000);
+  scene.add(rim);
 
   const roomGroup = new THREE.Group();
   const furnitureGroup = new THREE.Group();
@@ -1213,18 +1196,21 @@ function rebuildRoomGeometry() {
   const { width, length, height } = state.roomConfig;
   const floor = new THREE.Mesh(
     new THREE.BoxGeometry(width, 60, length),
-    new THREE.MeshStandardMaterial({ color: 0xd8c2a8, roughness: 0.95 })
+    createSurfaceMaterial("floor", "default", 0xffffff)
   );
   floor.position.y = -30;
+  floor.receiveShadow = true;
   roomGroup.add(floor);
 
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0xf4eadf, roughness: 0.95 });
+  const wallMat = createSurfaceMaterial("wall", "default", 0xfaf7f2);
   const wallBack = new THREE.Mesh(new THREE.BoxGeometry(width, height, 50), wallMat);
   wallBack.position.set(0, height / 2, -length / 2);
+  wallBack.receiveShadow = true;
   roomGroup.add(wallBack);
 
-  const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(50, height, length), wallMat);
+  const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(50, height, length), wallMat.clone());
   wallLeft.position.set(-width / 2, height / 2, 0);
+  wallLeft.receiveShadow = true;
   roomGroup.add(wallLeft);
 }
 
@@ -1240,15 +1226,12 @@ function renderRoom3D() {
     const h = Math.max(Number(item.height) || 350, 350);
     const mesh = new THREE.Mesh(
       new THREE.BoxGeometry(w, h, d),
-      new THREE.MeshStandardMaterial({
-        map: getTextureByType(texturePreset.material),
-        color: texturePreset.color,
-        roughness: 0.65,
-        metalness: texturePreset.material === "metal" ? 0.22 : 0.06,
-      })
+      createSurfaceMaterial(texturePreset.material, item.texture || "default", texturePreset.color)
     );
     mesh.position.set(roomUnitToWorldX(item.x), h / 2, roomUnitToWorldZ(item.z));
     mesh.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
     mesh.userData.kind = "furniture";
     mesh.userData.objectId = item.id;
     furnitureGroup.add(mesh);
@@ -1538,6 +1521,45 @@ function renderCostEstimate(bom = null) {
     </div>`;
 }
 
+async function ensureCategoriesLoaded() {
+  if (state.categories.length) return;
+  state.categories = await api("GET", "/catalog/categories");
+}
+
+function populateProductCategorySelect(selectedId = null) {
+  const catSelect = document.getElementById("editProductCategory");
+  const hint = document.getElementById("editProductCategoryHint");
+  if (!catSelect) return false;
+  if (!state.categories.length) {
+    catSelect.innerHTML = `<option value="">— выберите или создайте категорию —</option>`;
+    hint?.classList.remove("d-none");
+    return false;
+  }
+  hint?.classList.add("d-none");
+  catSelect.innerHTML = state.categories
+    .map(
+      (c) =>
+        `<option value="${c.id}" ${Number(c.id) === Number(selectedId) ? "selected" : ""}>${escapeHtml(categoryName(c.id))}</option>`
+    )
+    .join("");
+  return true;
+}
+
+async function quickCreateCategory() {
+  const name = window.prompt("Название новой категории");
+  if (!name?.trim()) return;
+  try {
+    const created = await api("POST", "/catalog/categories", { name: name.trim() }, true);
+    state.categories.push(created);
+    state.categories.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+    populateProductCategorySelect(created.id);
+    renderCategories();
+    toast(`Категория «${created.name}» создана`);
+  } catch (error) {
+    toast(`Не удалось создать категорию: ${error.message}`, false);
+  }
+}
+
 function openProductEditor(productId) {
   const product = state.products.find((p) => p.id === productId);
   if (!product) return;
@@ -1548,13 +1570,13 @@ function openProductEditor(productId) {
   document.getElementById("editProductPrice").value = product.price;
   document.getElementById("editProductStock").value = product.stock;
   document.getElementById("editProductDesc").value = displayProductDescription(product) || "";
-  const catSelect = document.getElementById("editProductCategory");
-  catSelect.innerHTML = state.categories.map((c) => `<option value="${c.id}" ${c.id === product.category_id ? "selected" : ""}>${escapeHtml(categoryName(c.id))}</option>`).join("");
+  populateProductCategorySelect(product.category_id);
   document.getElementById("productEditorTitle").textContent = "Редактировать товар";
   bootstrap.Modal.getOrCreateInstance(document.getElementById("productEditorModal")).show();
 }
 
-function openNewProductEditor() {
+async function openNewProductEditor() {
+  await ensureCategoriesLoaded();
   document.getElementById("editProductId").value = "";
   document.getElementById("editProductName").value = "";
   document.getElementById("editProductSku").value = `SKU-${Date.now()}`;
@@ -1562,14 +1584,22 @@ function openNewProductEditor() {
   document.getElementById("editProductPrice").value = "10000";
   document.getElementById("editProductStock").value = "5";
   document.getElementById("editProductDesc").value = "";
-  const catSelect = document.getElementById("editProductCategory");
-  catSelect.innerHTML = state.categories.map((c) => `<option value="${c.id}">${escapeHtml(categoryName(c.id))}</option>`).join("");
+  populateProductCategorySelect(state.categories[0]?.id ?? null);
   document.getElementById("productEditorTitle").textContent = "Новый товар";
   bootstrap.Modal.getOrCreateInstance(document.getElementById("productEditorModal")).show();
+  if (!state.categories.length) {
+    toast("Создайте категорию или загрузите демо-данные", false);
+  }
 }
 
 async function saveProductEditor() {
   const id = document.getElementById("editProductId").value;
+  const categoryRaw = document.getElementById("editProductCategory").value;
+  const categoryId = categoryRaw ? Number(categoryRaw) : null;
+  if (!categoryId) {
+    toast("Выберите категорию или создайте новую", false);
+    return;
+  }
   const payload = {
     name: document.getElementById("editProductName").value.trim(),
     sku: document.getElementById("editProductSku").value.trim(),
@@ -1577,9 +1607,13 @@ async function saveProductEditor() {
     description: document.getElementById("editProductDesc").value.trim(),
     price: Number(document.getElementById("editProductPrice").value),
     stock: Number(document.getElementById("editProductStock").value),
-    category_id: Number(document.getElementById("editProductCategory").value),
+    category_id: categoryId,
     is_active: true,
   };
+  if (!payload.name || !payload.sku || payload.price <= 0) {
+    toast("Заполните название, SKU и цену", false);
+    return;
+  }
   try {
     if (id) {
       await api("PATCH", `/catalog/products/${id}`, payload, true);
@@ -1652,6 +1686,112 @@ async function renderCuttingJobs() {
   }
 }
 
+async function loadCrm() {
+  if (APP_MODE !== "admin" || !canManageCatalog()) return;
+  try {
+    state.crm.warehouse = await api("GET", "/catalog/crm/warehouse", undefined, true);
+    state.crm.orders = await api("GET", "/catalog/crm/orders", undefined, true);
+    renderCrmPanel();
+  } catch (error) {
+    const wh = document.getElementById("crmWarehouseTable");
+    const orders = document.getElementById("crmOrdersPanel");
+    const msg = `<div class="text-danger">${escapeHtml(error.message)}</div>`;
+    if (wh) wh.innerHTML = msg;
+    if (orders) orders.innerHTML = msg;
+  }
+}
+
+function renderCrmWarehouse() {
+  const host = document.getElementById("crmWarehouseTable");
+  if (!host) return;
+  if (!state.crm.warehouse.length) {
+    host.innerHTML = `<div class="text-muted">Склад пуст. Нажмите «Загрузить демо CRM».</div>`;
+    return;
+  }
+  host.innerHTML = `
+    <table class="table table-sm mb-0">
+      <thead><tr><th>Материал</th><th>На складе</th></tr></thead>
+      <tbody>${state.crm.warehouse
+        .map(
+          (row) =>
+            `<tr><td>${escapeHtml(row.material_name)}</td><td><strong>${row.quantity}</strong> ${escapeHtml(row.unit)}</td></tr>`
+        )
+        .join("")}</tbody>
+    </table>`;
+}
+
+async function renderCrmOrderProcurement(orderId) {
+  const host = document.getElementById(`crm-proc-${orderId}`);
+  if (!host) return;
+  host.innerHTML = `<span class="text-muted">Считаем...</span>`;
+  try {
+    const data = await api("GET", `/catalog/crm/orders/${orderId}/procurement`, undefined, true);
+    host.innerHTML = `
+      <table class="table table-sm table-bordered mb-0 mt-2">
+        <thead class="table-light">
+          <tr><th>Материал</th><th>Нужно</th><th>На складе</th><th class="text-danger">Купить</th></tr>
+        </thead>
+        <tbody>${data.lines
+          .map(
+            (line) => `<tr>
+              <td>${escapeHtml(line.material_name)}</td>
+              <td>${line.required_qty} ${escapeHtml(line.unit)}</td>
+              <td>${line.in_stock_qty} ${escapeHtml(line.unit)}</td>
+              <td class="${line.to_buy_qty > 0 ? "text-danger fw-semibold" : "text-success"}">${line.to_buy_qty > 0 ? line.to_buy_qty : "—"} ${line.to_buy_qty > 0 ? escapeHtml(line.unit) : ""}</td>
+            </tr>`
+          )
+          .join("")}</tbody>
+      </table>`;
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderCrmPanel() {
+  renderCrmWarehouse();
+  const host = document.getElementById("crmOrdersPanel");
+  if (!host) return;
+  if (!state.crm.orders.length) {
+    host.innerHTML = `<div class="text-muted">Нет заказов. Нажмите «Загрузить демо CRM».</div>`;
+    return;
+  }
+  host.innerHTML = state.crm.orders
+    .map(
+      (order) => `
+      <div class="border rounded p-3 mb-3">
+        <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+          <div>
+            <strong>${escapeHtml(order.title)}</strong>
+            <span class="badge text-bg-secondary ms-2">${escapeHtml(order.status)}</span>
+          </div>
+          <span class="text-muted small">${escapeHtml(order.customer || "—")}</span>
+        </div>
+        ${order.notes ? `<div class="small text-muted mb-2">${escapeHtml(order.notes)}</div>` : ""}
+        <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
+        <div id="crm-proc-${order.id}"></div>
+      </div>`
+    )
+    .join("");
+  host.querySelectorAll("[data-crm-order]").forEach((btn) => {
+    btn.addEventListener("click", () => renderCrmOrderProcurement(Number(btn.dataset.crmOrder)));
+  });
+}
+
+async function seedCrmDemo() {
+  try {
+    await api("POST", "/catalog/crm/seed-demo", {}, true);
+    await loadCrm();
+    toast("Демо CRM загружено");
+  } catch (error) {
+    const msg = String(error?.message || error || "");
+    if (/internal server error/i.test(msg)) {
+      toast("CRM: ошибка сервера. После деплоя обновите backend и примените migrate (не -Fast).", false);
+      return;
+    }
+    toast(`CRM: ${msg}`, false);
+  }
+}
+
 async function bootAdminPanel() {
   const gate = document.getElementById("adminGate");
   const content = document.getElementById("adminContent");
@@ -1664,6 +1804,7 @@ async function bootAdminPanel() {
   renderAdminCatalogTable();
   await renderCuttingJobs();
   await loadDeliverySettingsAdmin();
+  await loadCrm();
   ensureRoom3D();
 }
 
@@ -1885,6 +2026,81 @@ function exportBasisScript() {
   toast("Скрипт для Базис сохранён — запустите его через меню «Скрипты»");
 }
 
+function buildDbsDocument() {
+  const bom = buildBomFromObjects();
+  const cost = estimateProjectCost(bom);
+  const panels = bom.parts.map((part) => ({
+    name: part.name,
+    width_mm: part.width,
+    height_mm: part.height,
+    quantity: part.quantity,
+    area_mm2: part.width * part.height * part.quantity,
+  }));
+
+  return {
+    format: "woodcraft-dbs",
+    version: "1.0",
+    generated_at: new Date().toISOString(),
+    producer: "WoodCraft Market",
+    project: {
+      id: state.projectId,
+      title: "Комната WoodCraft",
+      units: "mm",
+    },
+    room: { ...state.roomConfig },
+    furniture: state.objects3d.map((item) => {
+      const preset = resolveTexturePreset(item);
+      return {
+        id: item.id,
+        name: item.name,
+        type: item.type,
+        texture: item.texture,
+        material: preset.material,
+        width_mm: item.width,
+        depth_mm: item.depth,
+        height_mm: item.height,
+        x_mm: item.x,
+        z_mm: item.z,
+        rotation_deg: item.rotationY || 0,
+      };
+    }),
+    bom: {
+      parts: bom.parts,
+      assembly: bom.assembly,
+      estimated_cost_rub: cost.total,
+    },
+    panels,
+    cutting: state.lastCutResult
+      ? {
+          placed_count: state.lastCutResult.placed_count,
+          requested_count: state.lastCutResult.requested_count,
+          total_sheets: state.lastCutResult.total_sheets,
+          utilization_percent: state.lastCutResult.utilization_percent,
+        }
+      : null,
+    exports: {
+      basis_script: "woodcraft-basis-import.js",
+      gltf: "room-scene.gltf",
+      note: "DBS — Design Bundle Specification для передачи в производство и CRM",
+    },
+  };
+}
+
+function exportDbsFile() {
+  if (!state.objects3d.length) {
+    toast("Добавьте объекты в планировщик для экспорта DBS", false);
+    return;
+  }
+  const doc = buildDbsDocument();
+  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `woodcraft-project-${Date.now()}.dbs`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast("Файл DBS сохранён (спецификация для производства)");
+}
+
 function exportAssemblyPdf() {
   const bom = buildBomFromObjects();
   if (!bom.parts.length) {
@@ -2021,6 +2237,7 @@ async function boot() {
   bindClick("btnEstimateCost", () => { renderBom(); toast("Стоимость пересчитана"); });
   bindClick("btnCutFrom3d", cutFrom3D);
   bindClick("btnExportBasis", exportBasisScript);
+  bindClick("btnExportDbs", exportDbsFile);
   bindClick("btnExportCutPdf", exportCutPdf);
   bindClick("btnExportAssemblyPdf", exportAssemblyPdf);
   bindClick("btnExport3d", exportSceneGltf);
@@ -2033,6 +2250,14 @@ async function boot() {
   bindClick("btnSaveDeliverySettings", saveDeliverySettingsAdmin);
   bindClick("btnQuoteDelivery", quoteDelivery);
   bindClick("btnSeedDemo", async () => { await seedDemoData(); await loadCatalog(); renderAdminCatalogTable(); toast("Демо-данные загружены"); });
+  bindClick("btnSeedCrm", seedCrmDemo);
+  bindClick("btnQuickCategory", quickCreateCategory);
+  bindClick("btnSeedFromModal", async () => {
+    await seedDemoData();
+    await loadCatalog();
+    populateProductCategorySelect(state.categories[0]?.id ?? null);
+    toast("Демо-данные загружены");
+  });
   bindClick("btnRefreshJobs", renderCuttingJobs);
 
   document.addEventListener("pointermove", handleDragMove);
