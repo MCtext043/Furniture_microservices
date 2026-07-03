@@ -211,11 +211,107 @@
     });
   }
 
+  function makeDimLabel(text) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 64;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "rgba(15,23,42,0.88)";
+    ctx.fillRect(4, 4, 248, 56);
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = "#f8fafc";
+    ctx.font = "bold 26px Segoe UI, Arial, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, 128, 32);
+    const tex = new THREE.CanvasTexture(canvas);
+    if (THREE.SRGBColorSpace) tex.colorSpace = THREE.SRGBColorSpace;
+    const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true });
+    const sprite = new THREE.Sprite(mat);
+    sprite.scale.set(420, 105, 1);
+    sprite.renderOrder = 10;
+    return sprite;
+  }
+
+  function metalHandleMat() {
+    return new THREE.MeshStandardMaterial({ color: 0xb8bcc4, metalness: 0.78, roughness: 0.28 });
+  }
+
+  function buildFurnitureGroup(item, w, h, d, bodyMat) {
+    const group = new THREE.Group();
+    const shell = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMat);
+    shell.position.y = h / 2;
+    shell.castShadow = true;
+    shell.receiveShadow = true;
+    group.add(shell);
+
+    const drawerCount = Number(item.drawers) || (item.type === "cabinet" ? 2 : 0);
+    const handleCount = Number(item.handles) || (item.type === "wardrobe" ? 2 : drawerCount || 1);
+    const handleMat = metalHandleMat();
+
+    if (drawerCount > 0) {
+      const gap = 14;
+      const drawerH = (h - gap * (drawerCount + 1)) / drawerCount;
+      for (let i = 0; i < drawerCount; i++) {
+        const y = gap + drawerH / 2 + i * (drawerH + gap);
+        const front = new THREE.Mesh(new THREE.BoxGeometry(w - 28, drawerH - 6, 14), bodyMat.clone());
+        front.position.set(0, y, d / 2 + 6);
+        front.castShadow = true;
+        group.add(front);
+        const groove = new THREE.Mesh(new THREE.BoxGeometry(w - 60, 3, 2), handleMat);
+        groove.position.set(0, y + drawerH * 0.22, d / 2 + 14);
+        group.add(groove);
+      }
+    }
+
+    if (item.type === "wardrobe") {
+      const doorW = (w - 36) / 2;
+      [-1, 1].forEach((side) => {
+        const door = new THREE.Mesh(new THREE.BoxGeometry(doorW, h - 48, 14), bodyMat.clone());
+        door.position.set(side * (doorW / 2 + 10), h / 2, d / 2 + 5);
+        door.castShadow = true;
+        group.add(door);
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(10, 110, 10), handleMat);
+        bar.position.set(side * (doorW / 2 - 24), h / 2, d / 2 + 16);
+        group.add(bar);
+      });
+    } else if (item.type === "cabinet" && drawerCount === 0) {
+      const door = new THREE.Mesh(new THREE.BoxGeometry(w - 24, h - 28, 14), bodyMat.clone());
+      door.position.set(0, h / 2, d / 2 + 5);
+      group.add(door);
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(90, 10, 10), handleMat);
+      bar.position.set(0, h * 0.62, d / 2 + 16);
+      group.add(bar);
+    }
+
+    const spareHandles = Math.max(0, handleCount - group.children.filter((c) => c.material === handleMat).length);
+    for (let i = 0; i < spareHandles; i++) {
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(10, 12, 12), handleMat);
+      knob.position.set(-w / 4 + i * (w / Math.max(spareHandles, 1)), h * 0.55, d / 2 + 18);
+      group.add(knob);
+    }
+
+    const wLabel = makeDimLabel(`${Math.round(w)} мм`);
+    wLabel.position.set(0, 24, d / 2 + 140);
+    group.add(wLabel);
+    const hLabel = makeDimLabel(`${Math.round(h)} мм`);
+    hLabel.position.set(w / 2 + 120, h / 2, 0);
+    group.add(hLabel);
+    const dLabel = makeDimLabel(`${Math.round(d)} мм`);
+    dLabel.position.set(0, h + 80, 0);
+    group.add(dLabel);
+
+    return group;
+  }
+
   window.Texture3D = {
     getMaterialMaps,
     getTextureByType(type, variant) {
       return getMaterialMaps(type, variant)?.map || null;
     },
     createSurfaceMaterial,
+    buildFurnitureGroup,
   };
 })();

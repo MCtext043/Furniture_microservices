@@ -112,14 +112,31 @@ Remove-Item -Force $archive, $remoteSh -ErrorAction SilentlyContinue
 Write-Host ""
 Write-Host "Deploy complete." -ForegroundColor Green
 $gatewayPort = "8002"
+$httpsEnabled = $false
+$publicHost = $Server
+$publicDomain = ""
 if (Test-Path $secretsLocal) {
     foreach ($line in Get-Content $secretsLocal) {
         if ($line -match '^\s*GATEWAY_PORT=(\d+)\s*$') {
             $gatewayPort = $Matches[1]
-            break
+        }
+        if ($line -match '^\s*HTTPS_ENABLED=(.+)\s*$') {
+            $httpsEnabled = $Matches[1].Trim() -eq "1"
+        }
+        if ($line -match '^\s*PUBLIC_HOST=(.+)\s*$') {
+            $publicHost = $Matches[1].Trim()
+        }
+        if ($line -match '^\s*PUBLIC_DOMAIN=(.+)\s*$') {
+            $publicDomain = $Matches[1].Trim()
         }
     }
 }
-Write-Host "Site: http://${Server}:${gatewayPort}/" -ForegroundColor Green
-Write-Host "Health: http://${Server}:${gatewayPort}/health"
+$siteHost = if ($publicDomain) { $publicDomain } else { $publicHost }
+if ($httpsEnabled) {
+    Write-Host "Site: https://${siteHost}/" -ForegroundColor Green
+    Write-Host "Health: https://${siteHost}/health"
+} else {
+    Write-Host "Site: http://${Server}:${gatewayPort}/" -ForegroundColor Green
+    Write-Host "Health: http://${Server}:${gatewayPort}/health"
+}
 Write-Host "Browser: Ctrl+F5"

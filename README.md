@@ -266,7 +266,7 @@ powershell -ExecutionPolicy Bypass -File deploy\upload-to-server.ps1
 | Только фронт | `upload-to-server.ps1 -Fast` |
 | Сброс БД | `upload-to-server.ps1 -ResetDb` |
 
-**Production URL:** `http://<PUBLIC_HOST>:8002/` (порт из `GATEWAY_PORT` в `local.env`).
+**Production URL:** `https://<PUBLIC_HOST>/` или `https://<PUBLIC_DOMAIN>/` (Caddy, порты 80/443). Старый `http://…:8002` — только localhost на сервере для отладки.
 
 Диагностика на сервере: `bash deploy/diagnose-server.sh`
 

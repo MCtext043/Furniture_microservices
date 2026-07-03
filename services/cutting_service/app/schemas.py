@@ -6,6 +6,7 @@ class Part(BaseModel):
     width: int = Field(gt=0)
     height: int = Field(gt=0)
     quantity: int = Field(gt=0, le=200)
+    allow_rotation: bool = True
 
 
 class CuttingRequest(BaseModel):

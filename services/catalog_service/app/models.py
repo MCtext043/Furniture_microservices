@@ -1,4 +1,6 @@
-from sqlalchemy import Boolean, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from datetime import datetime
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -93,8 +95,25 @@ class CrmProductionOrder(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     title: Mapped[str] = mapped_column(String(180), index=True)
     customer: Mapped[str] = mapped_column(String(120), default="")
-    status: Mapped[str] = mapped_column(String(32), default="new", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="конструктор", index=True)
     notes: Mapped[str] = mapped_column(Text, default="")
+    planner_project_id: Mapped[int | None] = mapped_column(index=True, nullable=True)
+    user_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    price_standard: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    price_comfort: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    price_premium: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+
+
+class CrmOrderPhoto(Base):
+    __tablename__ = "crm_order_photos"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("crm_production_orders.id"), index=True)
+    object_key: Mapped[str] = mapped_column(String(255))
+    caption: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    order: Mapped[CrmProductionOrder] = relationship()
 
 
 class CrmOrderMaterial(Base):

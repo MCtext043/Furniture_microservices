@@ -3,10 +3,10 @@
 (async () => {
   try {
     const THREE_NS = await import("three");
-    const THREE = { ...THREE_NS };
     const { GLTFExporter } = await import("three/addons/exporters/GLTFExporter.js");
+    // Module namespace objects are immutable (non-extensible). Make a mutable copy for legacy scripts.
+    const THREE = { ...THREE_NS, GLTFExporter };
     window.THREE = THREE;
-    window.THREE.GLTFExporter = GLTFExporter;
     window.__THREE_BOOTSTRAP_OK = true;
   } catch (error) {
     window.__THREE_BOOTSTRAP_OK = false;

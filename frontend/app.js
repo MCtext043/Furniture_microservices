@@ -22,7 +22,8 @@ const state = {
   rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0 },
   cameraDrag: { active: false, startX: 0, startY: 0 },
   lastCutResult: null,
-  crm: { orders: [], warehouse: [] },
+  crm: { orders: [], warehouse: [], procurementByOrder: {} },
+  userOrders: [],
 };
 
 const demoCategories = ["Кухни", "Шкафы", "Гостиные", "Спальни", "Офис", "Детские"];
@@ -42,11 +43,19 @@ const demoProducts = [
 const RETIRED_DEMO_SKUS = ["DEMO-SOFA-CLOUD", "DEMO-WARD-VERONA"];
 
 const defaultCuttingParts = [
-  { name: "Боковина шкафа", width: 600, height: 2200, quantity: 2 },
-  { name: "Полка", width: 560, height: 400, quantity: 5 },
-  { name: "Фасад", width: 480, height: 720, quantity: 4 },
-  { name: "Цоколь", width: 1800, height: 120, quantity: 1 },
+  { name: "Боковина шкафа", width: 600, height: 2200, quantity: 2, allow_rotation: true },
+  { name: "Полка", width: 560, height: 400, quantity: 5, allow_rotation: true },
+  { name: "Фасад", width: 480, height: 720, quantity: 4, allow_rotation: false },
+  { name: "Цоколь", width: 1800, height: 120, quantity: 1, allow_rotation: true },
 ];
+
+const PRICING_TIERS = [
+  { key: "standard", title: "Стандарт", material: 1, hardware: 1, labor: 1 },
+  { key: "comfort", title: "Комфорт", material: 1.18, hardware: 1.25, labor: 1.1 },
+  { key: "premium", title: "Премиум", material: 1.42, hardware: 1.55, labor: 1.22 },
+];
+
+const CRM_STATUSES = ["конструктор", "закупка", "сборка"];
 
 const typePresets = {
   wardrobe: { title: "Шкаф", color: "#8B5E3C", texture: "wood" },
@@ -70,8 +79,8 @@ const texturePresets = {
 
 function sameOriginApiBase() {
   const { protocol, hostname, port } = window.location;
-  const gatewayPorts = new Set(["8080", "8001", "8002", "8000"]);
-  if (gatewayPorts.has(port)) {
+  const gatewayPorts = new Set(["8080", "8001", "8002", "8000", "443", "80"]);
+  if (!port || gatewayPorts.has(port)) {
     return `${protocol}//${hostname}${port ? `:${port}` : ""}`;
   }
   return null;
@@ -89,7 +98,7 @@ function apiBase() {
 
 function defaultApiBase() {
   const { protocol, hostname, port } = window.location;
-  if (port === "8080" || port === "8001" || port === "8002") {
+  if (!port || port === "8080" || port === "8001" || port === "8002" || port === "443") {
     return `${protocol}//${hostname}${port ? `:${port}` : ""}`;
   }
   const host = hostname || "127.0.0.1";
@@ -152,6 +161,9 @@ function updateAccountButton() {
   if (!btn) return;
   const name = customerName();
   btn.textContent = name ? `Кабинет: ${name}` : "Войти";
+  const ordersTab = document.getElementById("userOrdersTabNav");
+  if (ordersTab) ordersTab.classList.toggle("d-none", !name);
+  if (name && APP_MODE !== "admin") loadUserOrders();
 }
 
 function money(value) {
@@ -328,11 +340,18 @@ async function api(method, path, body, withAuth = false) {
 
 async function validateToken() {
   if (!token()) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch(`${apiBase()}/auth/me`, { headers: { Authorization: `Bearer ${token()}` } });
+    const response = await fetch(`${apiBase()}/auth/me`, {
+      headers: { Authorization: `Bearer ${token()}` },
+      signal: controller.signal,
+    });
     return response.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -508,6 +527,7 @@ function categoryName(id) {
 
 function renderCategories() {
   const host = document.getElementById("categoryPills");
+  if (!host) return;
   const counts = new Map();
   state.products.forEach((p) => counts.set(p.category_id, (counts.get(p.category_id) || 0) + 1));
   const buttons = [`<button class="btn btn-sm category-pill ${state.activeCategory === "all" ? "active" : ""}" data-cat="all">Все (${state.products.length})</button>`];
@@ -701,7 +721,8 @@ async function saveDeliverySettingsAdmin() {
 }
 
 function renderCart() {
-  document.getElementById("cartCount").textContent = state.cart.reduce((sum, item) => sum + item.qty, 0);
+  const countEl = document.getElementById("cartCount");
+  if (countEl) countEl.textContent = state.cart.reduce((sum, item) => sum + item.qty, 0);
   const host = document.getElementById("cartItems");
   if (!host) return;
   if (!state.cart.length) {
@@ -778,6 +799,10 @@ function renderParts() {
         <div>
           <strong>${escapeHtml(part.name)}</strong>
           <div class="small text-muted">${part.width}×${part.height} мм</div>
+          <div class="form-check form-check-inline mt-1 mb-0">
+            <input class="form-check-input" type="checkbox" id="partRotate${index}" data-part-rotate="${index}" ${part.allow_rotation !== false ? "checked" : ""}>
+            <label class="form-check-label small" for="partRotate${index}">Можно вращать</label>
+          </div>
         </div>
         <div class="d-flex align-items-center gap-2">
           <button class="btn btn-sm btn-outline-secondary" data-part-minus="${index}">-</button>
@@ -787,6 +812,13 @@ function renderParts() {
         </div>
       </div>`)
     .join("");
+
+  host.querySelectorAll("[data-part-rotate]").forEach((input) =>
+    input.addEventListener("change", () => {
+      const idx = Number(input.dataset.partRotate);
+      if (state.cuttingParts[idx]) state.cuttingParts[idx].allow_rotation = input.checked;
+    })
+  );
 
   host.querySelectorAll("[data-part-minus]").forEach((btn) =>
     btn.addEventListener("click", () => changePartQty(Number(btn.dataset.partMinus), -1))
@@ -834,9 +866,11 @@ function clampObjectPosition(item, roomWidth, roomLength) {
 
 function normalizePartsForCutting(parts) {
   return parts.map((part) => ({
-    ...part,
+    name: part.name,
     width: Number(part.width),
     height: Number(part.height),
+    quantity: Number(part.quantity),
+    allow_rotation: part.allow_rotation !== false,
   }));
 }
 
@@ -924,7 +958,7 @@ function addPartFromInputs() {
     toast("Заполните название, размеры и количество детали", false);
     return;
   }
-  state.cuttingParts.push({ name, width, height, quantity });
+  state.cuttingParts.push({ name, width, height, quantity, allow_rotation: true });
   renderParts();
   document.getElementById("partName").value = "";
   document.getElementById("partWidth").value = "";
@@ -956,30 +990,45 @@ async function createRoom() {
     bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
     return;
   }
-  const projectName = document.getElementById("projectName")?.value?.trim() || `Проект ${customerName()}`;
-  const projectLocation = document.getElementById("projectLocation")?.value?.trim() || "Онлайн";
   try {
-    const project = await api(
-      "POST",
-      "/planner/projects",
-      {
-        name: projectName,
-        location: projectLocation,
-      },
-      true
-    );
+    const project = await savePlannerProject();
     state.projectId = project.id;
-    document.getElementById("plannerHint").textContent = `Проект №${project.id} создан: ${project.name}`;
+    document.getElementById("plannerHint").textContent = `Проект №${project.id} сохранён: ${project.name}`;
     await syncPlannerObjectsToBackend();
-    toast("Проект комнаты создан");
+    toast("Проект комнаты сохранён");
   } catch (error) {
     toast(`Планировщик недоступен: ${error.message}`, false);
   }
 }
 
+async function savePlannerProject() {
+  const bom = buildBomFromObjects();
+  const cost = estimateProjectCost(bom);
+  const tiers = estimateTierPrices(cost);
+  const projectName = document.getElementById("projectName")?.value?.trim() || `Проект ${customerName()}`;
+  const projectLocation = document.getElementById("projectLocation")?.value?.trim() || "Онлайн";
+  const payload = {
+    name: projectName,
+    location: projectLocation,
+    user_id: customerName(),
+    room_width: state.roomConfig.width,
+    room_length: state.roomConfig.length,
+    room_height: state.roomConfig.height,
+    price_standard: tiers.standard,
+    price_comfort: tiers.comfort,
+    price_premium: tiers.premium,
+    bom_json: JSON.stringify(bom),
+  };
+  if (state.projectId) {
+    return { id: state.projectId, name: projectName, ...payload };
+  }
+  return api("POST", "/planner/projects", payload, true);
+}
+
 async function syncPlannerObjectsToBackend() {
   if (!state.projectId) return;
   for (const obj of state.objects3d) {
+    const defaults = furnitureAccessoryDefaults(obj.type);
     try {
       await api(
         "POST",
@@ -993,6 +1042,11 @@ async function syncPlannerObjectsToBackend() {
           y: 0,
           z: obj.z,
           rotation_y: obj.rotationY || 0,
+          furniture_type: obj.type,
+          texture: obj.texture || "wood_oak",
+          custom_color: obj.customColor || "",
+          drawers: obj.drawers ?? defaults.drawers,
+          handles: obj.handles ?? defaults.handles,
         },
         true
       );
@@ -1039,11 +1093,62 @@ function roomUnitToWorldZ(z) {
 }
 
 function resolveTexturePreset(item) {
-  return texturePresets[item.texture] || {
+  const base = texturePresets[item.texture] || {
     material: (typePresets[item.type] || typePresets.cabinet).texture,
     color: (typePresets[item.type] || typePresets.cabinet).color,
     title: "По типу",
   };
+  if (item.customColor) return { ...base, color: item.customColor };
+  return base;
+}
+
+function furnitureAccessoryDefaults(type) {
+  if (type === "cabinet") return { drawers: 2, handles: 2 };
+  if (type === "wardrobe") return { drawers: 0, handles: 2 };
+  if (type === "shelf") return { drawers: 0, handles: 0 };
+  return { drawers: 0, handles: 1 };
+}
+
+function disposeRoom3D() {
+  if (!state.three) return;
+  const { renderer, host } = state.three;
+  if (renderer) {
+    renderer.dispose();
+    if (typeof renderer.forceContextLoss === "function") {
+      renderer.forceContextLoss();
+    }
+  }
+  host?.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
+  state.three = null;
+}
+
+function canUseWebGL() {
+  try {
+    const canvas = document.createElement("canvas");
+    return !!(canvas.getContext("webgl2") || canvas.getContext("webgl") || canvas.getContext("experimental-webgl"));
+  } catch {
+    return false;
+  }
+}
+
+function createRoom3DRenderer(width, height) {
+  const attempts = [
+    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default" },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default" },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "low-power" },
+  ];
+  let lastError = null;
+  for (const options of attempts) {
+    try {
+      const renderer = new THREE.WebGLRenderer(options);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, options.antialias ? 2 : 1));
+      renderer.setSize(width, height);
+      return renderer;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Error creating WebGL context");
 }
 
 function initRoom3D() {
@@ -1051,6 +1156,19 @@ function initRoom3D() {
   if (!host || !window.THREE) {
     return;
   }
+
+  const liveCanvas = state.three?.renderer?.domElement;
+  if (state.three && liveCanvas && host.contains(liveCanvas)) {
+    refreshRoom3DLayout();
+    renderRoom3D();
+    return;
+  }
+
+  if (!canUseWebGL()) {
+    throw new Error("WebGL недоступен в браузере. Включите аппаратное ускорение или откройте сайт в Chrome/Edge.");
+  }
+
+  disposeRoom3D();
 
   const width = host.clientWidth || 640;
   const height = 360;
@@ -1061,9 +1179,7 @@ function initRoom3D() {
   camera.position.set(7000, 5500, 7500);
   camera.lookAt(0, 1000, 0);
 
-  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(width, height);
+  const renderer = createRoom3DRenderer(width, height);
   if (THREE.ACESFilmicToneMapping) {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.08;
@@ -1078,7 +1194,7 @@ function initRoom3D() {
   const light = new THREE.DirectionalLight(0xfff4e6, 1.15);
   light.position.set(4000, 9000, 5000);
   light.castShadow = true;
-  light.shadow.mapSize.set(2048, 2048);
+  light.shadow.mapSize.set(1024, 1024);
   scene.add(light);
   const fill = new THREE.DirectionalLight(0xc7d2fe, 0.42);
   fill.position.set(-5000, 3000, -2000);
@@ -1128,15 +1244,16 @@ function refreshRoom3DLayout() {
 }
 
 function ensureRoom3D() {
-  const host = document.getElementById("room3d");
-  if (!host || !window.THREE) return;
-  const init = () => {
-    if (!state.three) initRoom3D();
-    else refreshRoom3DLayout();
-    renderRoomTopView();
-    renderRoom3D();
-  };
-  requestAnimationFrame(() => requestAnimationFrame(init));
+  try {
+    initRoom3D();
+  } catch (error) {
+    console.error("3D init failed:", error);
+    const host = document.getElementById("room3d");
+    if (host) {
+      host.innerHTML = `<div class="text-warning small p-3">3D не запустился: ${escapeHtml(error.message || String(error))}<div class="mt-2 text-muted">Попробуйте: закрыть другие вкладки с 3D, включить аппаратное ускорение в браузере, обновить страницу (Ctrl+F5). План сверху остаётся доступен.</div></div>`;
+    }
+  }
+  if (document.getElementById("roomPlan")) renderRoomTopView();
 }
 
 function updateOrbitCamera() {
@@ -1224,17 +1341,25 @@ function renderRoom3D() {
     const w = Math.max(Number(item.width) || 350, 350);
     const d = Math.max(Number(item.depth) || 350, 350);
     const h = Math.max(Number(item.height) || 350, 350);
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(w, h, d),
-      createSurfaceMaterial(texturePreset.material, item.texture || "default", texturePreset.color)
-    );
-    mesh.position.set(roomUnitToWorldX(item.x), h / 2, roomUnitToWorldZ(item.z));
-    mesh.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.userData.kind = "furniture";
-    mesh.userData.objectId = item.id;
-    furnitureGroup.add(mesh);
+    const bodyMat = createSurfaceMaterial(texturePreset.material, item.texture || "default", texturePreset.color);
+    const group = window.Texture3D?.buildFurnitureGroup
+      ? window.Texture3D.buildFurnitureGroup(item, w, h, d, bodyMat)
+      : (() => {
+          const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMat);
+          mesh.position.y = h / 2;
+          return mesh;
+        })();
+    group.position.set(roomUnitToWorldX(item.x), 0, roomUnitToWorldZ(item.z));
+    group.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
+    group.traverse((child) => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+    group.userData.kind = "furniture";
+    group.userData.objectId = item.id;
+    furnitureGroup.add(group);
   });
 }
 
@@ -1391,10 +1516,15 @@ function addObject3DFromForm() {
     return;
   }
   const { planW, planD } = getObjectPlanSize({ width, depth, height, rotationY: 0 });
+  const defaults = furnitureAccessoryDefaults(type);
+  const customColor = document.getElementById("objCustomColor")?.value || "";
   const item = {
     id: makeId(),
     type,
     texture,
+    customColor,
+    drawers: defaults.drawers,
+    handles: defaults.handles,
     name,
     width,
     depth,
@@ -1498,6 +1628,41 @@ function estimateProjectCost(bom) {
   return { materialCost: Math.round(materialCost), edgeCost: Math.round(edgeCost), laborCost, furnitureCost, total: subtotal };
 }
 
+function estimateTierPrices(cost) {
+  const hardwareCost = cost.edgeCost;
+  const result = {};
+  for (const tier of PRICING_TIERS) {
+    result[tier.key] = Math.round(
+      cost.materialCost * tier.material
+        + hardwareCost * tier.hardware
+        + cost.laborCost * tier.labor
+        + cost.furnitureCost
+    );
+  }
+  return result;
+}
+
+function renderTierCards(tiers) {
+  const tierMeta = {
+    standard: { badge: "bg-secondary", hint: "Базовые материалы и фурнитура" },
+    comfort: { badge: "bg-primary", hint: "Улучшенные фасады и направляющие" },
+    premium: { badge: "bg-warning text-dark", hint: "Премиум фурнитура и отделка" },
+  };
+  return `<div class="row g-3">${PRICING_TIERS.map((tier) => {
+    const meta = tierMeta[tier.key];
+    return `<div class="col-md-4">
+      <div class="p-3 border rounded h-100 bg-white">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="fw-semibold">${tier.title}</span>
+          <span class="badge ${meta.badge}">${tier.title}</span>
+        </div>
+        <div class="cost-highlight">${money(tiers[tier.key])}</div>
+        <div class="small text-muted mt-1">${meta.hint}</div>
+      </div>
+    </div>`;
+  }).join("")}</div>`;
+}
+
 function renderCostEstimate(bom = null) {
   const host = document.getElementById("costEstimate");
   if (!host) return;
@@ -1507,6 +1672,14 @@ function renderCostEstimate(bom = null) {
     return;
   }
   const cost = estimateProjectCost(data);
+  const tiers = estimateTierPrices(cost);
+  if (APP_MODE !== "admin") {
+    host.innerHTML = `
+      <div class="mb-2 small text-muted">Ориентировочная стоимость кухни / мебели в трёх комплектациях:</div>
+      ${renderTierCards(tiers)}
+      <div class="small text-muted mt-3">Точный расчёт деталей и раскрой выполняет производство после отправки проекта в работу.</div>`;
+    return;
+  }
   host.innerHTML = `
     <div class="row g-3">
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Материалы (ЛДСП)</div><div class="fw-semibold">${money(cost.materialCost)}</div></div></div>
@@ -1514,10 +1687,10 @@ function renderCostEstimate(bom = null) {
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Работа</div><div class="fw-semibold">${money(cost.laborCost)}</div></div></div>
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Мебель в проекте</div><div class="fw-semibold">${money(cost.furnitureCost)}</div></div></div>
     </div>
+    <div class="mt-3">${renderTierCards(tiers)}</div>
     <div class="mt-3 p-3 border rounded bg-white">
-      <div class="small text-muted">Итоговая ориентировочная стоимость</div>
-      <div class="cost-highlight">${money(cost.total)}</div>
-      <div class="small text-muted mt-1">Расчёт для клиента. Точная развёртка и раскрой — в панели администратора.</div>
+      <div class="small text-muted">Базовая сумма (стандарт)</div>
+      <div class="cost-highlight">${money(tiers.standard)}</div>
     </div>`;
 }
 
@@ -1726,6 +1899,7 @@ async function renderCrmOrderProcurement(orderId) {
   host.innerHTML = `<span class="text-muted">Считаем...</span>`;
   try {
     const data = await api("GET", `/catalog/crm/orders/${orderId}/procurement`, undefined, true);
+    state.crm.procurementByOrder[orderId] = data;
     host.innerHTML = `
       <table class="table table-sm table-bordered mb-0 mt-2">
         <thead class="table-light">
@@ -1741,10 +1915,114 @@ async function renderCrmOrderProcurement(orderId) {
             </tr>`
           )
           .join("")}</tbody>
-      </table>`;
+      </table>
+      <button type="button" class="btn btn-sm btn-outline-dark mt-2" data-crm-pdf="${orderId}">PDF закупки</button>`;
+    host.querySelector(`[data-crm-pdf="${orderId}"]`)?.addEventListener("click", () => exportCrmProcurementPdf(orderId));
   } catch (error) {
     host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
   }
+}
+
+function crmStatusBadge(status) {
+  const map = {
+    конструктор: "text-bg-info",
+    закупка: "text-bg-warning",
+    сборка: "text-bg-success",
+  };
+  return map[status] || "text-bg-secondary";
+}
+
+async function updateCrmOrderStatus(orderId, status) {
+  try {
+    await api("PATCH", `/catalog/crm/orders/${orderId}/status`, { status }, true);
+    await loadCrm();
+    toast(`Статус заказа: ${status}`);
+  } catch (error) {
+    toast(`Не удалось обновить статус: ${error.message}`, false);
+  }
+}
+
+async function uploadCrmOrderPhoto(orderId) {
+  const caption = window.prompt("Подпись к фото", "Этап изготовления") || "";
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const objectKey = `orders/${orderId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
+    try {
+      const presign = await api("POST", "/assets/presign-put", { object_key: objectKey, content_type: file.type || "image/jpeg" }, true);
+      const put = await fetch(presign.upload_url, { method: "PUT", body: file, headers: { "Content-Type": file.type || "image/jpeg" } });
+      if (!put.ok) throw new Error("Загрузка файла не удалась");
+      await api("POST", `/catalog/crm/orders/${orderId}/photos`, { object_key: objectKey, caption }, true);
+      await loadCrm();
+      toast("Фото добавлено к заказу");
+    } catch (error) {
+      toast(`Фото: ${error.message}`, false);
+    }
+  };
+  input.click();
+}
+
+async function getPhotoViewUrl(objectKey) {
+  try {
+    const data = await api("POST", "/assets/presign-get", { object_key: objectKey }, false);
+    return data.download_url || data.url || "";
+  } catch {
+    return "";
+  }
+}
+
+function exportCrmProcurementPdf(orderId) {
+  const cached = state.crm.procurementByOrder[orderId];
+  if (!cached?.lines?.length) {
+    toast("Сначала нажмите «Рассчитать закупку»", false);
+    return;
+  }
+  if (!window.pdfMake) {
+    toast("Модуль PDF не загружен", false);
+    return;
+  }
+  const order = state.crm.orders.find((o) => o.id === orderId);
+  window.pdfMake
+    .createPdf({
+      pageSize: "A4",
+      pageMargins: [28, 28, 28, 28],
+      content: [
+        { text: "Закупка материалов", style: "title" },
+        { text: order ? `${order.title} · ${order.customer}` : `Заказ #${orderId}`, style: "meta" },
+        { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta", margin: [0, 0, 0, 12] },
+        {
+          table: {
+            widths: ["*", 70, 70, 70],
+            body: [
+              [
+                { text: "Материал", style: "thead" },
+                { text: "Нужно", style: "thead" },
+                { text: "Склад", style: "thead" },
+                { text: "Купить", style: "thead" },
+              ],
+              ...cached.lines.map((line) => [
+                line.material_name,
+                `${line.required_qty} ${line.unit}`,
+                `${line.in_stock_qty}`,
+                line.to_buy_qty > 0 ? `${line.to_buy_qty} ${line.unit}` : "—",
+              ]),
+            ],
+          },
+          layout: "lightHorizontalLines",
+        },
+      ],
+      styles: {
+        title: { fontSize: 18, bold: true },
+        meta: { fontSize: 10, color: "#4b5563" },
+        thead: { bold: true, fillColor: "#eef2ff", fontSize: 10 },
+      },
+      defaultStyle: { font: "Roboto", fontSize: 10 },
+    })
+    .download(`procurement-order-${orderId}.pdf`);
+  toast("PDF закупки сохранён");
 }
 
 function renderCrmPanel() {
@@ -1752,29 +2030,205 @@ function renderCrmPanel() {
   const host = document.getElementById("crmOrdersPanel");
   if (!host) return;
   if (!state.crm.orders.length) {
-    host.innerHTML = `<div class="text-muted">Нет заказов. Нажмите «Загрузить демо CRM».</div>`;
+    host.innerHTML = `<div class="text-muted">Нет заказов. Нажмите «Загрузить демо CRM» или дождитесь отправки проекта клиентом.</div>`;
     return;
   }
   host.innerHTML = state.crm.orders
     .map(
       (order) => `
-      <div class="border rounded p-3 mb-3">
+      <div class="border rounded p-3 mb-3" data-order-card="${order.id}">
         <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
           <div>
             <strong>${escapeHtml(order.title)}</strong>
-            <span class="badge text-bg-secondary ms-2">${escapeHtml(order.status)}</span>
+            <span class="badge ${crmStatusBadge(order.status)} ms-2">${escapeHtml(order.status)}</span>
+            ${order.planner_project_id ? `<span class="badge text-bg-light ms-1">проект #${order.planner_project_id}</span>` : ""}
           </div>
           <span class="text-muted small">${escapeHtml(order.customer || "—")}</span>
         </div>
         ${order.notes ? `<div class="small text-muted mb-2">${escapeHtml(order.notes)}</div>` : ""}
-        <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
+        ${order.price_standard ? `<div class="small mb-2">Цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+          <select class="form-select form-select-sm" style="max-width:160px" data-crm-status="${order.id}">
+            ${CRM_STATUSES.map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
+          </select>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>
+          <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
+          <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>
+        </div>
         <div id="crm-proc-${order.id}"></div>
+        <div id="crm-photos-${order.id}" class="mt-2"></div>
       </div>`
     )
     .join("");
   host.querySelectorAll("[data-crm-order]").forEach((btn) => {
     btn.addEventListener("click", () => renderCrmOrderProcurement(Number(btn.dataset.crmOrder)));
   });
+  host.querySelectorAll("[data-crm-save-status]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const orderId = Number(btn.dataset.crmSaveStatus);
+      const select = host.querySelector(`[data-crm-status="${orderId}"]`);
+      updateCrmOrderStatus(orderId, select?.value || "конструктор");
+    });
+  });
+  host.querySelectorAll("[data-crm-photo]").forEach((btn) => {
+    btn.addEventListener("click", () => uploadCrmOrderPhoto(Number(btn.dataset.crmPhoto)));
+  });
+  state.crm.orders.forEach((order) => renderCrmOrderPhotos(order.id));
+}
+
+async function renderCrmOrderPhotos(orderId) {
+  const host = document.getElementById(`crm-photos-${orderId}`);
+  if (!host) return;
+  try {
+    const photos = await api("GET", `/catalog/crm/orders/${orderId}/photos`, undefined, true);
+    if (!photos.length) {
+      host.innerHTML = `<div class="small text-muted">Фото этапов пока нет.</div>`;
+      return;
+    }
+    const items = await Promise.all(
+      photos.map(async (photo) => {
+        const url = await getPhotoViewUrl(photo.object_key);
+        return `<div class="d-inline-block me-2 mb-2" style="max-width:140px">
+          ${url ? `<img src="${url}" alt="" class="img-fluid rounded border" style="max-height:100px">` : `<div class="border rounded p-2 small">${escapeHtml(photo.object_key)}</div>`}
+          <div class="small text-muted">${escapeHtml(photo.caption || "")}</div>
+        </div>`;
+      })
+    );
+    host.innerHTML = `<div class="small fw-semibold mb-1">Фото производства</div>${items.join("")}`;
+  } catch {
+    host.innerHTML = "";
+  }
+}
+
+async function buildCrmMaterialsFromBom(bom) {
+  const materials = await api("GET", "/catalog/crm/materials", undefined, true);
+  if (!materials.length) throw new Error("Материалы CRM не настроены. Админ должен загрузить демо CRM.");
+  const byName = (part) => materials.find((m) => m.name.toLowerCase().includes(part)) || null;
+  const ldsp = byName("дсп") || materials[0];
+  const edge = byName("кромка");
+  const screws = byName("саморез");
+  const hinges = byName("петля");
+  const slides = byName("направляющ");
+  let sheetArea = 0;
+  let edgeMeters = 0;
+  for (const part of bom.parts) {
+    sheetArea += (part.width * part.height * part.quantity) / 1_000_000;
+    edgeMeters += ((part.width + part.height) * 2 * part.quantity) / 1000;
+  }
+  const cabinetCount = state.objects3d.filter((o) => o.type === "cabinet" || o.type === "wardrobe").length;
+  const lines = [];
+  lines.push({ material_id: ldsp.id, required_qty: Math.max(1, Math.ceil(sheetArea / 4.9)) });
+  if (edge) lines.push({ material_id: edge.id, required_qty: Math.max(1, Math.round(edgeMeters)) });
+  if (hinges) lines.push({ material_id: hinges.id, required_qty: Math.max(2, cabinetCount * 4) });
+  if (slides) lines.push({ material_id: slides.id, required_qty: Math.max(1, state.objects3d.filter((o) => o.type === "cabinet").length * 2) });
+  if (screws) lines.push({ material_id: screws.id, required_qty: Math.max(50, bom.parts.length * 24) });
+  return lines;
+}
+
+async function submitProjectToWork() {
+  if (!customerName()) {
+    toast("Войдите, чтобы отправить проект в работу", false);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
+    return;
+  }
+  if (!state.objects3d.length) {
+    toast("Добавьте мебель в комнату", false);
+    return;
+  }
+  try {
+    const bom = buildBomFromObjects();
+    const cost = estimateProjectCost(bom);
+    const tiers = estimateTierPrices(cost);
+    const project = await savePlannerProject();
+    state.projectId = project.id;
+    await syncPlannerObjectsToBackend();
+    await api("POST", `/planner/projects/${state.projectId}/submit`, {}, true);
+    const materials = await buildCrmMaterialsFromBom(bom);
+    const projectName = document.getElementById("projectName")?.value?.trim() || `Кухня ${customerName()}`;
+    await api(
+      "POST",
+      "/catalog/crm/orders/submit-project",
+      {
+        planner_project_id: state.projectId,
+        title: projectName,
+        customer: customerName(),
+        user_id: customerName(),
+        pricing: tiers,
+        materials,
+        notes: `Комната ${state.roomConfig.width}×${state.roomConfig.length}×${state.roomConfig.height} мм, объектов: ${state.objects3d.length}`,
+      },
+      true
+    );
+    document.getElementById("plannerHint").textContent = `Проект №${state.projectId} отправлен в производство`;
+    await loadUserOrders();
+    toast("Проект отправлен в работу — админ увидит расчёты");
+  } catch (error) {
+    toast(`Не удалось отправить: ${error.message}`, false);
+  }
+}
+
+async function loadUserOrders() {
+  const host = document.getElementById("userOrdersPanel");
+  if (!host || !customerName()) return;
+  try {
+    state.userOrders = await api("GET", `/catalog/crm/orders/user/${encodeURIComponent(customerName())}`, undefined, true);
+    await renderUserOrders();
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function renderUserOrders() {
+  const host = document.getElementById("userOrdersPanel");
+  if (!host) return;
+  if (!state.userOrders.length) {
+    host.innerHTML = `<div class="text-muted">У вас пока нет заказов в производстве. Спланируйте кухню и нажмите «Отправить в работу».</div>`;
+    return;
+  }
+  const cards = await Promise.all(
+    state.userOrders.map(async (order) => {
+      let photosHtml = "";
+      try {
+        const photos = await api("GET", `/catalog/crm/orders/${order.id}/photos`, undefined, true);
+        if (photos.length) {
+          const thumbs = await Promise.all(
+            photos.map(async (photo) => {
+              const url = await getPhotoViewUrl(photo.object_key);
+              return url
+                ? `<div class="me-2 mb-2 d-inline-block"><img src="${url}" class="rounded border" style="height:72px" alt=""><div class="small text-muted">${escapeHtml(photo.caption || "")}</div></div>`
+                : "";
+            })
+          );
+          photosHtml = `<div class="mt-2">${thumbs.join("")}</div>`;
+        }
+      } catch {
+        photosHtml = "";
+      }
+      const prices = order.price_standard
+        ? `<div class="small mt-1">Стандарт ${money(order.price_standard)} · Комфорт ${money(order.price_comfort)} · Премиум ${money(order.price_premium)}</div>`
+        : "";
+      return `<div class="border rounded p-3 mb-2">
+        <div class="d-flex justify-content-between gap-2">
+          <strong>${escapeHtml(order.title)}</strong>
+          <span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(order.status)}</span>
+        </div>
+        ${prices}
+        <div class="small text-muted">Заказ #${order.id}${order.planner_project_id ? ` · проект #${order.planner_project_id}` : ""}</div>
+        ${photosHtml}
+      </div>`;
+    })
+  );
+  host.innerHTML = cards.join("");
+}
+
+function applyPlannerModeUi() {
+  if (APP_MODE === "admin") {
+    document.getElementById("bomTabNav")?.classList.remove("d-none");
+    document.getElementById("btnGenerateBom")?.classList.remove("d-none");
+    return;
+  }
+  document.getElementById("bomTabNav")?.classList.add("d-none");
+  document.getElementById("btnGenerateBom")?.classList.add("d-none");
 }
 
 async function seedCrmDemo() {
@@ -2201,9 +2655,12 @@ async function prepareAssetLink() {
 
 function setBackendStatus(ok, message) {
   const dot = document.getElementById("backendDot");
-  dot.classList.toggle("ok", ok);
-  dot.classList.toggle("bad", !ok);
-  document.getElementById("backendStatus").textContent = message;
+  if (dot) {
+    dot.classList.toggle("ok", ok);
+    dot.classList.toggle("bad", !ok);
+  }
+  const statusEl = document.getElementById("backendStatus");
+  if (statusEl) statusEl.textContent = message;
 }
 
 function bindClick(id, handler) {
@@ -2234,7 +2691,14 @@ async function boot() {
   bindClick("btnCreateRoom", createRoom);
   bindClick("btnAddFurniture", addFurnitureSet);
   bindClick("btnGenerateBom", () => { renderBom(); toast("Список деталей обновлён"); });
-  bindClick("btnEstimateCost", () => { renderBom(); toast("Стоимость пересчитана"); });
+  bindClick("btnEstimateCost", () => {
+    renderBom();
+    if (APP_MODE !== "admin") {
+      document.querySelector('[data-bs-target="#costPane"]')?.click();
+    }
+    toast("Стоимость пересчитана");
+  });
+  bindClick("btnSubmitToWork", submitProjectToWork);
   bindClick("btnCutFrom3d", cutFrom3D);
   bindClick("btnExportBasis", exportBasisScript);
   bindClick("btnExportDbs", exportDbsFile);
@@ -2270,19 +2734,22 @@ async function boot() {
   }
   createDemoObjects();
   renderCart();
+  applyPlannerModeUi();
   if (document.getElementById("roomPlan")) renderRoomTopView();
   renderBom();
-  if (APP_MODE !== "admin") initRoom3D();
+  ensureRoom3D();
   updateAccountButton();
 
   try {
     await api("GET", "/health");
+    setBackendStatus(true, APP_MODE === "admin" ? "Backend доступен" : "Магазин подключен");
     if (APP_MODE === "admin") {
       await autoLogin();
       await bootAdminPanel();
-      ensureRoom3D();
-      if (canManageCatalog()) await seedDemoData();
-      setBackendStatus(true, "Панель администратора подключена");
+      if (canManageCatalog()) {
+        seedDemoData().catch((error) => console.warn("Demo seed:", error));
+      }
+      setBackendStatus(true, token() ? "Панель администратора подключена" : "Войдите как admin");
     } else {
       if (token()) await refreshAuth();
       await loadDeliverySettings();

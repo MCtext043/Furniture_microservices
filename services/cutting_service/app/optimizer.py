@@ -11,6 +11,7 @@ class _PartInstance:
     width: int
     height: int
     sequence: int
+    allow_rotation: bool = True
 
     @property
     def area(self) -> int:
@@ -52,7 +53,9 @@ def expand_parts(parts: list[Part]) -> list[_PartInstance]:
     sequence = 0
     for part in parts:
         for _ in range(part.quantity):
-            result.append(_PartInstance(part.name, part.width, part.height, sequence))
+            result.append(
+                _PartInstance(part.name, part.width, part.height, sequence, part.allow_rotation)
+            )
             sequence += 1
     return result
 
@@ -65,11 +68,17 @@ class _PackResult:
     sheet_bounds: tuple[tuple[int, int], ...]
 
 
-def _candidate_sizes(width: int, height: int, sheet_width: int, sheet_height: int) -> list[tuple[int, int, bool]]:
+def _candidate_sizes(
+    width: int,
+    height: int,
+    sheet_width: int,
+    sheet_height: int,
+    allow_rotation: bool = True,
+) -> list[tuple[int, int, bool]]:
     sizes: list[tuple[int, int, bool]] = []
     if width <= sheet_width and height <= sheet_height:
         sizes.append((width, height, False))
-    if width != height and height <= sheet_width and width <= sheet_height:
+    if allow_rotation and width != height and height <= sheet_width and width <= sheet_height:
         sizes.append((height, width, True))
     return sizes
 
@@ -153,7 +162,9 @@ def _find_best_candidate(
 ) -> _Candidate | None:
     best: _Candidate | None = None
     for part_index, part in enumerate(remaining):
-        for cand_w, cand_h, rotated in _candidate_sizes(part.width, part.height, sheet_width, sheet_height):
+        for cand_w, cand_h, rotated in _candidate_sizes(
+            part.width, part.height, sheet_width, sheet_height, part.allow_rotation
+        ):
             for free_rect in free_rects:
                 if cand_w > free_rect.width or cand_h > free_rect.height:
                     continue
@@ -173,12 +184,12 @@ def _pack_maxrects(
     remaining = [
         part
         for part in ordered_parts
-        if _candidate_sizes(part.width, part.height, sheet_width, sheet_height)
+        if _candidate_sizes(part.width, part.height, sheet_width, sheet_height, part.allow_rotation)
     ]
     impossible = tuple(
         part
         for part in ordered_parts
-        if not _candidate_sizes(part.width, part.height, sheet_width, sheet_height)
+        if not _candidate_sizes(part.width, part.height, sheet_width, sheet_height, part.allow_rotation)
     )
     placements: list[Placement] = []
     sheet_bounds: list[tuple[int, int]] = []

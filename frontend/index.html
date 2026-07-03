@@ -127,6 +127,10 @@
                     <option value="metal_graphite">Графитовый металл</option>
                   </select>
                 </div>
+                <div class="col-12">
+                  <label class="form-label small text-muted mb-0" for="objCustomColor">Свой цвет (необязательно)</label>
+                  <input class="form-control form-control-color form-control-sm w-100" type="color" id="objCustomColor" value="#8B5E3C" title="Свой цвет фасада">
+                </div>
               </div>
               <div class="d-flex gap-2 mt-2">
                 <button class="btn btn-sm btn-success" id="btnAddObject3d">Добавить</button>
@@ -134,10 +138,15 @@
               </div>
             </div>
 
+            <div class="row g-2 mb-2">
+              <div class="col-6"><input class="form-control form-control-sm" id="projectName" placeholder="Название проекта"></div>
+              <div class="col-6"><input class="form-control form-control-sm" id="projectLocation" placeholder="Город / адрес"></div>
+            </div>
             <div class="d-flex gap-2 flex-wrap mb-2">
               <button class="btn btn-sm btn-primary" id="btnCreateRoom">Сохранить проект</button>
-              <button class="btn btn-sm btn-outline-primary" id="btnGenerateBom">Список деталей</button>
+              <button class="btn btn-sm btn-outline-primary d-none" id="btnGenerateBom">Список деталей</button>
               <button class="btn btn-sm btn-warning" id="btnEstimateCost">Рассчитать стоимость</button>
+              <button class="btn btn-sm btn-success" id="btnSubmitToWork">Отправить в работу</button>
               <button class="btn btn-sm btn-outline-dark" id="btnExportAssemblyPdf">Инструкция (PDF)</button>
               <button class="btn btn-sm btn-outline-dark" id="btnExport3d">Скачать 3D</button>
               <button class="btn btn-sm btn-outline-dark" id="btnExportDbs">DBS</button>
@@ -151,7 +160,7 @@
             <ul class="nav nav-pills mb-3" role="tablist">
               <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#room3dPane" type="button">3D</button></li>
               <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#room2dPane" type="button">План сверху</button></li>
-              <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#bomPane" type="button">Детали</button></li>
+              <li class="nav-item d-none" id="bomTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#bomPane" type="button">Детали</button></li>
               <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#costPane" type="button">Стоимость</button></li>
             </ul>
             <div class="tab-content">
@@ -203,9 +212,10 @@
           <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
         </div>
         <div class="modal-body p-4">
-          <ul class="nav nav-pills mb-3">
+          <ul class="nav nav-pills mb-3" id="accountTabs">
             <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#loginPane" type="button">Вход</button></li>
             <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#registerPane" type="button">Регистрация</button></li>
+            <li class="nav-item d-none" id="userOrdersTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#userOrdersPane" type="button">Мои заказы</button></li>
           </ul>
           <div class="tab-content">
             <div class="tab-pane fade show active" id="loginPane">
@@ -218,6 +228,9 @@
               <input type="password" class="form-control mb-3" id="regPass" placeholder="Пароль (мин. 8 символов)" autocomplete="new-password" />
               <button class="btn btn-success w-100" id="btnRegister">Создать аккаунт</button>
             </div>
+            <div class="tab-pane fade" id="userOrdersPane">
+              <div id="userOrdersPanel" class="small text-muted">Войдите, чтобы видеть заказы в производстве.</div>
+            </div>
           </div>
         </div>
       </div>
@@ -227,18 +240,10 @@
   <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
   <script>window.APP_MODE = "user";</script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-      }
-    }
-  </script>
-  <script type="module" src="three-bootstrap.js?v=20260630-gltf"></script>
-  <script defer src="textures3d.js?v=20260616-pbr"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script defer src="app.js?v=20260616-pbr-dbs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="textures3d.js?v=20260703-cdn-restore"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
+  <script defer src="app.js?v=20260703-webgl-fix"></script>
 </body>
 </html>

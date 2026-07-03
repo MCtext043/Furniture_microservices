@@ -32,13 +32,36 @@ fi
 echo "[1/6] docker compose config..."
 "${COMPOSE[@]}" config >/dev/null
 
-chmod +x deploy/free-gateway-port.sh
+chmod +x deploy/free-gateway-port.sh deploy/free-https-ports.sh deploy/generate-caddyfile.sh
+
+# Explicit service list (no --profile: older docker compose on VPS may not support it).
+APP_SERVICES=(
+  postgres rabbitmq minio minio-init
+  catalog-service cutting-service planner-service auth-service assets-service
+  gateway-service
+)
+if [[ "${HTTPS_ENABLED:-0}" == "1" ]]; then
+  ./deploy/generate-caddyfile.sh
+  ./deploy/free-https-ports.sh
+  APP_SERVICES+=(caddy)
+else
+  "${COMPOSE[@]}" stop caddy 2>/dev/null || true
+  "${COMPOSE[@]}" rm -f caddy 2>/dev/null || true
+  # Public HTTP via gateway when HTTPS/Caddy is off
+  if grep -q '^GATEWAY_PORT_MAPPING=127.0.0.1:' .env 2>/dev/null; then
+    sed -i 's/^GATEWAY_PORT_MAPPING=127.0.0.1:/GATEWAY_PORT_MAPPING=0.0.0.0:/' .env
+  fi
+fi
 
 if [[ "${FAST_DEPLOY:-0}" == "1" ]]; then
   echo "[2/6] FAST: rebuild gateway only..."
   ./deploy/free-gateway-port.sh
   "${COMPOSE[@]}" build gateway-service
   "${COMPOSE[@]}" up -d --no-deps --force-recreate gateway-service
+  if [[ "${HTTPS_ENABLED:-0}" == "1" ]]; then
+    ./deploy/free-https-ports.sh
+    "${COMPOSE[@]}" up -d --no-deps --force-recreate caddy
+  fi
 else
   echo "[2/6] Starting postgres, rabbitmq, minio..."
   "${COMPOSE[@]}" up -d postgres rabbitmq minio
@@ -66,7 +89,10 @@ else
 
   echo "[5/6] Starting all services..."
   ./deploy/free-gateway-port.sh
-  "${COMPOSE[@]}" up -d --build --force-recreate --remove-orphans
+  if [[ "${HTTPS_ENABLED:-0}" == "1" ]]; then
+    ./deploy/free-https-ports.sh
+  fi
+  "${COMPOSE[@]}" up -d --build --force-recreate --remove-orphans "${APP_SERVICES[@]}"
 
   echo "Syncing admin password from .env..."
   chmod +x deploy/sync-admin-password.sh
@@ -77,7 +103,20 @@ echo "[6/6] Status:"
 "${COMPOSE[@]}" ps
 
 PORT="${GATEWAY_PORT:-8002}"
+HOST="${PUBLIC_DOMAIN:-${PUBLIC_HOST:-localhost}}"
 echo ""
 echo "Done."
-echo "  Health: curl -sS http://127.0.0.1:${PORT}/health"
-echo "  Site:   http://$(hostname -I | awk '{print $1}'):${PORT}/"
+if [[ "${HTTPS_ENABLED:-0}" == "1" ]]; then
+  SITE="${PUBLIC_DOMAIN:-${PUBLIC_HOST:-localhost}}"
+  if [[ "${SITE}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "  Site:   http://${SITE}/"
+    echo "  Health: curl -sS http://127.0.0.1/health"
+  else
+    echo "  Site:   https://${HOST}/"
+    echo "  Health: curl -k -sS https://127.0.0.1/health"
+  fi
+  echo "  HTTP :8002 (localhost only): curl -sS http://127.0.0.1:${PORT}/health"
+else
+  echo "  Health: curl -sS http://127.0.0.1:${PORT}/health"
+  echo "  Site:   http://${HOST}:${PORT}/"
+fi

@@ -1,0 +1,5 @@
+# Placeholder — overwritten on server by deploy/generate-caddyfile.sh
+:443 {
+    tls internal
+    reverse_proxy gateway-service:8000
+}

@@ -169,7 +169,44 @@ class CrmOrderOut(BaseModel):
     customer: str
     status: str
     notes: str
+    planner_project_id: int | None = None
+    user_id: str | None = None
+    price_standard: float | None = None
+    price_comfort: float | None = None
+    price_premium: float | None = None
     materials: list[CrmOrderMaterialLine]
+
+
+class CrmOrderStatusUpdate(BaseModel):
+    status: str = Field(pattern=r"^(конструктор|закупка|сборка)$")
+
+
+class CrmOrderPhotoCreate(BaseModel):
+    object_key: str = Field(min_length=3, max_length=255)
+    caption: str = Field(default="", max_length=255)
+
+
+class CrmOrderPhotoOut(CrmOrderPhotoCreate):
+    id: int
+    order_id: int
+    created_at: str
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CrmPricingIn(BaseModel):
+    standard: float = Field(ge=0)
+    comfort: float = Field(ge=0)
+    premium: float = Field(ge=0)
+
+
+class CrmSubmitProjectIn(BaseModel):
+    planner_project_id: int
+    title: str = Field(min_length=2, max_length=180)
+    customer: str = Field(default="", max_length=120)
+    user_id: str = Field(min_length=1, max_length=64)
+    pricing: CrmPricingIn
+    materials: list[CrmOrderMaterialLineIn] = Field(min_length=1)
+    notes: str = ""
 
 
 class CrmProcurementLine(BaseModel):

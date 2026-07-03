@@ -74,6 +74,11 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 _TRUNCATE_CATALOG = text(
     """
     TRUNCATE TABLE
+      crm_order_photos,
+      crm_order_materials,
+      crm_production_orders,
+      crm_warehouse_stock,
+      crm_materials,
       catalog_cart_items,
       catalog_wishlist_items,
       catalog_product_reviews,
@@ -92,8 +97,10 @@ _TRUNCATE_PLANNER = text(
 def catalog_engine():
     from services.catalog_service.app.db import Base
     from services.catalog_service.app import models as _catalog_models  # noqa: F401
+    from services.catalog_service.app.models import CrmOrderPhoto  # noqa: F401
 
     engine = create_engine(os.environ["DATABASE_URL"], future=True, pool_pre_ping=True)
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     return engine
 
@@ -126,6 +133,7 @@ def cutting_engine():
     from services.cutting_service.app import models as _cutting_models  # noqa: F401
 
     engine = create_engine(os.environ["DATABASE_URL"], future=True, pool_pre_ping=True)
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     return engine
 
@@ -158,6 +166,7 @@ def planner_engine():
     from services.planner_service.app import models as _planner_models  # noqa: F401
 
     engine = create_engine(os.environ["DATABASE_URL"], future=True, pool_pre_ping=True)
+    Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     return engine
 

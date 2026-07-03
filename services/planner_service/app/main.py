@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -13,8 +15,27 @@ from .schemas import FurnitureCreate, FurnitureOut, ProjectCreate, ProjectOut
 app = FastAPI(
     title="Furniture Planner Service",
     description="Управление проектами помещений и размещением 3D-мебели.",
-    version="0.1.0",
+    version="0.2.0",
 )
+
+
+def _project_out(project: RoomProject) -> ProjectOut:
+    submitted = project.submitted_at.isoformat() if project.submitted_at else None
+    return ProjectOut(
+        id=project.id,
+        name=project.name,
+        location=project.location,
+        user_id=project.user_id,
+        room_width=float(project.room_width),
+        room_length=float(project.room_length),
+        room_height=float(project.room_height),
+        price_standard=float(project.price_standard) if project.price_standard is not None else None,
+        price_comfort=float(project.price_comfort) if project.price_comfort is not None else None,
+        price_premium=float(project.price_premium) if project.price_premium is not None else None,
+        bom_json=project.bom_json or "",
+        status=project.status,
+        submitted_at=submitted,
+    )
 
 
 @app.get("/health")
@@ -23,18 +44,29 @@ def healthcheck() -> dict[str, str]:
 
 
 @app.post("/projects", response_model=ProjectOut, status_code=201, dependencies=[Depends(ensure_planner_user)])
-def create_project(payload: ProjectCreate, session: Session = Depends(get_session)) -> RoomProject:
+def create_project(payload: ProjectCreate, session: Session = Depends(get_session)) -> ProjectOut:
     project = RoomProject(**payload.model_dump())
     session.add(project)
     session.commit()
     session.refresh(project)
     publish_event("planner.project.created", {"id": project.id, "name": project.name})
-    return project
+    return _project_out(project)
 
 
 @app.get("/projects", response_model=list[ProjectOut])
-def list_projects(session: Session = Depends(get_session)) -> list[RoomProject]:
-    return list(session.scalars(select(RoomProject).order_by(RoomProject.id.desc())))
+def list_projects(session: Session = Depends(get_session)) -> list[ProjectOut]:
+    rows = list(session.scalars(select(RoomProject).order_by(RoomProject.id.desc())))
+    return [_project_out(row) for row in rows]
+
+
+@app.get("/projects/user/{user_id}", response_model=list[ProjectOut])
+def list_user_projects(user_id: str, session: Session = Depends(get_session)) -> list[ProjectOut]:
+    rows = list(
+        session.scalars(
+            select(RoomProject).where(RoomProject.user_id == user_id).order_by(RoomProject.id.desc())
+        )
+    )
+    return [_project_out(row) for row in rows]
 
 
 @app.post(
@@ -69,3 +101,16 @@ def list_furniture(project_id: int, session: Session = Depends(get_session)) -> 
         raise HTTPException(status_code=404, detail="Project not found")
     stmt = select(FurniturePlacement).where(FurniturePlacement.project_id == project_id)
     return list(session.scalars(stmt))
+
+
+@app.post("/projects/{project_id}/submit", response_model=ProjectOut, dependencies=[Depends(ensure_planner_user)])
+def submit_project(project_id: int, session: Session = Depends(get_session)) -> ProjectOut:
+    project = session.get(RoomProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project.status = "submitted"
+    project.submitted_at = datetime.now(timezone.utc)
+    session.commit()
+    session.refresh(project)
+    publish_event("planner.project.submitted", {"id": project.id, "user_id": project.user_id})
+    return _project_out(project)

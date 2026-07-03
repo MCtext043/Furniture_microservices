@@ -29,7 +29,7 @@ elif [[ ! -f .env ]]; then
   cp deploy/server.env.sample .env
 fi
 
-chmod +x deploy/install-server.sh deploy/alembic-upgrade.sh deploy/sync-db-password.sh deploy/reset-db.sh deploy/free-gateway-port.sh deploy/sync-admin-password.sh
+chmod +x deploy/install-server.sh deploy/alembic-upgrade.sh deploy/sync-db-password.sh deploy/reset-db.sh deploy/free-gateway-port.sh deploy/free-https-ports.sh deploy/generate-caddyfile.sh deploy/sync-admin-password.sh
 ./deploy/install-server.sh
 
 rm -f "${ARCHIVE}" "${SECRETS}" /tmp/furniture-deploy-remote.sh 2>/dev/null || true

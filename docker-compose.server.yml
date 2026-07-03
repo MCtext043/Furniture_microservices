@@ -169,7 +169,7 @@ services:
       dockerfile: services/gateway_service/Dockerfile
     restart: unless-stopped
     ports:
-      - "${GATEWAY_PORT_MAPPING:-0.0.0.0:8002:8000}"
+      - "${GATEWAY_PORT_MAPPING:-127.0.0.1:8002:8000}"
     environment:
       GATEWAY_CATALOG_URL: http://catalog-service:8000
       GATEWAY_CUTTING_URL: http://cutting-service:8000
@@ -183,6 +183,21 @@ services:
       - auth-service
       - assets-service
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT_MAPPING:-0.0.0.0:80:80}"
+      - "${HTTPS_PORT_MAPPING:-0.0.0.0:443:443}"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - gateway-service
+
 volumes:
   postgres_data:
   minio_data:
+  caddy_data:
+  caddy_config:
