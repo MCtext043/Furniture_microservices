@@ -44,6 +44,37 @@ def test_optimize_sheet_and_save_job(cutting_client: TestClient):
     jobs = cutting_client.get("/jobs")
     assert jobs.status_code == 200
     assert len(jobs.json()) == 1
+    assert jobs.json()[0]["has_result"] is True
+
+
+def test_get_cutting_job_detail_and_clear_history(cutting_client: TestClient):
+    created = cutting_client.post(
+        "/optimize",
+        json={
+            "sheet_width": 1000,
+            "sheet_height": 500,
+            "parts": [{"name": "Полка", "width": 200, "height": 100, "quantity": 2}],
+        },
+    )
+    assert created.status_code == 200
+    body = created.json()
+    job_id = body["job_id"]
+    assert job_id is not None
+
+    detail = cutting_client.get(f"/jobs/{job_id}")
+    assert detail.status_code == 200
+    detail_body = detail.json()
+    assert detail_body["id"] == job_id
+    assert detail_body["result"] is not None
+    assert detail_body["result"]["placed_count"] == body["placed_count"]
+
+    cleared = cutting_client.delete("/jobs")
+    assert cleared.status_code == 200
+    assert cleared.json()["deleted"] == 1
+
+    jobs = cutting_client.get("/jobs")
+    assert jobs.status_code == 200
+    assert jobs.json() == []
 
 
 def test_auto_transfer_to_next_sheet_and_area_accounting(cutting_client: TestClient):

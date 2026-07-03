@@ -39,6 +39,8 @@ body { background: #f7f3ee; color: #2f2924; }
 .furniture-chip { position: absolute; left: 50%; top: 50%; transform-origin: center center; border-radius: .65rem; background: rgba(122,79,43,.86); color: #fff; font-size: .75rem; box-shadow: 0 8px 20px rgba(0,0,0,.18); pointer-events: auto; display: flex; align-items: flex-start; justify-content: space-between; padding: .35rem .4rem; }
 .furniture-chip-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: .25rem; }
 .furniture-rotate-handle { position: absolute; top: -0.35rem; right: -0.35rem; width: 1.35rem; height: 1.35rem; border: 0; border-radius: 50%; background: #fff; color: #7a4f2b; font-size: .72rem; line-height: 1; cursor: grab; box-shadow: 0 2px 8px rgba(0,0,0,.22); pointer-events: auto; padding: 0; }
+.furniture-delete-handle { position: absolute; top: -0.35rem; left: -0.35rem; width: 1.35rem; height: 1.35rem; border: 0; border-radius: 50%; background: #fee2e2; color: #b91c1c; font-size: .95rem; line-height: 1; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.22); pointer-events: auto; padding: 0; }
+.furniture-delete-handle:hover { background: #fecaca; }
 .furniture-rotate-handle:active { cursor: grabbing; background: #fef3c7; }
 .viewer-3d { min-height: 360px; border-radius: .9rem; overflow: hidden; background: linear-gradient(180deg, #111827, #384152); position: relative; }
 .viewer-3d canvas { display: block; width: 100%; height: 360px; }

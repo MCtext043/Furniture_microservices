@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Integer
+from sqlalchemy import DateTime, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -15,4 +15,5 @@ class CuttingJob(Base):
     parts_count: Mapped[int] = mapped_column(Integer)
     placed_count: Mapped[int] = mapped_column(Integer)
     utilization_percent: Mapped[int] = mapped_column(Integer)
+    result_json: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))

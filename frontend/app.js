@@ -22,6 +22,7 @@ const state = {
   rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0 },
   cameraDrag: { active: false, startX: 0, startY: 0 },
   lastCutResult: null,
+  selectedCutJobId: null,
   crm: { orders: [], warehouse: [], procurementByOrder: {} },
   userOrders: [],
 };
@@ -891,6 +892,7 @@ async function optimizeCutting(customParts = null, silent = false) {
   try {
     const data = await api("POST", "/cutting/optimize", payload, true);
     state.lastCutResult = data;
+    state.selectedCutJobId = data.job_id || null;
     document.getElementById("cutStats").textContent = `${data.placed_count}/${data.requested_count} деталей, ${data.total_sheets} лист(ов), ${data.utilization_percent}%`;
     renderCutView(payload.sheet_width, payload.sheet_height, data.sheets || []);
     renderCutExtra(data);
@@ -1066,6 +1068,7 @@ function createDemoObjects() {
 
 function addFurnitureSet() {
   createDemoObjects();
+  renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
   renderBom();
@@ -1397,9 +1400,14 @@ function renderRoomTopView() {
       const chipH = Math.max(item.depth * scale, 18);
       const rotation = normalizeAngle(item.rotationY);
       const texturePreset = resolveTexturePreset(item);
+      const deleteBtn =
+        APP_MODE === "admin"
+          ? ""
+          : `<button type="button" class="furniture-delete-handle" data-delete-id="${item.id}" title="Удалить">×</button>`;
       return `
         <div class="furniture-chip-wrap" style="left:${left}px; top:${top}px; width:${Math.max(planW * scale, 24)}px; height:${Math.max(planD * scale, 18)}px;">
           <div class="furniture-chip" data-drag-id="${item.id}" style="cursor:grab; left:50%; top:50%; width:${chipW}px; height:${chipH}px; background:${texturePreset.color}; transform: translate(-50%, -50%) rotate(${rotation}deg);">
+            ${deleteBtn}
             <span class="furniture-chip-label">${escapeHtml(item.name)}</span>
             <button type="button" class="furniture-rotate-handle" data-rotate-id="${item.id}" title="Удерживайте и вращайте">↻</button>
           </div>
@@ -1409,12 +1417,18 @@ function renderRoomTopView() {
 
   host.querySelectorAll("[data-drag-id]").forEach((el) => {
     el.addEventListener("pointerdown", (ev) => {
-      if (ev.target.closest("[data-rotate-id]")) return;
+      if (ev.target.closest("[data-rotate-id], [data-delete-id]")) return;
       beginDrag(ev, el.dataset.dragId);
     });
   });
   host.querySelectorAll("[data-rotate-id]").forEach((el) => {
     el.addEventListener("pointerdown", (ev) => beginRotate(ev, el.dataset.rotateId));
+  });
+  host.querySelectorAll("[data-delete-id]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      removeObject3D(el.dataset.deleteId);
+    });
   });
 }
 
@@ -1557,6 +1571,7 @@ function addObject3DFromForm() {
     rotationY: 0,
   };
   state.objects3d.push(item);
+  renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
   toast("Объект добавлен в сцену");
@@ -1873,13 +1888,104 @@ async function renderCuttingJobs() {
       return;
     }
     host.innerHTML = `
-      <table class="table table-sm admin-table">
-        <thead><tr><th>#</th><th>Лист</th><th>Деталей</th><th>Загрузка</th></tr></thead>
-        <tbody>${jobs.map((j) => `<tr><td>${j.id}</td><td>${j.sheet_width}×${j.sheet_height} мм</td><td>${j.placed_count}/${j.parts_count}</td><td>${j.utilization_percent}%</td></tr>`).join("")}</tbody>
+      <table class="table table-sm admin-table mb-0">
+        <thead><tr><th>#</th><th>Дата</th><th>Лист</th><th>Деталей</th><th>Загрузка</th><th></th></tr></thead>
+        <tbody>${jobs
+          .map((job) => {
+            const active = state.selectedCutJobId === job.id ? "table-primary" : "";
+            const created = job.created_at ? new Date(job.created_at).toLocaleString("ru-RU") : "—";
+            const viewBtn = job.has_result
+              ? `<button class="btn btn-sm btn-outline-primary py-0" data-view-cut="${job.id}">Схема</button>`
+              : `<span class="text-muted">—</span>`;
+            return `<tr class="${active}">
+              <td>${job.id}</td>
+              <td class="small">${escapeHtml(created)}</td>
+              <td>${job.sheet_width}×${job.sheet_height} мм</td>
+              <td>${job.placed_count}/${job.parts_count}</td>
+              <td>${job.utilization_percent}%</td>
+              <td>${viewBtn}</td>
+            </tr>`;
+          })
+          .join("")}</tbody>
       </table>`;
+    host.querySelectorAll("[data-view-cut]").forEach((button) => {
+      button.addEventListener("click", () => viewCuttingJob(Number(button.dataset.viewCut)));
+    });
   } catch (error) {
     host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
   }
+}
+
+async function viewCuttingJob(jobId) {
+  try {
+    const job = await api("GET", `/cutting/jobs/${jobId}`);
+    if (!job.result) {
+      toast("Для этого раскроя нет сохранённой схемы", false);
+      return;
+    }
+    state.selectedCutJobId = job.id;
+    state.lastCutResult = job.result;
+    const stats = document.getElementById("cutStats");
+    if (stats) {
+      stats.textContent = `${job.result.placed_count}/${job.result.requested_count} деталей, ${job.result.total_sheets} лист(ов), ${job.result.utilization_percent}%`;
+    }
+    renderCutView(job.sheet_width, job.sheet_height, job.result.sheets || []);
+    renderCutExtra(job.result);
+    await renderCuttingJobs();
+    toast(`Показан раскрой #${job.id}`);
+  } catch (error) {
+    toast(`Не удалось открыть раскрой: ${formatApiError(error)}`, false);
+  }
+}
+
+async function clearCuttingJobs() {
+  if (!window.confirm("Очистить всю историю раскроев?")) return;
+  try {
+    await api("DELETE", "/cutting/jobs", undefined, true);
+    state.selectedCutJobId = null;
+    state.lastCutResult = null;
+    const stats = document.getElementById("cutStats");
+    if (stats) stats.textContent = "готово";
+    const view = document.getElementById("cutView");
+    if (view) view.innerHTML = `<span class="text-muted">Схема появится после расчёта</span>`;
+    const extra = document.getElementById("cutExtraInfo");
+    if (extra) extra.textContent = "";
+    await renderCuttingJobs();
+    toast("История раскроев очищена");
+  } catch (error) {
+    toast(`Не удалось очистить историю: ${formatApiError(error)}`, false);
+  }
+}
+
+function removeObject3D(id) {
+  const index = state.objects3d.findIndex((obj) => obj.id === id);
+  if (index < 0) return;
+  const [removed] = state.objects3d.splice(index, 1);
+  renderObjects3dList();
+  renderRoomTopView();
+  renderRoom3D();
+  renderBom();
+  toast(`Удалён: ${removed.name}`);
+}
+
+function renderObjects3dList() {
+  const host = document.getElementById("objects3dList");
+  if (!host || APP_MODE === "admin") return;
+  if (!state.objects3d.length) {
+    host.innerHTML = `<div class="text-muted">Объектов в комнате пока нет.</div>`;
+    return;
+  }
+  host.innerHTML = state.objects3d
+    .map(
+      (item) => `<div class="d-flex justify-content-between align-items-center gap-2 border rounded px-2 py-1 mb-1">
+        <span>${escapeHtml(item.name)} <span class="text-muted">(${Math.round(item.width)}×${Math.round(item.depth)}×${Math.round(item.height)})</span></span>
+        <button type="button" class="btn btn-sm btn-outline-danger py-0" data-delete-object="${item.id}">Удалить</button>
+      </div>`
+    )
+    .join("");
+  host.querySelectorAll("[data-delete-object]").forEach((button) => {
+    button.addEventListener("click", () => removeObject3D(button.dataset.deleteObject));
+  });
 }
 
 async function loadCrm() {
@@ -2301,6 +2407,7 @@ async function loadPlannerProject(projectId) {
   if (roomHeight) roomHeight.value = state.roomConfig.height;
 
   if (state.three) rebuildRoomGeometry();
+  renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
   renderBom();
@@ -2832,6 +2939,7 @@ async function boot() {
     toast("Демо-данные загружены");
   });
   bindClick("btnRefreshJobs", renderCuttingJobs);
+  bindClick("btnClearCuttingJobs", clearCuttingJobs);
 
   document.addEventListener("pointermove", handleDragMove);
   document.addEventListener("pointerup", endDrag);
@@ -2847,6 +2955,7 @@ async function boot() {
   renderCart();
   applyPlannerModeUi();
   if (document.getElementById("roomPlan")) renderRoomTopView();
+  renderObjects3dList();
   renderBom();
   if (APP_MODE !== "admin") {
     ensureRoom3D();

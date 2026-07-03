@@ -1,5 +1,7 @@
-from fastapi import Depends, FastAPI
-from sqlalchemy import select
+import json
+
+from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from common.jwt_auth import ensure_cutting_runner
@@ -8,7 +10,7 @@ from common.messaging import publish_event
 from .db import get_session
 from .models import CuttingJob
 from .optimizer import optimize_sheet
-from .schemas import CuttingJobOut, CuttingRequest, CuttingResponse
+from .schemas import CuttingJobDetail, CuttingJobOut, CuttingRequest, CuttingResponse
 
 
 app = FastAPI(
@@ -57,18 +59,10 @@ def optimize(payload: CuttingRequest, session: Session = Depends(get_session)) -
         utilization_percent=int(utilization),
     )
     session.add(job)
-    session.commit()
-    session.refresh(job)
-    publish_event(
-        "cutting.job.completed",
-        {
-            "job_id": job.id,
-            "placed_count": job.placed_count,
-            "utilization_percent": job.utilization_percent,
-        },
-    )
+    session.flush()
 
-    return CuttingResponse(
+    response = CuttingResponse(
+        job_id=job.id,
         placed_count=len(placements),
         requested_count=requested_count,
         utilization_percent=utilization,
@@ -80,7 +74,58 @@ def optimize(payload: CuttingRequest, session: Session = Depends(get_session)) -
         placements=placements,
     )
 
+    job.result_json = json.dumps(response.model_dump(mode="json"))
+    session.commit()
+    session.refresh(job)
+    publish_event(
+        "cutting.job.completed",
+        {
+            "job_id": job.id,
+            "placed_count": job.placed_count,
+            "utilization_percent": job.utilization_percent,
+        },
+    )
+
+    return response
+
+
+def _job_out(job: CuttingJob) -> CuttingJobOut:
+    return CuttingJobOut(
+        id=job.id,
+        sheet_width=job.sheet_width,
+        sheet_height=job.sheet_height,
+        parts_count=job.parts_count,
+        placed_count=job.placed_count,
+        utilization_percent=job.utilization_percent,
+        created_at=job.created_at,
+        has_result=bool(job.result_json),
+    )
+
 
 @app.get("/jobs", response_model=list[CuttingJobOut])
-def list_jobs(session: Session = Depends(get_session)) -> list[CuttingJob]:
-    return list(session.scalars(select(CuttingJob).order_by(CuttingJob.id.desc()).limit(100)))
+def list_jobs(session: Session = Depends(get_session)) -> list[CuttingJobOut]:
+    rows = list(session.scalars(select(CuttingJob).order_by(CuttingJob.id.desc()).limit(100)))
+    return [_job_out(row) for row in rows]
+
+
+@app.get("/jobs/{job_id}", response_model=CuttingJobDetail)
+def get_job(job_id: int, session: Session = Depends(get_session)) -> CuttingJobDetail:
+    job = session.get(CuttingJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Cutting job not found")
+    result = None
+    if job.result_json:
+        try:
+            payload = json.loads(job.result_json)
+            payload.pop("job_id", None)
+            result = CuttingResponse(**payload)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            result = None
+    return CuttingJobDetail(**_job_out(job).model_dump(), result=result)
+
+
+@app.delete("/jobs", dependencies=[Depends(ensure_cutting_runner)])
+def clear_jobs(session: Session = Depends(get_session)) -> dict[str, int]:
+    deleted = session.execute(delete(CuttingJob)).rowcount or 0
+    session.commit()
+    return {"deleted": deleted}

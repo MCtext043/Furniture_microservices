@@ -20,7 +20,12 @@ with tarfile.open(fileobj=buf, mode="w:gz") as tar:
         "frontend/app.js",
         "frontend/admin.html",
         "frontend/index.html",
+        "frontend/styles.css",
         "frontend/textures3d.js",
+        "services/cutting_service/app/main.py",
+        "services/cutting_service/app/models.py",
+        "services/cutting_service/app/schemas.py",
+        "alembic/versions/005_cutting_job_result.py",
     ]:
         tar.add(ROOT / rel, arcname=rel)
 buf.seek(0)
@@ -31,19 +36,18 @@ sftp.close()
 
 cmds = [
     "cd /opt/furniture && tar -xzf /tmp/3d-final.tar.gz",
-    "cd /opt/furniture && docker compose --env-file .env -f docker-compose.server.yml build gateway-service",
-    "cd /opt/furniture && docker compose --env-file .env -f docker-compose.server.yml up -d --no-deps --force-recreate gateway-service",
+    "cd /opt/furniture && docker compose --env-file .env -f docker-compose.server.yml build migrate cutting-service gateway-service",
+    "cd /opt/furniture && docker compose --env-file .env -f docker-compose.server.yml run --rm migrate",
+    "cd /opt/furniture && docker compose --env-file .env -f docker-compose.server.yml up -d --no-deps --force-recreate cutting-service gateway-service",
     "curl -sS -m 8 http://127.0.0.1/health",
-    "grep -c 'three.min.js' /opt/furniture/frontend/index.html",
-    "curl -sS -m 8 http://127.0.0.1/index.html | grep -n 'admin-view'",
+    "curl -sS -m 8 http://127.0.0.1/cutting/jobs",
 ]
 
 for cmd in cmds:
-    _, stdout, stderr = ssh.exec_command(cmd)
+    _, stdout, stderr = ssh.exec_command(cmd, timeout=300)
     code = stdout.channel.recv_exit_status()
     out = (stdout.read() + stderr.read()).decode("utf-8", "replace")
     print(f"--- exit {code}: {cmd}")
-    print(out[-1200:])
+    print(out[-1500:])
 
 ssh.close()
-

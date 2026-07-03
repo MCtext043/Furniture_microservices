@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -41,6 +43,7 @@ class UnplacedPart(BaseModel):
 
 
 class CuttingResponse(BaseModel):
+    job_id: int | None = None
     placed_count: int
     requested_count: int
     utilization_percent: float
@@ -59,4 +62,10 @@ class CuttingJobOut(BaseModel):
     parts_count: int
     placed_count: int
     utilization_percent: int
+    created_at: datetime | None = None
+    has_result: bool = False
     model_config = ConfigDict(from_attributes=True)
+
+
+class CuttingJobDetail(CuttingJobOut):
+    result: CuttingResponse | None = None
