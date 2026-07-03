@@ -173,32 +173,19 @@
           <div class="col-xl-5">
             <div class="service-card p-4">
               <div class="muted-title">Проекты</div>
-              <h2 class="section-title">Планировщик (производство)</h2>
-              <p class="text-muted small">Соберите комнату и отправьте детали в раскрой.</p>
-              <div class="row g-2 mb-3">
-                <div class="col-4"><input class="form-control form-control-sm" id="roomWidth" type="number" value="6000"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="roomLength" type="number" value="5000"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="roomHeight" type="number" value="2800"></div>
-              </div>
-              <button class="btn btn-sm btn-outline-primary mb-2" id="btnApplyRoomSize">Размеры комнаты</button>
-              <div class="row g-2 mb-2">
-                <div class="col-6"><select class="form-select form-select-sm" id="objType"><option value="wardrobe">Шкаф</option><option value="cabinet">Тумба</option><option value="shelf">Стеллаж</option><option value="table">Стол</option><option value="sofa">Диван</option></select></div>
-                <div class="col-6"><input class="form-control form-control-sm" id="objName" value="Объект"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="objW" type="number" value="1200"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="objD" type="number" value="600"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="objH" type="number" value="2100"></div>
-                <div class="col-12"><select class="form-select form-select-sm" id="objTexture"><option value="wood_dark_oak">Темный дуб</option><option value="wood_oak">Светлый дуб</option><option value="mdf_matte">МДФ матовый</option><option value="board_white">Белое ДСП</option><option value="board_black">Черное ДСП</option><option value="laminate_grey">Ламинат</option><option value="countertop">Столешница</option></select></div>
-              </div>
+              <h2 class="section-title h5">Просмотр 3D-проектов</h2>
+              <p class="text-muted small">Откройте сохранённый проект клиента, просмотрите сцену и экспортируйте данные для производства.</p>
+              <button class="btn btn-sm btn-outline-primary mb-3" id="btnRefreshProjects">Обновить список</button>
+              <div id="adminProjectsList" class="mb-3 small text-muted">Загрузка проектов...</div>
+              <div class="small text-muted mb-2" id="plannerHint">Проект не выбран.</div>
               <div class="d-flex flex-wrap gap-2">
-                <button class="btn btn-sm btn-success" id="btnAddObject3d">Добавить</button>
-                <button class="btn btn-sm btn-outline-secondary" id="btnAddFurniture">Демо</button>
-                <button class="btn btn-sm btn-primary" id="btnCreateRoom">Сохранить проект</button>
+                <button class="btn btn-sm btn-outline-primary" id="btnGenerateBom">Детали</button>
                 <button class="btn btn-sm btn-warning" id="btnCutFrom3d">Раскрой из 3D</button>
                 <button class="btn btn-sm btn-outline-dark" id="btnExportBasis">Базис</button>
                 <button class="btn btn-sm btn-outline-dark" id="btnExport3d">GLTF</button>
                 <button class="btn btn-sm btn-outline-dark" id="btnExportDbs">DBS</button>
+                <button class="btn btn-sm btn-outline-dark" id="btnExportAssemblyPdf">PDF</button>
               </div>
-              <div class="small text-muted mt-2" id="plannerHint">Проект не создан.</div>
               <div class="alert alert-light border mt-2 small mb-0" id="plannerCutResult">Раскрой из 3D ещё не запускался.</div>
             </div>
           </div>
@@ -216,14 +203,6 @@
               </div>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section class="mb-5" id="assets">
-        <div class="service-card p-4">
-          <h2 class="section-title h5">3D и материалы</h2>
-          <button class="btn btn-outline-primary btn-sm" id="btnAssetLink">Подготовить ссылку на загрузку</button>
-          <div class="alert alert-light border mt-3 small mb-0" id="assetResult">Ссылка не запрошена.</div>
         </div>
       </section>
     </main>
@@ -283,6 +262,6 @@
   <script src="textures3d.js?v=20260703-cdn-restore"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script defer src="app.js?v=20260703-webgl-fix"></script>
+  <script defer src="app.js?v=20260703-admin-view"></script>
 </body>
 </html>

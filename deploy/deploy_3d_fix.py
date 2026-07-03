@@ -35,7 +35,7 @@ cmds = [
     "cd /opt/furniture && docker compose --env-file .env -f docker-compose.server.yml up -d --no-deps --force-recreate gateway-service",
     "curl -sS -m 8 http://127.0.0.1/health",
     "grep -c 'three.min.js' /opt/furniture/frontend/index.html",
-    "curl -sS -m 8 http://127.0.0.1/index.html | grep -n 'webgl-fix'",
+    "curl -sS -m 8 http://127.0.0.1/index.html | grep -n 'admin-view'",
 ]
 
 for cmd in cmds:

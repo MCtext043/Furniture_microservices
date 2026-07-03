@@ -1084,6 +1084,22 @@ function createSurfaceMaterial(type, variant, colorHex) {
   return new THREE.MeshStandardMaterial({ color: colorHex });
 }
 
+function normalizeColorHex(value) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  return raw.startsWith("#") ? raw : `#${raw}`;
+}
+
+function createFurnitureMaterial(item, texturePreset) {
+  if (!window.THREE) return null;
+  const customColor = normalizeColorHex(item.customColor);
+  if (customColor) {
+    return new THREE.MeshStandardMaterial({ color: customColor, roughness: 0.72, metalness: 0.04 });
+  }
+  return createSurfaceMaterial(texturePreset.material, item.texture || "default", texturePreset.color);
+}
+
 function roomUnitToWorldX(x) {
   return x - state.roomConfig.width / 2;
 }
@@ -1341,7 +1357,7 @@ function renderRoom3D() {
     const w = Math.max(Number(item.width) || 350, 350);
     const d = Math.max(Number(item.depth) || 350, 350);
     const h = Math.max(Number(item.height) || 350, 350);
-    const bodyMat = createSurfaceMaterial(texturePreset.material, item.texture || "default", texturePreset.color);
+    const bodyMat = createFurnitureMaterial(item, texturePreset);
     const group = window.Texture3D?.buildFurnitureGroup
       ? window.Texture3D.buildFurnitureGroup(item, w, h, d, bodyMat)
       : (() => {
@@ -1403,6 +1419,7 @@ function renderRoomTopView() {
 }
 
 function beginDrag(ev, id) {
+  if (APP_MODE === "admin") return;
   if (state.rotate.active) return;
   const item = state.objects3d.find((obj) => obj.id === id);
   if (!item) return;
@@ -1417,6 +1434,7 @@ function beginDrag(ev, id) {
 }
 
 function beginRotate(ev, id) {
+  if (APP_MODE === "admin") return;
   ev.stopPropagation();
   ev.preventDefault();
   const item = state.objects3d.find((obj) => obj.id === id);
@@ -1487,9 +1505,13 @@ function endDrag() {
 }
 
 function applyRoomSize() {
-  const width = Number(document.getElementById("roomWidth").value);
-  const length = Number(document.getElementById("roomLength").value);
-  const height = Number(document.getElementById("roomHeight").value);
+  const widthInput = document.getElementById("roomWidth");
+  const lengthInput = document.getElementById("roomLength");
+  const heightInput = document.getElementById("roomHeight");
+  if (!widthInput || !lengthInput || !heightInput) return;
+  const width = Number(widthInput.value);
+  const length = Number(lengthInput.value);
+  const height = Number(heightInput.value);
   if (width < 2000 || length < 2000 || height < 2000) {
     toast("Размеры комнаты должны быть не менее 2000 мм", false);
     return;
@@ -1517,7 +1539,8 @@ function addObject3DFromForm() {
   }
   const { planW, planD } = getObjectPlanSize({ width, depth, height, rotationY: 0 });
   const defaults = furnitureAccessoryDefaults(type);
-  const customColor = document.getElementById("objCustomColor")?.value || "";
+  const useCustomColor = document.getElementById("objUseCustomColor")?.checked;
+  const customColor = useCustomColor ? normalizeColorHex(document.getElementById("objCustomColor")?.value) : "";
   const item = {
     id: makeId(),
     type,
@@ -2222,13 +2245,119 @@ async function renderUserOrders() {
 }
 
 function applyPlannerModeUi() {
-  if (APP_MODE === "admin") {
-    document.getElementById("bomTabNav")?.classList.remove("d-none");
-    document.getElementById("btnGenerateBom")?.classList.remove("d-none");
-    return;
-  }
+  if (APP_MODE === "admin") return;
   document.getElementById("bomTabNav")?.classList.add("d-none");
   document.getElementById("btnGenerateBom")?.classList.add("d-none");
+}
+
+function plannerStatusLabel(status) {
+  if (status === "submitted") return "отправлен";
+  if (status === "draft") return "черновик";
+  return status || "—";
+}
+
+async function loadPlannerProject(projectId) {
+  const projects = await api("GET", "/planner/projects");
+  const project = projects.find((row) => row.id === projectId);
+  if (!project) throw new Error("Проект не найден");
+
+  state.projectId = project.id;
+  state.roomConfig = {
+    width: Number(project.room_width) || 6000,
+    length: Number(project.room_length) || 5000,
+    height: Number(project.room_height) || 2800,
+  };
+
+  const furniture = await api("GET", `/planner/projects/${projectId}/furniture`);
+  state.objects3d = furniture.map((row) => ({
+    id: makeId(),
+    type: row.furniture_type || "cabinet",
+    texture: row.texture || "wood_oak",
+    customColor: row.custom_color || "",
+    name: row.name,
+    width: row.width,
+    depth: row.depth,
+    height: row.height,
+    x: row.x,
+    z: row.z,
+    rotationY: row.rotation_y || 0,
+    drawers: row.drawers ?? 0,
+    handles: row.handles ?? 0,
+  }));
+
+  if (project.bom_json) {
+    try {
+      state.lastCutResult = null;
+    } catch {
+      // ignore invalid bom cache
+    }
+  }
+
+  const roomWidth = document.getElementById("roomWidth");
+  const roomLength = document.getElementById("roomLength");
+  const roomHeight = document.getElementById("roomHeight");
+  if (roomWidth) roomWidth.value = state.roomConfig.width;
+  if (roomLength) roomLength.value = state.roomConfig.length;
+  if (roomHeight) roomHeight.value = state.roomConfig.height;
+
+  if (state.three) rebuildRoomGeometry();
+  renderRoomTopView();
+  renderRoom3D();
+  renderBom();
+  ensureRoom3D();
+
+  const hint = document.getElementById("plannerHint");
+  if (hint) {
+    const user = project.user_id ? ` · ${project.user_id}` : "";
+    const location = project.location ? ` · ${project.location}` : "";
+    hint.textContent = `Открыт проект №${project.id}: ${project.name}${user}${location} (${plannerStatusLabel(project.status)})`;
+  }
+}
+
+async function renderAdminPlannerProjects() {
+  const host = document.getElementById("adminProjectsList");
+  if (!host) return;
+  host.textContent = "Загрузка проектов...";
+  try {
+    const projects = await api("GET", "/planner/projects");
+    if (!projects.length) {
+      host.innerHTML = '<div class="text-muted">Сохранённых проектов пока нет.</div>';
+      return;
+    }
+    host.innerHTML = projects
+      .map((project) => {
+        const active = state.projectId === project.id ? "border-primary" : "";
+        const prices = project.price_standard
+          ? `<div class="small text-muted mt-1">от ${money(project.price_standard)}</div>`
+          : "";
+        return `<div class="border rounded p-3 mb-2 ${active}">
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <div>
+              <strong>#${project.id} ${escapeHtml(project.name)}</strong>
+              <div class="small text-muted">${escapeHtml(project.user_id || "—")} · ${escapeHtml(plannerStatusLabel(project.status))}</div>
+              <div class="small">${Math.round(project.room_width)}×${Math.round(project.room_length)}×${Math.round(project.room_height)} мм</div>
+              ${prices}
+            </div>
+            <button class="btn btn-sm btn-primary" data-open-project="${project.id}">Открыть</button>
+          </div>
+        </div>`;
+      })
+      .join("");
+
+    host.querySelectorAll("[data-open-project]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try {
+          await loadPlannerProject(Number(button.dataset.openProject));
+          await renderAdminPlannerProjects();
+          toast("Проект загружен");
+        } catch (error) {
+          toast(`Не удалось открыть проект: ${formatApiError(error)}`, false);
+        }
+      });
+    });
+  } catch (error) {
+    host.innerHTML = `<div class="text-warning">Не удалось загрузить проекты: ${escapeHtml(formatApiError(error))}</div>`;
+  }
 }
 
 async function seedCrmDemo() {
@@ -2259,7 +2388,10 @@ async function bootAdminPanel() {
   await renderCuttingJobs();
   await loadDeliverySettingsAdmin();
   await loadCrm();
-  ensureRoom3D();
+  await renderAdminPlannerProjects();
+  if (state.projectId) {
+    ensureRoom3D();
+  }
 }
 
 async function cutFrom3D() {
@@ -2630,29 +2762,6 @@ function exportSceneGltf() {
   });
 }
 
-async function prepareAssetLink() {
-  try {
-    const data = await api(
-      "POST",
-      "/assets/presign-put",
-      { object_key: `models/demo-room-${Date.now()}.glb`, content_type: "model/gltf-binary" },
-      true
-    );
-    document.getElementById("assetResult").innerHTML = `
-      <strong>Ссылка для загрузки подготовлена</strong> (действует ${data.expires_seconds} сек).<br>
-      <span class="text-muted">Готовой модели с этим именем нет — это пустой слот в MinIO. Получить GLB:</span>
-      <ul class="mb-2 mt-2">
-        <li>кнопка <strong>GLTF</strong> в планировщике — экспорт текущей сцены;</li>
-        <li>любой файл <code>.glb</code> / <code>.gltf</code> — загрузить по ссылке ниже (curl, Postman или <a href="http://127.0.0.1:9001" target="_blank" rel="noopener">MinIO Console</a>).</li>
-      </ul>
-      <div class="small mb-2"><strong>upload_url:</strong> <a href="${data.upload_url}" target="_blank" rel="noopener">открыть presigned PUT</a></div>
-      <span class="small text-muted">Bucket: ${escapeHtml(data.bucket)}, key: ${escapeHtml(data.object_key)}</span>`;
-    toast("Хранилище готово принять 3D-модель");
-  } catch (error) {
-    toast(`Хранилище недоступно: ${error.message}`, false);
-  }
-}
-
 function setBackendStatus(ok, message) {
   const dot = document.getElementById("backendDot");
   if (dot) {
@@ -2705,7 +2814,7 @@ async function boot() {
   bindClick("btnExportCutPdf", exportCutPdf);
   bindClick("btnExportAssemblyPdf", exportAssemblyPdf);
   bindClick("btnExport3d", exportSceneGltf);
-  bindClick("btnAssetLink", prepareAssetLink);
+  bindClick("btnRefreshProjects", renderAdminPlannerProjects);
   bindClick("btnLogin", loginCustomer);
   bindClick("btnRegister", registerCustomer);
   bindClick("btnAdminLogin", loginCustomer);
@@ -2731,14 +2840,28 @@ async function boot() {
   if (APP_MODE === "admin") {
     state.cuttingParts = defaultCuttingParts.map((p) => ({ ...p }));
     renderParts();
+    state.objects3d = [];
+  } else {
+    createDemoObjects();
   }
-  createDemoObjects();
   renderCart();
   applyPlannerModeUi();
   if (document.getElementById("roomPlan")) renderRoomTopView();
   renderBom();
-  ensureRoom3D();
+  if (APP_MODE !== "admin") {
+    ensureRoom3D();
+  }
   updateAccountButton();
+
+  const useCustomColorEl = document.getElementById("objUseCustomColor");
+  const customColorEl = document.getElementById("objCustomColor");
+  if (useCustomColorEl && customColorEl) {
+    const syncCustomColorInput = () => {
+      customColorEl.disabled = !useCustomColorEl.checked;
+    };
+    useCustomColorEl.addEventListener("change", syncCustomColorInput);
+    syncCustomColorInput();
+  }
 
   try {
     await api("GET", "/health");

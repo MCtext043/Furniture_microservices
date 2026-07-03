@@ -128,8 +128,11 @@
                   </select>
                 </div>
                 <div class="col-12">
-                  <label class="form-label small text-muted mb-0" for="objCustomColor">Свой цвет (необязательно)</label>
-                  <input class="form-control form-control-color form-control-sm w-100" type="color" id="objCustomColor" value="#8B5E3C" title="Свой цвет фасада">
+                  <div class="form-check mb-1">
+                    <input class="form-check-input" type="checkbox" id="objUseCustomColor" />
+                    <label class="form-check-label small" for="objUseCustomColor">Свой цвет фасада</label>
+                  </div>
+                  <input class="form-control form-control-color form-control-sm w-100" type="color" id="objCustomColor" value="#8B5E3C" title="Свой цвет фасада" disabled />
                 </div>
               </div>
               <div class="d-flex gap-2 mt-2">
@@ -244,6 +247,6 @@
   <script src="textures3d.js?v=20260703-cdn-restore"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script defer src="app.js?v=20260703-webgl-fix"></script>
+  <script defer src="app.js?v=20260703-admin-view"></script>
 </body>
 </html>
