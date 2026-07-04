@@ -244,13 +244,14 @@
           </div>
           <div class="mb-2">
             <label class="form-label small">Категория</label>
-            <select class="form-select" id="editProductCategory"></select>
-            <div id="editProductCategoryHint" class="small text-warning mt-1 d-none">
-              Нет категорий.
-              <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="btnQuickCategory">Создать категорию</button>
-              или
-              <button type="button" class="btn btn-link btn-sm p-0 align-baseline" id="btnSeedFromModal">загрузить демо-данные</button>.
-            </div>
+            <input class="form-control" id="editProductCategory" list="categoryNameList" placeholder="Кухни, Шкафы или новая категория" />
+            <datalist id="categoryNameList"></datalist>
+            <div class="small text-muted mt-1">Введите существующую категорию или новое название — она создастся автоматически.</div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small">Фото товара</label>
+            <input class="form-control form-control-sm" type="file" id="editProductPhotos" accept="image/*" multiple />
+            <div id="editProductPhotosPreview" class="d-flex flex-wrap gap-2 mt-2"></div>
           </div>
           <div class="mb-2"><label class="form-label small">Описание</label><textarea class="form-control" id="editProductDesc" rows="2"></textarea></div>
         </div>
@@ -266,6 +267,6 @@
   <script src="textures3d.js?v=20260703-cdn-restore"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script defer src="app.js?v=20260703-tier-select"></script>
+  <script defer src="app.js?v=20260704-catalog-photos"></script>
 </body>
 </html>

@@ -28,6 +28,18 @@ class Product(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     category: Mapped[Category | None] = relationship()
+    photos: Mapped[list["ProductPhoto"]] = relationship(back_populates="product", order_by="ProductPhoto.sort_order")
+
+
+class ProductPhoto(Base):
+    __tablename__ = "catalog_product_photos"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("catalog_products.id", ondelete="CASCADE"), index=True)
+    object_key: Mapped[str] = mapped_column(String(255))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+
+    product: Mapped[Product] = relationship(back_populates="photos")
 
 
 class ProductReview(Base):

@@ -27,8 +27,20 @@ class ProductCreate(BaseModel):
     is_active: bool = True
 
 
+class ProductPhotoCreate(BaseModel):
+    object_key: str = Field(min_length=3, max_length=255)
+    sort_order: int = Field(default=0, ge=0)
+
+
+class ProductPhotoOut(ProductPhotoCreate):
+    id: int
+    product_id: int
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ProductOut(ProductCreate):
     id: int
+    photos: list[ProductPhotoOut] = []
     model_config = ConfigDict(from_attributes=True)
 
 

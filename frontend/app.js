@@ -26,7 +26,10 @@ const state = {
   crm: { orders: [], warehouse: [], procurementByOrder: {} },
   userOrders: [],
   selectedTier: "standard",
+  productPhotoUrls: {},
 };
+
+const productEditorPhotos = { existing: [], pending: [], removed: [] };
 
 const demoCategories = ["Кухни", "Шкафы", "Гостиные", "Спальни", "Офис", "Детские"];
 const demoProducts = [
@@ -280,21 +283,39 @@ function inferDemoCategoryLabel(categoryId, products) {
   return [...tallies.entries()].sort((a, b) => b[1] - a[1])[0][0];
 }
 
-async function repairCorruptCategoryNames(categories, products) {
-  const takenNames = new Set(
-    categories.filter((c) => !isLikelyCorruptCategoryName(c.name)).map((c) => c.name)
-  );
-  for (const cat of categories) {
-    if (!isLikelyCorruptCategoryName(cat.name)) continue;
-    const label = inferDemoCategoryLabel(cat.id, products);
-    if (!label || takenNames.has(label)) continue;
+function visibleCategories() {
+  return state.categories.filter((cat) => !isLikelyCorruptCategoryName(cat.name));
+}
+
+async function purgeCorruptCategories() {
+  if (!canManageCatalog()) return;
+  const corrupt = state.categories.filter((cat) => isLikelyCorruptCategoryName(cat.name));
+  if (!corrupt.length) return;
+  for (const cat of corrupt) {
+    const label = inferDemoCategoryLabel(cat.id, state.products);
+    let targetId = null;
+    if (label) {
+      try {
+        targetId = await resolveCategoryIdByName(label, { reload: false });
+      } catch {
+        targetId = null;
+      }
+    }
+    for (const product of state.products.filter((p) => p.category_id === cat.id)) {
+      try {
+        await api("PATCH", `/catalog/products/${product.id}`, { category_id: targetId }, true);
+        product.category_id = targetId;
+      } catch (error) {
+        console.warn("Product reassign skipped:", product.id, error);
+      }
+    }
     try {
-      await api("PATCH", `/catalog/categories/${cat.id}`, { name: label }, true);
-      takenNames.add(label);
+      await requestNoBody("DELETE", `/catalog/categories/${cat.id}`, true);
     } catch (error) {
-      console.warn("Category repair skipped:", cat.id, error);
+      console.warn("Category delete skipped:", cat.id, error);
     }
   }
+  state.categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
 }
 
 async function repairCorruptDemoProducts(products) {
@@ -465,10 +486,14 @@ async function removeRetiredDemoProducts() {
 
 async function seedDemoData() {
   await removeRetiredDemoProducts();
-  let categories = await api("GET", "/catalog/categories");
+  let categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
   let products = await api("GET", "/catalog/products?limit=100");
-  await repairCorruptCategoryNames(categories, products);
-  categories = await api("GET", "/catalog/categories");
+  if (canManageCatalog()) {
+    state.categories = categories;
+    state.products = products;
+    await purgeCorruptCategories();
+    categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
+  }
   const byName = new Map(categories.map((c) => [c.name, c]));
 
   for (const name of demoCategories) {
@@ -511,11 +536,20 @@ async function seedDemoData() {
 
   products = await api("GET", "/catalog/products?limit=100");
   await repairCorruptDemoProducts(products);
+  if (canManageCatalog()) {
+    await purgeCorruptCategories();
+  }
 }
 
 async function loadCatalog() {
-  state.categories = await api("GET", "/catalog/categories");
+  state.categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
   state.products = await api("GET", "/catalog/products?limit=100&sort_by=name");
+  if (canManageCatalog()) {
+    await purgeCorruptCategories();
+    state.categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
+    state.products = await api("GET", "/catalog/products?limit=100&sort_by=name");
+  }
+  await hydrateProductPhotoUrls(state.products);
   const statP = document.getElementById("statProducts");
   const statC = document.getElementById("statCategories");
   if (statP) statP.textContent = state.products.length;
@@ -538,11 +572,11 @@ function demoCategoryLabelForCategoryId(categoryId) {
 }
 
 function categoryName(id) {
-  const raw = state.categories.find((c) => c.id === id)?.name;
-  if (raw && !isLikelyCorruptCategoryName(raw)) return raw;
+  const raw = visibleCategories().find((c) => c.id === id)?.name;
+  if (raw) return raw;
   const inferred = demoCategoryLabelForCategoryId(id);
   if (inferred) return inferred;
-  return raw || "Каталог";
+  return "Каталог";
 }
 
 function renderCategories() {
@@ -551,7 +585,7 @@ function renderCategories() {
   const counts = new Map();
   state.products.forEach((p) => counts.set(p.category_id, (counts.get(p.category_id) || 0) + 1));
   const buttons = [`<button class="btn btn-sm category-pill ${state.activeCategory === "all" ? "active" : ""}" data-cat="all">Все (${state.products.length})</button>`];
-  for (const cat of state.categories) {
+  for (const cat of visibleCategories()) {
     const count = counts.get(cat.id) || 0;
     if (!count) continue;
     buttons.push(`<button class="btn btn-sm category-pill ${state.activeCategory === String(cat.id) ? "active" : ""}" data-cat="${cat.id}">${escapeHtml(categoryName(cat.id))} (${count})</button>`);
@@ -591,6 +625,10 @@ function renderProducts() {
   host.innerHTML = products
     .map((p) => {
       const meta = demoMeta(p);
+      const imgUrl = state.productPhotoUrls[p.id];
+      const art = imgUrl
+        ? `<div class="product-art product-art-photo"><img src="${imgUrl}" alt="${escapeHtml(displayProductTitle(p))}"></div>`
+        : `<div class="product-art" style="background:${meta.gradient}">${meta.icon}</div>`;
       const actionButtons = adminActions
         ? `<div class="btn-group">
             <button class="btn btn-outline-primary btn-sm" data-edit="${p.id}">Изменить</button>
@@ -603,7 +641,7 @@ function renderProducts() {
       return `
         <div class="col-md-6 col-xl-4">
           <article class="card product-card h-100">
-            <div class="product-art" style="background:${meta.gradient}">${meta.icon}</div>
+            ${art}
             <div class="card-body d-flex flex-column">
               <div class="d-flex justify-content-between gap-2 mb-2">
                 <span class="badge text-bg-light">${escapeHtml(categoryName(p.category_id))}</span>
@@ -1794,46 +1832,167 @@ function renderCostEstimate(bom = null) {
 
 async function ensureCategoriesLoaded() {
   if (state.categories.length) return;
-  state.categories = await api("GET", "/catalog/categories");
+  state.categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
 }
 
-function populateProductCategorySelect(selectedId = null) {
-  const catSelect = document.getElementById("editProductCategory");
-  const hint = document.getElementById("editProductCategoryHint");
-  if (!catSelect) return false;
-  if (!state.categories.length) {
-    catSelect.innerHTML = `<option value="">— выберите или создайте категорию —</option>`;
-    hint?.classList.remove("d-none");
-    return false;
-  }
-  hint?.classList.add("d-none");
-  catSelect.innerHTML = state.categories
-    .map(
-      (c) =>
-        `<option value="${c.id}" ${Number(c.id) === Number(selectedId) ? "selected" : ""}>${escapeHtml(categoryName(c.id))}</option>`
-    )
+function populateProductCategoryDatalist() {
+  const list = document.getElementById("categoryNameList");
+  if (!list) return;
+  list.innerHTML = visibleCategories()
+    .map((cat) => `<option value="${escapeHtml(cat.name)}"></option>`)
     .join("");
-  return true;
 }
 
-async function quickCreateCategory() {
-  const name = window.prompt("Название новой категории");
-  if (!name?.trim()) return;
-  try {
-    const created = await api("POST", "/catalog/categories", { name: name.trim() }, true);
-    state.categories.push(created);
-    state.categories.sort((a, b) => a.name.localeCompare(b.name, "ru"));
-    populateProductCategorySelect(created.id);
-    renderCategories();
-    toast(`Категория «${created.name}» создана`);
-  } catch (error) {
-    toast(`Не удалось создать категорию: ${error.message}`, false);
+function categoryInputValue(categoryId) {
+  if (!categoryId) return "";
+  const cat = visibleCategories().find((c) => c.id === categoryId);
+  return cat?.name || categoryName(categoryId);
+}
+
+async function resolveCategoryIdByName(name, options = { reload: true }) {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Укажите категорию");
+  if (isLikelyCorruptCategoryName(trimmed)) throw new Error("Некорректное название категории");
+  const existing = visibleCategories().find((cat) => cat.name.toLowerCase() === trimmed.toLowerCase());
+  if (existing) return existing.id;
+  const created = await api("POST", "/catalog/categories", { name: trimmed }, true);
+  state.categories.push(created);
+  state.categories.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  if (options.reload !== false) populateProductCategoryDatalist();
+  return created.id;
+}
+
+function resetProductEditorPhotos() {
+  productEditorPhotos.pending.forEach((item) => {
+    if (item.preview?.startsWith("blob:")) URL.revokeObjectURL(item.preview);
+  });
+  productEditorPhotos.existing = [];
+  productEditorPhotos.pending = [];
+  productEditorPhotos.removed = [];
+  const input = document.getElementById("editProductPhotos");
+  if (input) input.value = "";
+}
+
+async function loadProductEditorPhotos(product) {
+  resetProductEditorPhotos();
+  if (!product?.photos?.length) {
+    renderProductEditorPhotosPreview();
+    return;
+  }
+  productEditorPhotos.existing = await Promise.all(
+    product.photos.map(async (photo) => ({
+      ...photo,
+      preview: (await getPhotoViewUrl(photo.object_key).catch(() => "")) || "",
+    }))
+  );
+  renderProductEditorPhotosPreview();
+}
+
+function renderProductEditorPhotosPreview() {
+  const host = document.getElementById("editProductPhotosPreview");
+  if (!host) return;
+  const items = [
+    ...productEditorPhotos.existing.map((photo) => ({
+      key: `existing-${photo.id}`,
+      preview: photo.preview,
+      remove: () => {
+        productEditorPhotos.removed.push(photo.id);
+        productEditorPhotos.existing = productEditorPhotos.existing.filter((row) => row.id !== photo.id);
+        renderProductEditorPhotosPreview();
+      },
+    })),
+    ...productEditorPhotos.pending.map((photo, index) => ({
+      key: `pending-${index}`,
+      preview: photo.preview,
+      remove: () => {
+        if (photo.preview?.startsWith("blob:")) URL.revokeObjectURL(photo.preview);
+        productEditorPhotos.pending.splice(index, 1);
+        renderProductEditorPhotosPreview();
+      },
+    })),
+  ];
+  host.innerHTML = items.length
+    ? items
+        .map(
+          (item) => `<div class="product-photo-thumb position-relative">
+            ${item.preview ? `<img src="${item.preview}" alt="">` : `<div class="border rounded p-2 small">фото</div>`}
+            <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0" data-remove-photo="${item.key}">×</button>
+          </div>`
+        )
+        .join("")
+    : `<div class="small text-muted">Фото не прикреплены</div>`;
+  host.querySelectorAll("[data-remove-photo]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const item = items.find((row) => row.key === btn.dataset.removePhoto);
+      item?.remove();
+    });
+  });
+}
+
+function handleProductPhotosSelected(event) {
+  for (const file of Array.from(event.target.files || [])) {
+    productEditorPhotos.pending.push({
+      file,
+      preview: URL.createObjectURL(file),
+    });
+  }
+  renderProductEditorPhotosPreview();
+}
+
+async function uploadAssetFile(file, objectKey) {
+  const presign = await api(
+    "POST",
+    "/assets/presign-put",
+    { object_key: objectKey, content_type: file.type || "image/jpeg" },
+    true
+  );
+  const put = await fetch(presign.upload_url, {
+    method: "PUT",
+    body: file,
+    headers: { "Content-Type": file.type || "image/jpeg" },
+  });
+  if (!put.ok) throw new Error("Не удалось загрузить файл");
+  return objectKey;
+}
+
+async function syncProductEditorPhotos(productId) {
+  for (const photoId of productEditorPhotos.removed) {
+    await requestNoBody("DELETE", `/catalog/products/${productId}/photos/${photoId}`, true);
+  }
+  let order = productEditorPhotos.existing.length;
+  for (const item of productEditorPhotos.pending) {
+    const ext = (item.file.name.split(".").pop() || "jpg").toLowerCase();
+    const objectKey = `products/${productId}/${Date.now()}-${order}.${ext}`;
+    await uploadAssetFile(item.file, objectKey);
+    await api(
+      "POST",
+      `/catalog/products/${productId}/photos`,
+      { object_key: objectKey, sort_order: order },
+      true
+    );
+    order += 1;
   }
 }
 
-function openProductEditor(productId) {
+async function hydrateProductPhotoUrls(products) {
+  state.productPhotoUrls = {};
+  await Promise.all(
+    products.map(async (product) => {
+      const key = product.photos?.[0]?.object_key;
+      if (!key) return;
+      try {
+        state.productPhotoUrls[product.id] = await getPhotoViewUrl(key);
+      } catch {
+        // ignore broken photo links
+      }
+    })
+  );
+}
+
+async function openProductEditor(productId) {
   const product = state.products.find((p) => p.id === productId);
   if (!product) return;
+  populateProductCategoryDatalist();
   document.getElementById("editProductId").value = product.id;
   document.getElementById("editProductName").value = displayProductTitle(product);
   document.getElementById("editProductSku").value = product.sku;
@@ -1841,13 +2000,15 @@ function openProductEditor(productId) {
   document.getElementById("editProductPrice").value = product.price;
   document.getElementById("editProductStock").value = product.stock;
   document.getElementById("editProductDesc").value = displayProductDescription(product) || "";
-  populateProductCategorySelect(product.category_id);
+  document.getElementById("editProductCategory").value = categoryInputValue(product.category_id);
+  await loadProductEditorPhotos(product);
   document.getElementById("productEditorTitle").textContent = "Редактировать товар";
   bootstrap.Modal.getOrCreateInstance(document.getElementById("productEditorModal")).show();
 }
 
 async function openNewProductEditor() {
   await ensureCategoriesLoaded();
+  populateProductCategoryDatalist();
   document.getElementById("editProductId").value = "";
   document.getElementById("editProductName").value = "";
   document.getElementById("editProductSku").value = `SKU-${Date.now()}`;
@@ -1855,22 +2016,16 @@ async function openNewProductEditor() {
   document.getElementById("editProductPrice").value = "10000";
   document.getElementById("editProductStock").value = "5";
   document.getElementById("editProductDesc").value = "";
-  populateProductCategorySelect(state.categories[0]?.id ?? null);
+  document.getElementById("editProductCategory").value = visibleCategories()[0]?.name || "";
+  resetProductEditorPhotos();
+  renderProductEditorPhotosPreview();
   document.getElementById("productEditorTitle").textContent = "Новый товар";
   bootstrap.Modal.getOrCreateInstance(document.getElementById("productEditorModal")).show();
-  if (!state.categories.length) {
-    toast("Создайте категорию или загрузите демо-данные", false);
-  }
 }
 
 async function saveProductEditor() {
   const id = document.getElementById("editProductId").value;
-  const categoryRaw = document.getElementById("editProductCategory").value;
-  const categoryId = categoryRaw ? Number(categoryRaw) : null;
-  if (!categoryId) {
-    toast("Выберите категорию или создайте новую", false);
-    return;
-  }
+  const categoryNameInput = document.getElementById("editProductCategory").value;
   const payload = {
     name: document.getElementById("editProductName").value.trim(),
     sku: document.getElementById("editProductSku").value.trim(),
@@ -1878,7 +2033,6 @@ async function saveProductEditor() {
     description: document.getElementById("editProductDesc").value.trim(),
     price: Number(document.getElementById("editProductPrice").value),
     stock: Number(document.getElementById("editProductStock").value),
-    category_id: categoryId,
     is_active: true,
   };
   if (!payload.name || !payload.sku || payload.price <= 0) {
@@ -1886,13 +2040,18 @@ async function saveProductEditor() {
     return;
   }
   try {
-    if (id) {
-      await api("PATCH", `/catalog/products/${id}`, payload, true);
+    const categoryId = await resolveCategoryIdByName(categoryNameInput);
+    payload.category_id = categoryId;
+    let productId = id ? Number(id) : null;
+    if (productId) {
+      await api("PATCH", `/catalog/products/${productId}`, payload, true);
       toast("Товар обновлён");
     } else {
-      await api("POST", "/catalog/products", payload, true);
+      const created = await api("POST", "/catalog/products", payload, true);
+      productId = created.id;
       toast("Товар добавлен");
     }
+    await syncProductEditorPhotos(productId);
     bootstrap.Modal.getInstance(document.getElementById("productEditorModal")).hide();
     await loadCatalog();
     renderAdminCatalogTable();
@@ -3026,13 +3185,6 @@ async function boot() {
   bindClick("btnQuoteDelivery", quoteDelivery);
   bindClick("btnSeedDemo", async () => { await seedDemoData(); await loadCatalog(); renderAdminCatalogTable(); toast("Демо-данные загружены"); });
   bindClick("btnSeedCrm", seedCrmDemo);
-  bindClick("btnQuickCategory", quickCreateCategory);
-  bindClick("btnSeedFromModal", async () => {
-    await seedDemoData();
-    await loadCatalog();
-    populateProductCategorySelect(state.categories[0]?.id ?? null);
-    toast("Демо-данные загружены");
-  });
   bindClick("btnRefreshJobs", renderCuttingJobs);
   bindClick("btnClearCuttingJobs", clearCuttingJobs);
 
@@ -3059,6 +3211,8 @@ async function boot() {
 
   const useCustomColorEl = document.getElementById("objUseCustomColor");
   const customColorEl = document.getElementById("objCustomColor");
+  const productPhotosInput = document.getElementById("editProductPhotos");
+  if (productPhotosInput) productPhotosInput.addEventListener("change", handleProductPhotosSelected);
   if (useCustomColorEl && customColorEl) {
     const syncCustomColorInput = () => {
       customColorEl.disabled = !useCustomColorEl.checked;

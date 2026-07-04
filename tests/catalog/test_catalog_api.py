@@ -13,6 +13,63 @@ def test_patch_category(catalog_client: TestClient):
     assert conflict.status_code == 409
 
 
+def test_reject_corrupt_category_name(catalog_client: TestClient):
+    response = catalog_client.post("/categories", json={"name": "????"})
+    assert response.status_code == 422
+
+
+def test_delete_category_unlinks_products(catalog_client: TestClient):
+    category = catalog_client.post("/categories", json={"name": "Временная"}).json()
+    product = catalog_client.post(
+        "/products",
+        json={
+            "name": "Стол",
+            "sku": "TABLE-001",
+            "brand": "Test",
+            "description": "",
+            "price": 10000,
+            "category_id": category["id"],
+            "stock": 1,
+            "is_active": True,
+        },
+    ).json()
+    deleted = catalog_client.delete(f"/categories/{category['id']}")
+    assert deleted.status_code == 204
+    updated = catalog_client.get(f"/products/{product['id']}").json()
+    assert updated["category_id"] is None
+
+
+def test_product_photos_crud(catalog_client: TestClient):
+    category = catalog_client.post("/categories", json={"name": "Диваны"}).json()
+    product = catalog_client.post(
+        "/products",
+        json={
+            "name": "Диван Soft",
+            "sku": "SOFA-001",
+            "brand": "Test",
+            "description": "",
+            "price": 50000,
+            "category_id": category["id"],
+            "stock": 2,
+            "is_active": True,
+        },
+    ).json()
+    created = catalog_client.post(
+        f"/products/{product['id']}/photos",
+        json={"object_key": "products/1/front.jpg", "sort_order": 0},
+    )
+    assert created.status_code == 201
+    listed = catalog_client.get(f"/products/{product['id']}/photos")
+    assert listed.status_code == 200
+    assert len(listed.json()) == 1
+    details = catalog_client.get(f"/products/{product['id']}")
+    assert details.json()["photos"][0]["object_key"] == "products/1/front.jpg"
+    photo_id = listed.json()[0]["id"]
+    deleted = catalog_client.delete(f"/products/{product['id']}/photos/{photo_id}")
+    assert deleted.status_code == 204
+    assert catalog_client.get(f"/products/{product['id']}/photos").json() == []
+
+
 def test_create_and_filter_products(catalog_client: TestClient):
     category = catalog_client.post("/categories", json={"name": "Кухни"}).json()
 

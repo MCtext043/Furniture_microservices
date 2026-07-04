@@ -21,6 +21,7 @@ FILES = [
     "services/planner_service/app/main.py",
     "services/planner_service/app/models.py",
     "services/planner_service/app/schemas.py",
+    "services/catalog_service/app/main.py",
     "services/catalog_service/app/crm_routes.py",
     "services/catalog_service/app/models.py",
     "services/catalog_service/app/schemas.py",
@@ -29,6 +30,7 @@ FILES = [
     "services/cutting_service/app/schemas.py",
     "alembic/versions/005_cutting_job_result.py",
     "alembic/versions/006_selected_tier.py",
+    "alembic/versions/007_product_photos.py",
 ]
 
 
@@ -76,7 +78,7 @@ def main() -> int:
             "up -d --no-deps --force-recreate planner-service catalog-service cutting-service gateway-service"
         ),
         "curl -skS -m 12 https://127.0.0.1/health || curl -sS -m 12 http://127.0.0.1:8002/health",
-        "grep -o '20260704-user-buttons' /opt/furniture/frontend/index.html || true",
+        "grep -o '20260704-catalog-photos' /opt/furniture/frontend/index.html || true",
     ]
 
     failed = False

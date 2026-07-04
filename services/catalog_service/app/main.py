@@ -7,7 +7,7 @@ from common.messaging import publish_event
 
 from .db import SessionLocal, get_session
 from .delivery import GeoPoint, calculate_delivery_quote, estimate_road_distance_km, geocode_address
-from .models import CartItem, Category, Product, ProductReview, ShopSettings, WishlistItem
+from .models import CartItem, Category, Product, ProductPhoto, ProductReview, ShopSettings, WishlistItem
 from .schemas import (
     CartItemCreate,
     CartItemOut,
@@ -23,6 +23,8 @@ from .schemas import (
     ProductCreate,
     ProductFiltersOut,
     ProductOut,
+    ProductPhotoCreate,
+    ProductPhotoOut,
     ProductUpdate,
     ReviewCreate,
     ReviewOut,
@@ -89,12 +91,69 @@ def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def _is_corrupt_category_name(name: str) -> bool:
+    stripped = (name or "").strip()
+    if len(stripped) < 2:
+        return True
+    if "\ufffd" in stripped:
+        return True
+    q_count = stripped.count("?")
+    if q_count == 0:
+        return False
+    core_len = len(stripped.replace(" ", ""))
+    if core_len == 0:
+        return True
+    if q_count >= max(2, int(core_len * 0.12)):
+        return True
+    return q_count >= 1 and core_len <= 8
+
+
+def _validate_category_name(name: str) -> str:
+    cleaned = name.strip()
+    if _is_corrupt_category_name(cleaned):
+        raise HTTPException(status_code=422, detail="Некорректное название категории")
+    return cleaned
+
+
+def _photos_by_product(session: Session, product_ids: list[int]) -> dict[int, list[ProductPhoto]]:
+    if not product_ids:
+        return {}
+    rows = list(
+        session.scalars(
+            select(ProductPhoto)
+            .where(ProductPhoto.product_id.in_(product_ids))
+            .order_by(ProductPhoto.sort_order.asc(), ProductPhoto.id.asc())
+        )
+    )
+    grouped: dict[int, list[ProductPhoto]] = {}
+    for row in rows:
+        grouped.setdefault(row.product_id, []).append(row)
+    return grouped
+
+
+def _product_out(product: Product, photos: list[ProductPhoto] | None = None) -> ProductOut:
+    photo_rows = photos if photos is not None else list(product.photos or [])
+    return ProductOut(
+        id=product.id,
+        name=product.name,
+        sku=product.sku,
+        brand=product.brand,
+        description=product.description,
+        price=float(product.price),
+        category_id=product.category_id,
+        stock=product.stock,
+        is_active=product.is_active,
+        photos=[ProductPhotoOut.model_validate(row) for row in photo_rows],
+    )
+
+
 @app.post("/categories", response_model=CategoryOut, status_code=201, tags=["categories"], dependencies=[Depends(ensure_catalog_writer)])
 def create_category(payload: CategoryCreate, session: Session = Depends(get_session)) -> Category:
-    existing = session.scalar(select(Category).where(Category.name == payload.name))
+    name = _validate_category_name(payload.name)
+    existing = session.scalar(select(Category).where(Category.name == name))
     if existing:
         raise HTTPException(status_code=409, detail="Category already exists")
-    category = Category(name=payload.name, parent_id=payload.parent_id)
+    category = Category(name=name, parent_id=payload.parent_id)
     session.add(category)
     session.commit()
     session.refresh(category)
@@ -103,7 +162,8 @@ def create_category(payload: CategoryCreate, session: Session = Depends(get_sess
 
 @app.get("/categories", response_model=list[CategoryOut], tags=["categories"])
 def list_categories(session: Session = Depends(get_session)) -> list[Category]:
-    return list(session.scalars(select(Category).order_by(Category.name)))
+    rows = list(session.scalars(select(Category).order_by(Category.name)))
+    return [row for row in rows if not _is_corrupt_category_name(row.name)]
 
 
 @app.get("/categories/{category_id}", response_model=CategoryOut, tags=["categories"])
@@ -124,17 +184,29 @@ def update_category(
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
     if payload.name is not None:
+        name = _validate_category_name(payload.name)
         existing = session.scalar(
-            select(Category).where(Category.name == payload.name, Category.id != category_id)
+            select(Category).where(Category.name == name, Category.id != category_id)
         )
         if existing:
             raise HTTPException(status_code=409, detail="Category already exists")
-        category.name = payload.name
+        category.name = name
     if payload.parent_id is not None:
         category.parent_id = payload.parent_id
     session.commit()
     session.refresh(category)
     return category
+
+
+@app.delete("/categories/{category_id}", status_code=204, tags=["categories"], dependencies=[Depends(ensure_catalog_writer)])
+def delete_category(category_id: int, session: Session = Depends(get_session)) -> None:
+    category = session.get(Category, category_id)
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found")
+    for product in session.scalars(select(Product).where(Product.category_id == category_id)):
+        product.category_id = None
+    session.delete(category)
+    session.commit()
 
 
 @app.post("/products", response_model=ProductOut, status_code=201, tags=["products"], dependencies=[Depends(ensure_catalog_writer)])
@@ -159,7 +231,7 @@ def create_product(payload: ProductCreate, session: Session = Depends(get_sessio
             "price": float(product.price),
         },
     )
-    return product
+    return _product_out(product, [])
 
 
 @app.get("/products", response_model=list[ProductOut], tags=["products"])
@@ -201,7 +273,9 @@ def list_products(
         stmt = stmt.order_by(Product.id.desc())
 
     stmt = stmt.offset(skip).limit(limit)
-    return list(session.scalars(stmt))
+    products = list(session.scalars(stmt))
+    photos_map = _photos_by_product(session, [p.id for p in products])
+    return [_product_out(product, photos_map.get(product.id, [])) for product in products]
 
 
 @app.get("/products/filters", response_model=ProductFiltersOut, tags=["products"])
@@ -220,11 +294,12 @@ def product_filters(session: Session = Depends(get_session)) -> ProductFiltersOu
 
 
 @app.get("/products/{product_id}", response_model=ProductOut, tags=["products"])
-def get_product(product_id: int, session: Session = Depends(get_session)) -> Product:
+def get_product(product_id: int, session: Session = Depends(get_session)) -> ProductOut:
     product = session.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
-    return product
+    photos_map = _photos_by_product(session, [product_id])
+    return _product_out(product, photos_map.get(product_id, []))
 
 
 @app.patch("/products/{product_id}", response_model=ProductOut, tags=["products"], dependencies=[Depends(ensure_catalog_writer)])
@@ -244,7 +319,66 @@ def update_product(
         setattr(product, field, value)
     session.commit()
     session.refresh(product)
-    return product
+    photos_map = _photos_by_product(session, [product_id])
+    return _product_out(product, photos_map.get(product_id, []))
+
+
+@app.get("/products/{product_id}/photos", response_model=list[ProductPhotoOut], tags=["products"])
+def list_product_photos(product_id: int, session: Session = Depends(get_session)) -> list[ProductPhoto]:
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    return list(
+        session.scalars(
+            select(ProductPhoto)
+            .where(ProductPhoto.product_id == product_id)
+            .order_by(ProductPhoto.sort_order.asc(), ProductPhoto.id.asc())
+        )
+    )
+
+
+@app.post(
+    "/products/{product_id}/photos",
+    response_model=ProductPhotoOut,
+    status_code=201,
+    tags=["products"],
+    dependencies=[Depends(ensure_catalog_writer)],
+)
+def add_product_photo(
+    product_id: int,
+    payload: ProductPhotoCreate,
+    session: Session = Depends(get_session),
+) -> ProductPhoto:
+    product = session.get(Product, product_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    photo = ProductPhoto(
+        product_id=product_id,
+        object_key=payload.object_key,
+        sort_order=payload.sort_order,
+    )
+    session.add(photo)
+    session.commit()
+    session.refresh(photo)
+    return photo
+
+
+@app.delete(
+    "/products/{product_id}/photos/{photo_id}",
+    status_code=204,
+    tags=["products"],
+    dependencies=[Depends(ensure_catalog_writer)],
+)
+def delete_product_photo(
+    product_id: int,
+    photo_id: int,
+    session: Session = Depends(get_session),
+) -> None:
+    photo = session.get(ProductPhoto, photo_id)
+    if not photo or photo.product_id != product_id:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    session.delete(photo)
+    session.commit()
 
 
 @app.delete("/products/{product_id}", status_code=204, tags=["products"], dependencies=[Depends(ensure_catalog_writer)])
