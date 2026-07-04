@@ -23,6 +23,7 @@ class RoomProject(Base):
     price_comfort: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     price_premium: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     bom_json: Mapped[str] = mapped_column(Text, default="")
+    selected_tier: Mapped[str] = mapped_column(String(16), default="standard")
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 

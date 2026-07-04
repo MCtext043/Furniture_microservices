@@ -91,6 +91,7 @@ def _order_out(session: Session, order: CrmProductionOrder) -> CrmOrderOut:
         price_standard=float(order.price_standard) if order.price_standard is not None else None,
         price_comfort=float(order.price_comfort) if order.price_comfort is not None else None,
         price_premium=float(order.price_premium) if order.price_premium is not None else None,
+        selected_tier=order.selected_tier or "standard",
         materials=[
             CrmOrderMaterialLine(
                 material_id=line.material_id,
@@ -250,6 +251,7 @@ def submit_project_order(payload: CrmSubmitProjectIn, session: Session = Depends
         price_standard=payload.pricing.standard,
         price_comfort=payload.pricing.comfort,
         price_premium=payload.pricing.premium,
+        selected_tier=payload.selected_tier,
     )
     session.add(order)
     session.flush()

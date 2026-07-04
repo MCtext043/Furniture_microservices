@@ -174,6 +174,7 @@ class CrmOrderOut(BaseModel):
     price_standard: float | None = None
     price_comfort: float | None = None
     price_premium: float | None = None
+    selected_tier: str = "standard"
     materials: list[CrmOrderMaterialLine]
 
 
@@ -205,6 +206,7 @@ class CrmSubmitProjectIn(BaseModel):
     customer: str = Field(default="", max_length=120)
     user_id: str = Field(min_length=1, max_length=64)
     pricing: CrmPricingIn
+    selected_tier: str = Field(default="standard", pattern=r"^(standard|comfort|premium)$")
     materials: list[CrmOrderMaterialLineIn] = Field(min_length=1)
     notes: str = ""
 

@@ -1,5 +1,7 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+SELECTED_TIER_PATTERN = r"^(standard|comfort|premium)$"
+
 
 class ProjectCreate(BaseModel):
     name: str = Field(min_length=2, max_length=180)
@@ -12,6 +14,25 @@ class ProjectCreate(BaseModel):
     price_comfort: float | None = Field(default=None, ge=0)
     price_premium: float | None = Field(default=None, ge=0)
     bom_json: str = ""
+    selected_tier: str = Field(default="standard", pattern=SELECTED_TIER_PATTERN)
+
+
+class ProjectUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=2, max_length=180)
+    location: str | None = Field(default=None, max_length=180)
+    user_id: str | None = Field(default=None, max_length=64)
+    room_width: float | None = Field(default=None, gt=0)
+    room_length: float | None = Field(default=None, gt=0)
+    room_height: float | None = Field(default=None, gt=0)
+    price_standard: float | None = Field(default=None, ge=0)
+    price_comfort: float | None = Field(default=None, ge=0)
+    price_premium: float | None = Field(default=None, ge=0)
+    bom_json: str | None = None
+    selected_tier: str | None = Field(default=None, pattern=SELECTED_TIER_PATTERN)
+
+
+class ProjectSubmitIn(BaseModel):
+    selected_tier: str = Field(default="standard", pattern=SELECTED_TIER_PATTERN)
 
 
 class ProjectOut(ProjectCreate):

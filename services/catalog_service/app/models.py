@@ -102,6 +102,7 @@ class CrmProductionOrder(Base):
     price_standard: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     price_comfort: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     price_premium: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    selected_tier: Mapped[str] = mapped_column(String(16), default="standard")
 
 
 class CrmOrderPhoto(Base):

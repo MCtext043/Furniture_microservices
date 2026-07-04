@@ -25,6 +25,7 @@ const state = {
   selectedCutJobId: null,
   crm: { orders: [], warehouse: [], procurementByOrder: {} },
   userOrders: [],
+  selectedTier: "standard",
 };
 
 const demoCategories = ["Кухни", "Шкафы", "Гостиные", "Спальни", "Офис", "Детские"];
@@ -55,6 +56,24 @@ const PRICING_TIERS = [
   { key: "comfort", title: "Комфорт", material: 1.18, hardware: 1.25, labor: 1.1 },
   { key: "premium", title: "Премиум", material: 1.42, hardware: 1.55, labor: 1.22 },
 ];
+
+const TIER_MATERIAL_PROFILES = {
+  standard: {
+    qty: { panel: 1, edge: 1, hinges: 1, slides: 1, screws: 1 },
+    specs: ["ЛДСП 16 мм", "Кромка ПВХ 0,4 мм", "Петли стандарт", "Направляющие шариковые"],
+    patterns: { panel: "дсп", edge: "кромка", hinges: "петл", slides: "направляющ", screws: "саморез" },
+  },
+  comfort: {
+    qty: { panel: 1.06, edge: 1.14, hinges: 1.35, slides: 1.45, screws: 1.1 },
+    specs: ["ЛДСП 18 мм, улучшенный декор", "Кромка ПВХ 2 мм", "Петли с доводчиком", "Направляющие полного выдвижения"],
+    patterns: { panel: "дсп", edge: "кромка", hinges: "петл", slides: "направляющ", screws: "саморез" },
+  },
+  premium: {
+    qty: { panel: 1.18, edge: 1.28, hinges: 1.65, slides: 1.8, screws: 1.2 },
+    specs: ["МДФ фасады / шпон", "Кромка ABS 2 мм", "Blum / Hettich", "Tandembox / Legrabox"],
+    patterns: { panel: "дсп", edge: "кромка", hinges: "blum", slides: "направляющ", screws: "саморез" },
+  },
+};
 
 const CRM_STATUSES = ["конструктор", "закупка", "сборка"];
 
@@ -1020,9 +1039,10 @@ async function savePlannerProject() {
     price_comfort: tiers.comfort,
     price_premium: tiers.premium,
     bom_json: JSON.stringify(bom),
+    selected_tier: state.selectedTier || "standard",
   };
   if (state.projectId) {
-    return { id: state.projectId, name: projectName, ...payload };
+    return api("PATCH", `/planner/projects/${state.projectId}`, payload, true);
   }
   return api("POST", "/planner/projects", payload, true);
 }
@@ -1680,22 +1700,61 @@ function estimateTierPrices(cost) {
   return result;
 }
 
+function tierTitle(key) {
+  return PRICING_TIERS.find((tier) => tier.key === key)?.title || key;
+}
+
+function orderSelectedPrice(order) {
+  const tier = order.selected_tier || "standard";
+  return order[`price_${tier}`];
+}
+
+function selectTier(key) {
+  if (!PRICING_TIERS.some((tier) => tier.key === key)) return;
+  state.selectedTier = key;
+  renderCostEstimate();
+  const hint = document.getElementById("plannerHint");
+  if (hint && customerName()) {
+    hint.textContent = `Выбрана комплектация «${tierTitle(key)}». Сохраните или отправьте проект в работу.`;
+  }
+}
+
+function bindTierCardSelection(host) {
+  if (!host || APP_MODE === "admin") return;
+  host.querySelectorAll("[data-tier-select]").forEach((card) => {
+    card.addEventListener("click", () => selectTier(card.dataset.tierSelect));
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectTier(card.dataset.tierSelect);
+      }
+    });
+  });
+}
+
 function renderTierCards(tiers) {
   const tierMeta = {
     standard: { badge: "bg-secondary", hint: "Базовые материалы и фурнитура" },
     comfort: { badge: "bg-primary", hint: "Улучшенные фасады и направляющие" },
     premium: { badge: "bg-warning text-dark", hint: "Премиум фурнитура и отделка" },
   };
+  const selected = state.selectedTier || "standard";
   return `<div class="row g-3">${PRICING_TIERS.map((tier) => {
     const meta = tierMeta[tier.key];
+    const profile = TIER_MATERIAL_PROFILES[tier.key];
+    const active = tier.key === selected ? "border-primary border-2 shadow-sm" : "";
+    const selectable = APP_MODE !== "admin";
     return `<div class="col-md-4">
-      <div class="p-3 border rounded h-100 bg-white">
+      <div class="p-3 border rounded h-100 bg-white ${active} ${selectable ? "tier-select-card" : ""}"
+        ${selectable ? `data-tier-select="${tier.key}" role="button" tabindex="0" style="cursor:pointer"` : ""}>
         <div class="d-flex justify-content-between align-items-center mb-2">
           <span class="fw-semibold">${tier.title}</span>
           <span class="badge ${meta.badge}">${tier.title}</span>
         </div>
         <div class="cost-highlight">${money(tiers[tier.key])}</div>
         <div class="small text-muted mt-1">${meta.hint}</div>
+        ${profile ? `<ul class="small text-muted mt-2 mb-0 ps-3">${profile.specs.map((spec) => `<li>${escapeHtml(spec)}</li>`).join("")}</ul>` : ""}
+        ${tier.key === selected && selectable ? `<div class="small text-primary fw-semibold mt-2">Выбрано</div>` : ""}
       </div>
     </div>`;
   }).join("")}</div>`;
@@ -1713,9 +1772,10 @@ function renderCostEstimate(bom = null) {
   const tiers = estimateTierPrices(cost);
   if (APP_MODE !== "admin") {
     host.innerHTML = `
-      <div class="mb-2 small text-muted">Ориентировочная стоимость кухни / мебели в трёх комплектациях:</div>
+      <div class="mb-2 small text-muted">Выберите комплектацию — админ получит расчёт материалов и цену по вашему выбору:</div>
       ${renderTierCards(tiers)}
-      <div class="small text-muted mt-3">Точный расчёт деталей и раскрой выполняет производство после отправки проекта в работу.</div>`;
+      <div class="small text-muted mt-3">Точный раскрой и закупка выполняются производством после отправки проекта в работу.</div>`;
+    bindTierCardSelection(host);
     return;
   }
   host.innerHTML = `
@@ -2175,7 +2235,9 @@ function renderCrmPanel() {
           <span class="text-muted small">${escapeHtml(order.customer || "—")}</span>
         </div>
         ${order.notes ? `<div class="small text-muted mb-2">${escapeHtml(order.notes)}</div>` : ""}
-        ${order.price_standard ? `<div class="small mb-2">Цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
+        ${order.selected_tier ? `<div class="small mb-2"><span class="badge bg-info text-dark">Комплектация: ${escapeHtml(tierTitle(order.selected_tier))}</span> · <strong>${money(orderSelectedPrice(order))}</strong></div>` : ""}
+        ${order.materials?.length ? `<div class="small mb-2"><strong>Материалы:</strong> ${order.materials.map((line) => `${escapeHtml(line.material_name)} — ${line.required_qty} ${escapeHtml(line.unit)}`).join("; ")}</div>` : ""}
+        ${order.price_standard ? `<div class="small text-muted mb-2">Все цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
         <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
           <select class="form-select form-select-sm" style="max-width:160px" data-crm-status="${order.id}">
             ${CRM_STATUSES.map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
@@ -2229,15 +2291,21 @@ async function renderCrmOrderPhotos(orderId) {
   }
 }
 
-async function buildCrmMaterialsFromBom(bom) {
+async function buildCrmMaterialsFromBom(bom, tier = state.selectedTier || "standard") {
   const materials = await api("GET", "/catalog/crm/materials", undefined, true);
   if (!materials.length) throw new Error("Материалы CRM не настроены. Админ должен загрузить демо CRM.");
-  const byName = (part) => materials.find((m) => m.name.toLowerCase().includes(part)) || null;
-  const ldsp = byName("дсп") || materials[0];
-  const edge = byName("кромка");
-  const screws = byName("саморез");
-  const hinges = byName("петля");
-  const slides = byName("направляющ");
+  const profile = TIER_MATERIAL_PROFILES[tier] || TIER_MATERIAL_PROFILES.standard;
+  const findMaterial = (pattern, fallback) => {
+    const primary = materials.find((m) => m.name.toLowerCase().includes(pattern));
+    if (primary) return primary;
+    if (fallback) return materials.find((m) => m.name.toLowerCase().includes(fallback)) || null;
+    return null;
+  };
+  const ldsp = findMaterial(profile.patterns.panel, "дсп") || materials[0];
+  const edge = findMaterial(profile.patterns.edge, "кромка");
+  const screws = findMaterial(profile.patterns.screws, "саморез");
+  const hinges = findMaterial(profile.patterns.hinges, "петл");
+  const slides = findMaterial(profile.patterns.slides, "направляющ");
   let sheetArea = 0;
   let edgeMeters = 0;
   for (const part of bom.parts) {
@@ -2245,13 +2313,23 @@ async function buildCrmMaterialsFromBom(bom) {
     edgeMeters += ((part.width + part.height) * 2 * part.quantity) / 1000;
   }
   const cabinetCount = state.objects3d.filter((o) => o.type === "cabinet" || o.type === "wardrobe").length;
+  const drawerCabinets = state.objects3d.filter((o) => o.type === "cabinet").length;
+  const qty = profile.qty;
   const lines = [];
-  lines.push({ material_id: ldsp.id, required_qty: Math.max(1, Math.ceil(sheetArea / 4.9)) });
-  if (edge) lines.push({ material_id: edge.id, required_qty: Math.max(1, Math.round(edgeMeters)) });
-  if (hinges) lines.push({ material_id: hinges.id, required_qty: Math.max(2, cabinetCount * 4) });
-  if (slides) lines.push({ material_id: slides.id, required_qty: Math.max(1, state.objects3d.filter((o) => o.type === "cabinet").length * 2) });
-  if (screws) lines.push({ material_id: screws.id, required_qty: Math.max(50, bom.parts.length * 24) });
+  lines.push({ material_id: ldsp.id, required_qty: Math.max(1, Math.ceil((sheetArea / 4.9) * qty.panel)) });
+  if (edge) lines.push({ material_id: edge.id, required_qty: Math.max(1, Math.round(edgeMeters * qty.edge)) });
+  if (hinges) lines.push({ material_id: hinges.id, required_qty: Math.max(2, Math.round(cabinetCount * 4 * qty.hinges)) });
+  if (slides) lines.push({ material_id: slides.id, required_qty: Math.max(1, Math.round(drawerCabinets * 2 * qty.slides)) });
+  if (screws) lines.push({ material_id: screws.id, required_qty: Math.max(50, Math.round(bom.parts.length * 24 * qty.screws)) });
   return lines;
+}
+
+function buildTierSubmissionNotes(tier, bom, tiers) {
+  const profile = TIER_MATERIAL_PROFILES[tier] || TIER_MATERIAL_PROFILES.standard;
+  const specs = profile.specs.join("; ");
+  const price = tiers?.[tier];
+  const priceText = price ? money(price) : "—";
+  return `Комплектация: ${tierTitle(tier)} (${priceText}). Материалы: ${specs}. Комната ${state.roomConfig.width}×${state.roomConfig.length}×${state.roomConfig.height} мм, объектов: ${state.objects3d.length}, деталей: ${bom.parts.length}`;
 }
 
 async function submitProjectToWork() {
@@ -2264,6 +2342,12 @@ async function submitProjectToWork() {
     toast("Добавьте мебель в комнату", false);
     return;
   }
+  const selectedTier = state.selectedTier || "standard";
+  if (!PRICING_TIERS.some((tier) => tier.key === selectedTier)) {
+    toast("Выберите комплектацию на вкладке «Стоимость»", false);
+    document.querySelector('[data-bs-target="#costPane"]')?.click();
+    return;
+  }
   try {
     const bom = buildBomFromObjects();
     const cost = estimateProjectCost(bom);
@@ -2271,8 +2355,8 @@ async function submitProjectToWork() {
     const project = await savePlannerProject();
     state.projectId = project.id;
     await syncPlannerObjectsToBackend();
-    await api("POST", `/planner/projects/${state.projectId}/submit`, {}, true);
-    const materials = await buildCrmMaterialsFromBom(bom);
+    await api("POST", `/planner/projects/${state.projectId}/submit`, { selected_tier: selectedTier }, true);
+    const materials = await buildCrmMaterialsFromBom(bom, selectedTier);
     const projectName = document.getElementById("projectName")?.value?.trim() || `Кухня ${customerName()}`;
     await api(
       "POST",
@@ -2283,12 +2367,13 @@ async function submitProjectToWork() {
         customer: customerName(),
         user_id: customerName(),
         pricing: tiers,
+        selected_tier: selectedTier,
         materials,
-        notes: `Комната ${state.roomConfig.width}×${state.roomConfig.length}×${state.roomConfig.height} мм, объектов: ${state.objects3d.length}`,
+        notes: buildTierSubmissionNotes(selectedTier, bom, tiers),
       },
       true
     );
-    document.getElementById("plannerHint").textContent = `Проект №${state.projectId} отправлен в производство`;
+    document.getElementById("plannerHint").textContent = `Проект №${state.projectId} отправлен в производство (${tierTitle(selectedTier)}, ${money(tiers[selectedTier])})`;
     await loadUserOrders();
     toast("Проект отправлен в работу — админ увидит расчёты");
   } catch (error) {
@@ -2333,8 +2418,10 @@ async function renderUserOrders() {
       } catch {
         photosHtml = "";
       }
-      const prices = order.price_standard
-        ? `<div class="small mt-1">Стандарт ${money(order.price_standard)} · Комфорт ${money(order.price_comfort)} · Премиум ${money(order.price_premium)}</div>`
+      const tier = order.selected_tier || "standard";
+      const price = orderSelectedPrice(order);
+      const prices = price
+        ? `<div class="small mt-1">Комплектация <strong>${escapeHtml(tierTitle(tier))}</strong> — ${money(price)}</div>`
         : "";
       return `<div class="border rounded p-3 mb-2">
         <div class="d-flex justify-content-between gap-2">
@@ -2354,6 +2441,9 @@ function applyPlannerModeUi() {
   if (APP_MODE === "admin") return;
   document.getElementById("bomTabNav")?.classList.add("d-none");
   document.getElementById("btnGenerateBom")?.classList.add("d-none");
+  ["btnEstimateCost", "btnExportAssemblyPdf", "btnExport3d", "btnExportDbs"].forEach((id) => {
+    document.getElementById(id)?.classList.add("d-none");
+  });
 }
 
 function plannerStatusLabel(status) {
@@ -2368,6 +2458,7 @@ async function loadPlannerProject(projectId) {
   if (!project) throw new Error("Проект не найден");
 
   state.projectId = project.id;
+  state.selectedTier = project.selected_tier || "standard";
   state.roomConfig = {
     width: Number(project.room_width) || 6000,
     length: Number(project.room_length) || 5000,
@@ -2411,6 +2502,7 @@ async function loadPlannerProject(projectId) {
   renderRoomTopView();
   renderRoom3D();
   renderBom();
+  renderCostEstimate();
   ensureRoom3D();
 
   const hint = document.getElementById("plannerHint");
@@ -2434,16 +2526,19 @@ async function renderAdminPlannerProjects() {
     host.innerHTML = projects
       .map((project) => {
         const active = state.projectId === project.id ? "border-primary" : "";
-        const prices = project.price_standard
-          ? `<div class="small text-muted mt-1">от ${money(project.price_standard)}</div>`
-          : "";
+        const tier = project.selected_tier ? `<span class="badge bg-info text-dark ms-1">${escapeHtml(tierTitle(project.selected_tier))}</span>` : "";
+        const selectedPrice = project.selected_tier && project[`price_${project.selected_tier}`]
+          ? `<div class="small text-muted mt-1">${money(project[`price_${project.selected_tier}`])}</div>`
+          : project.price_standard
+            ? `<div class="small text-muted mt-1">от ${money(project.price_standard)}</div>`
+            : "";
         return `<div class="border rounded p-3 mb-2 ${active}">
           <div class="d-flex justify-content-between align-items-start gap-2">
             <div>
-              <strong>#${project.id} ${escapeHtml(project.name)}</strong>
+              <strong>#${project.id} ${escapeHtml(project.name)}</strong>${tier}
               <div class="small text-muted">${escapeHtml(project.user_id || "—")} · ${escapeHtml(plannerStatusLabel(project.status))}</div>
               <div class="small">${Math.round(project.room_width)}×${Math.round(project.room_length)}×${Math.round(project.room_height)} мм</div>
-              ${prices}
+              ${selectedPrice}
             </div>
             <button class="btn btn-sm btn-primary" data-open-project="${project.id}">Открыть</button>
           </div>

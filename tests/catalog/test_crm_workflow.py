@@ -19,7 +19,9 @@ def test_submit_project_creates_production_order(catalog_client: TestClient):
             "customer": "Иванова М.",
             "user_id": "7",
             "pricing": {"standard": 180000, "comfort": 215000, "premium": 260000},
+            "selected_tier": "comfort",
             "materials": [{"material_id": material_id, "required_qty": 12}],
+            "notes": "Комплектация: Комфорт",
         },
     )
     assert response.status_code == 201
@@ -27,6 +29,8 @@ def test_submit_project_creates_production_order(catalog_client: TestClient):
     assert body["status"] == "конструктор"
     assert body["planner_project_id"] == 42
     assert body["price_standard"] == 180000.0
+    assert body["selected_tier"] == "comfort"
+    assert body["materials"][0]["required_qty"] == 12.0
 
 
 def test_update_order_status(catalog_client: TestClient):

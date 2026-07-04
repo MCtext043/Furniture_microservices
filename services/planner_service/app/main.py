@@ -9,7 +9,7 @@ from common.messaging import publish_event
 
 from .db import get_session
 from .models import FurniturePlacement, RoomProject
-from .schemas import FurnitureCreate, FurnitureOut, ProjectCreate, ProjectOut
+from .schemas import FurnitureCreate, FurnitureOut, ProjectCreate, ProjectOut, ProjectSubmitIn, ProjectUpdate
 
 
 app = FastAPI(
@@ -33,6 +33,7 @@ def _project_out(project: RoomProject) -> ProjectOut:
         price_comfort=float(project.price_comfort) if project.price_comfort is not None else None,
         price_premium=float(project.price_premium) if project.price_premium is not None else None,
         bom_json=project.bom_json or "",
+        selected_tier=project.selected_tier or "standard",
         status=project.status,
         submitted_at=submitted,
     )
@@ -103,11 +104,33 @@ def list_furniture(project_id: int, session: Session = Depends(get_session)) -> 
     return list(session.scalars(stmt))
 
 
-@app.post("/projects/{project_id}/submit", response_model=ProjectOut, dependencies=[Depends(ensure_planner_user)])
-def submit_project(project_id: int, session: Session = Depends(get_session)) -> ProjectOut:
+@app.patch("/projects/{project_id}", response_model=ProjectOut, dependencies=[Depends(ensure_planner_user)])
+def update_project(
+    project_id: int,
+    payload: ProjectUpdate,
+    session: Session = Depends(get_session),
+) -> ProjectOut:
     project = session.get(RoomProject, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(project, field, value)
+    session.commit()
+    session.refresh(project)
+    return _project_out(project)
+
+
+@app.post("/projects/{project_id}/submit", response_model=ProjectOut, dependencies=[Depends(ensure_planner_user)])
+def submit_project(
+    project_id: int,
+    payload: ProjectSubmitIn | None = None,
+    session: Session = Depends(get_session),
+) -> ProjectOut:
+    project = session.get(RoomProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if payload and payload.selected_tier:
+        project.selected_tier = payload.selected_tier
     project.status = "submitted"
     project.submitted_at = datetime.now(timezone.utc)
     session.commit()
