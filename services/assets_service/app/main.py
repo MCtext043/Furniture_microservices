@@ -8,7 +8,8 @@ from functools import lru_cache
 import boto3
 from botocore.client import Config
 from botocore.exceptions import ClientError
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from common.jwt_auth import ensure_assets_writer
@@ -112,3 +113,40 @@ def presign_get(payload: PresignGetRequest) -> PresignGetResponse:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     cdn = f"{CDN_BASE_URL}/{payload.object_key}" if CDN_BASE_URL else None
     return PresignGetResponse(download_url=url, cdn_url=cdn)
+
+
+@app.post("/upload", dependencies=[Depends(ensure_assets_writer)])
+async def upload_object(
+    object_key: str = Form(..., min_length=3, max_length=255),
+    file: UploadFile = File(...),
+) -> dict[str, str]:
+    """Upload via gateway — browser cannot reach internal MinIO presigned URLs."""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Empty file")
+    cli = _client()
+    try:
+        cli.put_object(
+            Bucket=BUCKET,
+            Key=object_key,
+            Body=content,
+            ContentType=file.content_type or "application/octet-stream",
+        )
+    except ClientError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {"object_key": object_key}
+
+
+@app.get("/objects/{object_key:path}")
+def get_object(object_key: str) -> Response:
+    cli = _client()
+    try:
+        obj = cli.get_object(Bucket=BUCKET, Key=object_key)
+        body = obj["Body"].read()
+    except ClientError as exc:
+        code = exc.response.get("Error", {}).get("Code", "")
+        if code in {"NoSuchKey", "404"}:
+            raise HTTPException(status_code=404, detail="Object not found") from exc
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    content_type = obj.get("ContentType") or "application/octet-stream"
+    return Response(content=body, media_type=content_type)

@@ -25,6 +25,7 @@ FILES = [
     "services/catalog_service/app/crm_routes.py",
     "services/catalog_service/app/models.py",
     "services/catalog_service/app/schemas.py",
+    "services/assets_service/app/main.py",
     "services/cutting_service/app/main.py",
     "services/cutting_service/app/models.py",
     "services/cutting_service/app/schemas.py",
@@ -70,15 +71,15 @@ def main() -> int:
         "cd /opt/furniture && tar -xzf /tmp/furniture-quick.tar.gz",
         (
             "cd /opt/furniture && docker compose --env-file .env -f docker-compose.server.yml "
-            "build migrate planner-service catalog-service cutting-service gateway-service"
+            "build migrate planner-service catalog-service cutting-service assets-service gateway-service"
         ),
         "cd /opt/furniture && docker compose --env-file .env -f docker-compose.server.yml run --rm migrate",
         (
             "cd /opt/furniture && docker compose --env-file .env -f docker-compose.server.yml "
-            "up -d --no-deps --force-recreate planner-service catalog-service cutting-service gateway-service"
+            "up -d --no-deps --force-recreate planner-service catalog-service cutting-service assets-service gateway-service"
         ),
         "curl -skS -m 12 https://127.0.0.1/health || curl -sS -m 12 http://127.0.0.1:8002/health",
-        "grep -o '20260704-catalog-photos' /opt/furniture/frontend/index.html || true",
+        "grep -o '20260704-photos-archive' /opt/furniture/frontend/index.html || true",
     ]
 
     failed = False

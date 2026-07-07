@@ -23,7 +23,7 @@ const state = {
   cameraDrag: { active: false, startX: 0, startY: 0 },
   lastCutResult: null,
   selectedCutJobId: null,
-  crm: { orders: [], warehouse: [], procurementByOrder: {} },
+  crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active" },
   userOrders: [],
   selectedTier: "standard",
   productPhotoUrls: {},
@@ -78,7 +78,8 @@ const TIER_MATERIAL_PROFILES = {
   },
 };
 
-const CRM_STATUSES = ["конструктор", "закупка", "сборка"];
+const CRM_STATUSES = ["конструктор", "закупка", "сборка", "готова"];
+const CRM_STATUS_DONE = "готова";
 
 const typePresets = {
   wardrobe: { title: "Шкаф", color: "#8B5E3C", texture: "wood" },
@@ -1879,12 +1880,10 @@ async function loadProductEditorPhotos(product) {
     renderProductEditorPhotosPreview();
     return;
   }
-  productEditorPhotos.existing = await Promise.all(
-    product.photos.map(async (photo) => ({
-      ...photo,
-      preview: (await getPhotoViewUrl(photo.object_key).catch(() => "")) || "",
-    }))
-  );
+  productEditorPhotos.existing = product.photos.map((photo) => ({
+    ...photo,
+    preview: assetObjectUrl(photo.object_key),
+  }));
   renderProductEditorPhotosPreview();
 }
 
@@ -1940,19 +1939,29 @@ function handleProductPhotosSelected(event) {
 }
 
 async function uploadAssetFile(file, objectKey) {
-  const presign = await api(
-    "POST",
-    "/assets/presign-put",
-    { object_key: objectKey, content_type: file.type || "image/jpeg" },
-    true
-  );
-  const put = await fetch(presign.upload_url, {
-    method: "PUT",
-    body: file,
-    headers: { "Content-Type": file.type || "image/jpeg" },
-  });
-  if (!put.ok) throw new Error("Не удалось загрузить файл");
-  return objectKey;
+  const form = new FormData();
+  form.append("object_key", objectKey);
+  form.append("file", file);
+  const headers = { Accept: "application/json" };
+  if (token()) headers.Authorization = `Bearer ${token()}`;
+  const response = await fetch(`${apiBase()}/assets/upload`, { method: "POST", headers, body: form });
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = text;
+  }
+  if (!response.ok) {
+    const detail = payload?.detail;
+    throw new Error(typeof detail === "string" ? detail : "Не удалось загрузить файл");
+  }
+  return payload?.object_key || objectKey;
+}
+
+function assetObjectUrl(objectKey) {
+  const parts = String(objectKey).split("/").map((part) => encodeURIComponent(part));
+  return `${apiBase()}/assets/objects/${parts.join("/")}`;
 }
 
 async function syncProductEditorPhotos(productId) {
@@ -1976,17 +1985,10 @@ async function syncProductEditorPhotos(productId) {
 
 async function hydrateProductPhotoUrls(products) {
   state.productPhotoUrls = {};
-  await Promise.all(
-    products.map(async (product) => {
-      const key = product.photos?.[0]?.object_key;
-      if (!key) return;
-      try {
-        state.productPhotoUrls[product.id] = await getPhotoViewUrl(key);
-      } catch {
-        // ignore broken photo links
-      }
-    })
-  );
+  for (const product of products) {
+    const key = product.photos?.[0]?.object_key;
+    if (key) state.productPhotoUrls[product.id] = assetObjectUrl(key);
+  }
 }
 
 async function openProductEditor(productId) {
@@ -2276,15 +2278,107 @@ function crmStatusBadge(status) {
     конструктор: "text-bg-info",
     закупка: "text-bg-warning",
     сборка: "text-bg-success",
+    готова: "text-bg-secondary",
   };
   return map[status] || "text-bg-secondary";
+}
+
+function crmOrdersForTab(tab = state.crm.tab) {
+  if (tab === "archive") {
+    return state.crm.orders.filter((order) => order.status === CRM_STATUS_DONE);
+  }
+  return state.crm.orders.filter((order) => order.status !== CRM_STATUS_DONE);
+}
+
+function renderCrmOrderCard(order) {
+  return `
+      <div class="border rounded p-3 mb-3" data-order-card="${order.id}">
+        <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+          <div>
+            <strong>${escapeHtml(order.title)}</strong>
+            <span class="badge ${crmStatusBadge(order.status)} ms-2">${escapeHtml(order.status)}</span>
+            ${order.planner_project_id ? `<span class="badge text-bg-light ms-1">проект #${order.planner_project_id}</span>` : ""}
+          </div>
+          <span class="text-muted small">${escapeHtml(order.customer || "—")}</span>
+        </div>
+        ${order.notes ? `<div class="small text-muted mb-2">${escapeHtml(order.notes)}</div>` : ""}
+        ${order.selected_tier ? `<div class="small mb-2"><span class="badge bg-info text-dark">Комплектация: ${escapeHtml(tierTitle(order.selected_tier))}</span> · <strong>${money(orderSelectedPrice(order))}</strong></div>` : ""}
+        ${order.materials?.length ? `<div class="small mb-2"><strong>Материалы:</strong> ${order.materials.map((line) => `${escapeHtml(line.material_name)} — ${line.required_qty} ${escapeHtml(line.unit)}`).join("; ")}</div>` : ""}
+        ${order.price_standard ? `<div class="small text-muted mb-2">Все цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
+        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+          <select class="form-select form-select-sm" style="max-width:160px" data-crm-status="${order.id}">
+            ${CRM_STATUSES.map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
+          </select>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>
+          <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
+          <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>
+        </div>
+        <div id="crm-proc-${order.id}"></div>
+        <div id="crm-photos-${order.id}" class="mt-2"></div>
+      </div>`;
+}
+
+function bindCrmOrderPanel(host) {
+  host.querySelectorAll("[data-crm-order]").forEach((btn) => {
+    btn.addEventListener("click", () => renderCrmOrderProcurement(Number(btn.dataset.crmOrder)));
+  });
+  host.querySelectorAll("[data-crm-save-status]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const orderId = Number(btn.dataset.crmSaveStatus);
+      const select = host.querySelector(`[data-crm-status="${orderId}"]`);
+      updateCrmOrderStatus(orderId, select?.value || "конструктор");
+    });
+  });
+  host.querySelectorAll("[data-crm-photo]").forEach((btn) => {
+    btn.addEventListener("click", () => uploadCrmOrderPhoto(Number(btn.dataset.crmPhoto)));
+  });
+}
+
+function renderCrmPanel() {
+  renderCrmWarehouse();
+  const host = document.getElementById("crmOrdersPanel");
+  if (!host) return;
+  const activeCount = state.crm.orders.filter((order) => order.status !== CRM_STATUS_DONE).length;
+  const archiveCount = state.crm.orders.filter((order) => order.status === CRM_STATUS_DONE).length;
+  const orders = crmOrdersForTab(state.crm.tab);
+  const tabs = `
+    <ul class="nav nav-pills mb-3">
+      <li class="nav-item">
+        <button type="button" class="nav-link ${state.crm.tab === "active" ? "active" : ""}" data-crm-tab="active">Активные (${activeCount})</button>
+      </li>
+      <li class="nav-item">
+        <button type="button" class="nav-link ${state.crm.tab === "archive" ? "active" : ""}" data-crm-tab="archive">Архив (${archiveCount})</button>
+      </li>
+    </ul>`;
+  if (!orders.length) {
+    host.innerHTML = `${tabs}<div class="text-muted">${state.crm.tab === "archive" ? "В архиве пока нет завершённых проектов." : "Нет активных заказов. Нажмите «Загрузить демо CRM» или дождитесь отправки проекта клиентом."}</div>`;
+    host.querySelectorAll("[data-crm-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.crm.tab = btn.dataset.crmTab;
+        renderCrmPanel();
+      });
+    });
+    return;
+  }
+  host.innerHTML = `${tabs}${orders.map((order) => renderCrmOrderCard(order)).join("")}`;
+  host.querySelectorAll("[data-crm-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.crm.tab = btn.dataset.crmTab;
+      renderCrmPanel();
+    });
+  });
+  bindCrmOrderPanel(host);
+  orders.forEach((order) => renderCrmOrderPhotos(order.id));
 }
 
 async function updateCrmOrderStatus(orderId, status) {
   try {
     await api("PATCH", `/catalog/crm/orders/${orderId}/status`, { status }, true);
+    if (status === CRM_STATUS_DONE) {
+      state.crm.tab = "archive";
+    }
     await loadCrm();
-    toast(`Статус заказа: ${status}`);
+    toast(status === CRM_STATUS_DONE ? "Проект завершён и перемещён в архив" : `Статус заказа: ${status}`);
   } catch (error) {
     toast(`Не удалось обновить статус: ${error.message}`, false);
   }
@@ -2300,9 +2394,7 @@ async function uploadCrmOrderPhoto(orderId) {
     if (!file) return;
     const objectKey = `orders/${orderId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
     try {
-      const presign = await api("POST", "/assets/presign-put", { object_key: objectKey, content_type: file.type || "image/jpeg" }, true);
-      const put = await fetch(presign.upload_url, { method: "PUT", body: file, headers: { "Content-Type": file.type || "image/jpeg" } });
-      if (!put.ok) throw new Error("Загрузка файла не удалась");
+      await uploadAssetFile(file, objectKey);
       await api("POST", `/catalog/crm/orders/${orderId}/photos`, { object_key: objectKey, caption }, true);
       await loadCrm();
       toast("Фото добавлено к заказу");
@@ -2314,12 +2406,8 @@ async function uploadCrmOrderPhoto(orderId) {
 }
 
 async function getPhotoViewUrl(objectKey) {
-  try {
-    const data = await api("POST", "/assets/presign-get", { object_key: objectKey }, false);
-    return data.download_url || data.url || "";
-  } catch {
-    return "";
-  }
+  if (!objectKey) return "";
+  return assetObjectUrl(objectKey);
 }
 
 function exportCrmProcurementPdf(orderId) {
@@ -2371,59 +2459,6 @@ function exportCrmProcurementPdf(orderId) {
     })
     .download(`procurement-order-${orderId}.pdf`);
   toast("PDF закупки сохранён");
-}
-
-function renderCrmPanel() {
-  renderCrmWarehouse();
-  const host = document.getElementById("crmOrdersPanel");
-  if (!host) return;
-  if (!state.crm.orders.length) {
-    host.innerHTML = `<div class="text-muted">Нет заказов. Нажмите «Загрузить демо CRM» или дождитесь отправки проекта клиентом.</div>`;
-    return;
-  }
-  host.innerHTML = state.crm.orders
-    .map(
-      (order) => `
-      <div class="border rounded p-3 mb-3" data-order-card="${order.id}">
-        <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
-          <div>
-            <strong>${escapeHtml(order.title)}</strong>
-            <span class="badge ${crmStatusBadge(order.status)} ms-2">${escapeHtml(order.status)}</span>
-            ${order.planner_project_id ? `<span class="badge text-bg-light ms-1">проект #${order.planner_project_id}</span>` : ""}
-          </div>
-          <span class="text-muted small">${escapeHtml(order.customer || "—")}</span>
-        </div>
-        ${order.notes ? `<div class="small text-muted mb-2">${escapeHtml(order.notes)}</div>` : ""}
-        ${order.selected_tier ? `<div class="small mb-2"><span class="badge bg-info text-dark">Комплектация: ${escapeHtml(tierTitle(order.selected_tier))}</span> · <strong>${money(orderSelectedPrice(order))}</strong></div>` : ""}
-        ${order.materials?.length ? `<div class="small mb-2"><strong>Материалы:</strong> ${order.materials.map((line) => `${escapeHtml(line.material_name)} — ${line.required_qty} ${escapeHtml(line.unit)}`).join("; ")}</div>` : ""}
-        ${order.price_standard ? `<div class="small text-muted mb-2">Все цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
-        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-          <select class="form-select form-select-sm" style="max-width:160px" data-crm-status="${order.id}">
-            ${CRM_STATUSES.map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
-          </select>
-          <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>
-          <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
-          <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>
-        </div>
-        <div id="crm-proc-${order.id}"></div>
-        <div id="crm-photos-${order.id}" class="mt-2"></div>
-      </div>`
-    )
-    .join("");
-  host.querySelectorAll("[data-crm-order]").forEach((btn) => {
-    btn.addEventListener("click", () => renderCrmOrderProcurement(Number(btn.dataset.crmOrder)));
-  });
-  host.querySelectorAll("[data-crm-save-status]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const orderId = Number(btn.dataset.crmSaveStatus);
-      const select = host.querySelector(`[data-crm-status="${orderId}"]`);
-      updateCrmOrderStatus(orderId, select?.value || "конструктор");
-    });
-  });
-  host.querySelectorAll("[data-crm-photo]").forEach((btn) => {
-    btn.addEventListener("click", () => uploadCrmOrderPhoto(Number(btn.dataset.crmPhoto)));
-  });
-  state.crm.orders.forEach((order) => renderCrmOrderPhotos(order.id));
 }
 
 async function renderCrmOrderPhotos(orderId) {

@@ -191,7 +191,7 @@ class CrmOrderOut(BaseModel):
 
 
 class CrmOrderStatusUpdate(BaseModel):
-    status: str = Field(pattern=r"^(конструктор|закупка|сборка)$")
+    status: str = Field(pattern=r"^(конструктор|закупка|сборка|готова)$")
 
 
 class CrmOrderPhotoCreate(BaseModel):
