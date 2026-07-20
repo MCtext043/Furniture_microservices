@@ -215,6 +215,7 @@
           <ul class="nav nav-pills mb-3" id="accountTabs">
             <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#loginPane" type="button">Вход</button></li>
             <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#registerPane" type="button">Регистрация</button></li>
+            <li class="nav-item d-none" id="userProjectsTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#userProjectsPane" type="button">Мои проекты</button></li>
             <li class="nav-item d-none" id="userOrdersTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#userOrdersPane" type="button">Мои заказы</button></li>
           </ul>
           <div class="tab-content">
@@ -227,6 +228,9 @@
               <input class="form-control mb-3" id="regUser" placeholder="Имя" autocomplete="username" />
               <input type="password" class="form-control mb-3" id="regPass" placeholder="Пароль (мин. 8 символов)" autocomplete="new-password" />
               <button class="btn btn-success w-100" id="btnRegister">Создать аккаунт</button>
+            </div>
+            <div class="tab-pane fade" id="userProjectsPane">
+              <div id="userProjectsPanel" class="small text-muted">Войдите, чтобы видеть сохранённые проекты комнат.</div>
             </div>
             <div class="tab-pane fade" id="userOrdersPane">
               <div id="userOrdersPanel" class="small text-muted">Войдите, чтобы видеть заказы в производстве.</div>
@@ -241,9 +245,9 @@
   <script>window.APP_MODE = "user";</script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-  <script src="textures3d.js?v=20260703-cdn-restore"></script>
+  <script src="textures3d.js?v=20260707-3d-contrast"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script defer src="app.js?v=20260704-photos-archive"></script>
+  <script defer src="app.js?v=20260707-projects-crm"></script>
 </body>
 </html>

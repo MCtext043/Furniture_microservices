@@ -235,64 +235,23 @@
     return sprite;
   }
 
-  function metalHandleMat() {
-    return new THREE.MeshStandardMaterial({ color: 0xb8bcc4, metalness: 0.78, roughness: 0.28 });
+  function bodyLuminance(bodyMat) {
+    const color = bodyMat.color || new THREE.Color(0xcccccc);
+    return 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
   }
 
-  function buildFurnitureGroup(item, w, h, d, bodyMat) {
-    const group = new THREE.Group();
-    const shell = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMat);
-    shell.position.y = h / 2;
-    shell.castShadow = true;
-    shell.receiveShadow = true;
-    group.add(shell);
+  function contrastHandleMat(bodyMat) {
+    const darkHandles = bodyLuminance(bodyMat) > 0.52;
+    return new THREE.MeshStandardMaterial({
+      color: darkHandles ? 0x141414 : 0xf8f8f8,
+      metalness: darkHandles ? 0.72 : 0.18,
+      roughness: darkHandles ? 0.22 : 0.42,
+      emissive: darkHandles ? 0x050505 : 0x333333,
+      emissiveIntensity: darkHandles ? 0.08 : 0.22,
+    });
+  }
 
-    const drawerCount = Number(item.drawers) || (item.type === "cabinet" ? 2 : 0);
-    const handleCount = Number(item.handles) || (item.type === "wardrobe" ? 2 : drawerCount || 1);
-    const handleMat = metalHandleMat();
-
-    if (drawerCount > 0) {
-      const gap = 14;
-      const drawerH = (h - gap * (drawerCount + 1)) / drawerCount;
-      for (let i = 0; i < drawerCount; i++) {
-        const y = gap + drawerH / 2 + i * (drawerH + gap);
-        const front = new THREE.Mesh(new THREE.BoxGeometry(w - 28, drawerH - 6, 14), bodyMat.clone());
-        front.position.set(0, y, d / 2 + 6);
-        front.castShadow = true;
-        group.add(front);
-        const groove = new THREE.Mesh(new THREE.BoxGeometry(w - 60, 3, 2), handleMat);
-        groove.position.set(0, y + drawerH * 0.22, d / 2 + 14);
-        group.add(groove);
-      }
-    }
-
-    if (item.type === "wardrobe") {
-      const doorW = (w - 36) / 2;
-      [-1, 1].forEach((side) => {
-        const door = new THREE.Mesh(new THREE.BoxGeometry(doorW, h - 48, 14), bodyMat.clone());
-        door.position.set(side * (doorW / 2 + 10), h / 2, d / 2 + 5);
-        door.castShadow = true;
-        group.add(door);
-        const bar = new THREE.Mesh(new THREE.BoxGeometry(10, 110, 10), handleMat);
-        bar.position.set(side * (doorW / 2 - 24), h / 2, d / 2 + 16);
-        group.add(bar);
-      });
-    } else if (item.type === "cabinet" && drawerCount === 0) {
-      const door = new THREE.Mesh(new THREE.BoxGeometry(w - 24, h - 28, 14), bodyMat.clone());
-      door.position.set(0, h / 2, d / 2 + 5);
-      group.add(door);
-      const bar = new THREE.Mesh(new THREE.BoxGeometry(90, 10, 10), handleMat);
-      bar.position.set(0, h * 0.62, d / 2 + 16);
-      group.add(bar);
-    }
-
-    const spareHandles = Math.max(0, handleCount - group.children.filter((c) => c.material === handleMat).length);
-    for (let i = 0; i < spareHandles; i++) {
-      const knob = new THREE.Mesh(new THREE.SphereGeometry(10, 12, 12), handleMat);
-      knob.position.set(-w / 4 + i * (w / Math.max(spareHandles, 1)), h * 0.55, d / 2 + 18);
-      group.add(knob);
-    }
-
+  function addDimLabels(group, w, h, d) {
     const wLabel = makeDimLabel(`${Math.round(w)} мм`);
     wLabel.position.set(0, 24, d / 2 + 140);
     group.add(wLabel);
@@ -302,7 +261,104 @@
     const dLabel = makeDimLabel(`${Math.round(d)} мм`);
     dLabel.position.set(0, h + 80, 0);
     group.add(dLabel);
+  }
 
+  function buildTableGroup(item, w, h, d, bodyMat) {
+    const group = new THREE.Group();
+    const topTh = Math.max(36, Math.round(h * 0.055));
+    const legH = h - topTh;
+    const legSize = Math.max(48, Math.min(90, Math.round(Math.min(w, d) * 0.07)));
+    const inset = legSize * 0.85;
+
+    const top = new THREE.Mesh(new THREE.BoxGeometry(w, topTh, d), bodyMat);
+    top.position.y = h - topTh / 2;
+    top.castShadow = true;
+    top.receiveShadow = true;
+    group.add(top);
+
+    const legMat = bodyMat.clone();
+    if (legMat.color) legMat.color.multiplyScalar(0.82);
+    const legPositions = [
+      [-w / 2 + inset, legH / 2, -d / 2 + inset],
+      [w / 2 - inset, legH / 2, -d / 2 + inset],
+      [-w / 2 + inset, legH / 2, d / 2 - inset],
+      [w / 2 - inset, legH / 2, d / 2 - inset],
+    ];
+    legPositions.forEach(([lx, ly, lz]) => {
+      const leg = new THREE.Mesh(new THREE.BoxGeometry(legSize, legH, legSize), legMat);
+      leg.position.set(lx, ly, lz);
+      leg.castShadow = true;
+      leg.receiveShadow = true;
+      group.add(leg);
+    });
+
+    addDimLabels(group, w, h, d);
+    return group;
+  }
+
+  function buildFurnitureGroup(item, w, h, d, bodyMat) {
+    if (item.type === "table") {
+      return buildTableGroup(item, w, h, d, bodyMat);
+    }
+
+    const group = new THREE.Group();
+    const shell = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMat);
+    shell.position.y = h / 2;
+    shell.castShadow = true;
+    shell.receiveShadow = true;
+    group.add(shell);
+
+    const drawerCount = Number(item.drawers) || (item.type === "cabinet" ? 2 : 0);
+    const handleCount = Number(item.handles) || (item.type === "wardrobe" ? 2 : drawerCount || 1);
+    const handleMat = contrastHandleMat(bodyMat);
+
+    if (drawerCount > 0) {
+      const gap = 14;
+      const drawerH = (h - gap * (drawerCount + 1)) / drawerCount;
+      for (let i = 0; i < drawerCount; i++) {
+        const y = gap + drawerH / 2 + i * (drawerH + gap);
+        const front = new THREE.Mesh(new THREE.BoxGeometry(w - 28, drawerH - 6, 16), bodyMat.clone());
+        front.position.set(0, y, d / 2 + 7);
+        front.castShadow = true;
+        group.add(front);
+        const groove = new THREE.Mesh(new THREE.BoxGeometry(w - 50, 6, 4), handleMat);
+        groove.position.set(0, y + drawerH * 0.18, d / 2 + 16);
+        group.add(groove);
+      }
+    }
+
+    if (item.type === "wardrobe") {
+      const doorW = (w - 36) / 2;
+      [-1, 1].forEach((side) => {
+        const door = new THREE.Mesh(new THREE.BoxGeometry(doorW, h - 48, 16), bodyMat.clone());
+        door.position.set(side * (doorW / 2 + 10), h / 2, d / 2 + 6);
+        door.castShadow = true;
+        group.add(door);
+        const bar = new THREE.Mesh(new THREE.BoxGeometry(14, 120, 14), handleMat);
+        bar.position.set(side * (doorW / 2 - 28), h / 2, d / 2 + 18);
+        group.add(bar);
+      });
+    } else if (item.type === "cabinet" && drawerCount === 0) {
+      const door = new THREE.Mesh(new THREE.BoxGeometry(w - 24, h - 28, 16), bodyMat.clone());
+      door.position.set(0, h / 2, d / 2 + 6);
+      group.add(door);
+      const bar = new THREE.Mesh(new THREE.BoxGeometry(100, 14, 14), handleMat);
+      bar.position.set(0, h * 0.62, d / 2 + 18);
+      group.add(bar);
+    }
+
+    let handleSlots = 0;
+    group.children.forEach((child) => {
+      if (child.material === handleMat) handleSlots += 1;
+    });
+    const spareHandles = Math.max(0, handleCount - handleSlots);
+    for (let i = 0; i < spareHandles; i++) {
+      const knob = new THREE.Mesh(new THREE.SphereGeometry(14, 14, 14), handleMat);
+      knob.position.set(-w / 4 + i * (w / Math.max(spareHandles, 1)), h * 0.55, d / 2 + 20);
+      group.add(knob);
+    }
+
+    addDimLabels(group, w, h, d);
     return group;
   }
 

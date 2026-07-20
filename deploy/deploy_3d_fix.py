@@ -21,7 +21,6 @@ FILES = [
     "services/planner_service/app/main.py",
     "services/planner_service/app/models.py",
     "services/planner_service/app/schemas.py",
-    "services/catalog_service/app/main.py",
     "services/catalog_service/app/crm_routes.py",
     "services/catalog_service/app/models.py",
     "services/catalog_service/app/schemas.py",
@@ -79,7 +78,7 @@ def main() -> int:
             "up -d --no-deps --force-recreate planner-service catalog-service cutting-service assets-service gateway-service"
         ),
         "curl -skS -m 12 https://127.0.0.1/health || curl -sS -m 12 http://127.0.0.1:8002/health",
-        "grep -o '20260704-photos-archive' /opt/furniture/frontend/index.html || true",
+        "grep -o '20260707-projects-crm' /opt/furniture/frontend/index.html || true",
     ]
 
     failed = False

@@ -8,7 +8,7 @@ from typing import Callable, TypeVar
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session, joinedload
 
@@ -219,6 +219,16 @@ def list_user_orders(user_id: str, session: Session = Depends(get_session)) -> l
         )
     )
     return [_order_out(session, order) for order in orders]
+
+
+@router.delete("/orders", dependencies=[Depends(ensure_catalog_writer)])
+@crm_db_guard
+def clear_orders(session: Session = Depends(get_session)) -> dict[str, str]:
+    session.execute(delete(CrmOrderPhoto))
+    session.execute(delete(CrmOrderMaterial))
+    session.execute(delete(CrmProductionOrder))
+    session.commit()
+    return {"status": "cleared"}
 
 
 @router.post("/orders", response_model=CrmOrderOut, status_code=201, dependencies=[Depends(ensure_catalog_writer)])

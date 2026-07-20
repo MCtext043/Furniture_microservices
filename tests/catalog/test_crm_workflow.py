@@ -33,6 +33,23 @@ def test_submit_project_creates_production_order(catalog_client: TestClient):
     assert body["materials"][0]["required_qty"] == 12.0
 
 
+def test_clear_orders(catalog_client: TestClient):
+    material_id = _seed_material(catalog_client, "Болт")
+    catalog_client.post(
+        "/crm/orders",
+        json={
+            "title": "Тест",
+            "customer": "A",
+            "status": "конструктор",
+            "materials": [{"material_id": material_id, "required_qty": 1}],
+        },
+    )
+    response = catalog_client.delete("/crm/orders")
+    assert response.status_code == 200
+    assert response.json()["status"] == "cleared"
+    assert catalog_client.get("/crm/orders").json() == []
+
+
 def test_update_order_status_to_done(catalog_client: TestClient):
     material_id = _seed_material(catalog_client, "Кромка")
     created = catalog_client.post(

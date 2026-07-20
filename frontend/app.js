@@ -25,6 +25,7 @@ const state = {
   selectedCutJobId: null,
   crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active" },
   userOrders: [],
+  userProjects: [],
   selectedTier: "standard",
   productPhotoUrls: {},
 };
@@ -186,8 +187,13 @@ function updateAccountButton() {
   const name = customerName();
   btn.textContent = name ? `Кабинет: ${name}` : "Войти";
   const ordersTab = document.getElementById("userOrdersTabNav");
+  const projectsTab = document.getElementById("userProjectsTabNav");
   if (ordersTab) ordersTab.classList.toggle("d-none", !name);
-  if (name && APP_MODE !== "admin") loadUserOrders();
+  if (projectsTab) projectsTab.classList.toggle("d-none", !name);
+  if (name && APP_MODE !== "admin") {
+    loadUserOrders();
+    loadUserProjects();
+  }
 }
 
 function money(value) {
@@ -1055,6 +1061,7 @@ async function createRoom() {
     state.projectId = project.id;
     document.getElementById("plannerHint").textContent = `Проект №${project.id} сохранён: ${project.name}`;
     await syncPlannerObjectsToBackend();
+    await loadUserProjects();
     toast("Проект комнаты сохранён");
   } catch (error) {
     toast(`Планировщик недоступен: ${error.message}`, false);
@@ -2342,14 +2349,17 @@ function renderCrmPanel() {
   const archiveCount = state.crm.orders.filter((order) => order.status === CRM_STATUS_DONE).length;
   const orders = crmOrdersForTab(state.crm.tab);
   const tabs = `
-    <ul class="nav nav-pills mb-3">
-      <li class="nav-item">
-        <button type="button" class="nav-link ${state.crm.tab === "active" ? "active" : ""}" data-crm-tab="active">Активные (${activeCount})</button>
-      </li>
-      <li class="nav-item">
-        <button type="button" class="nav-link ${state.crm.tab === "archive" ? "active" : ""}" data-crm-tab="archive">Архив (${archiveCount})</button>
-      </li>
-    </ul>`;
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+      <ul class="nav nav-pills mb-0">
+        <li class="nav-item">
+          <button type="button" class="nav-link ${state.crm.tab === "active" ? "active" : ""}" data-crm-tab="active">Активные (${activeCount})</button>
+        </li>
+        <li class="nav-item">
+          <button type="button" class="nav-link ${state.crm.tab === "archive" ? "active" : ""}" data-crm-tab="archive">Архив (${archiveCount})</button>
+        </li>
+      </ul>
+      ${activeCount + archiveCount > 0 ? `<button type="button" class="btn btn-sm btn-outline-danger" id="btnClearCrmOrdersInline">Очистить историю</button>` : ""}
+    </div>`;
   if (!orders.length) {
     host.innerHTML = `${tabs}<div class="text-muted">${state.crm.tab === "archive" ? "В архиве пока нет завершённых проектов." : "Нет активных заказов. Нажмите «Загрузить демо CRM» или дождитесь отправки проекта клиентом."}</div>`;
     host.querySelectorAll("[data-crm-tab]").forEach((btn) => {
@@ -2358,6 +2368,7 @@ function renderCrmPanel() {
         renderCrmPanel();
       });
     });
+    host.querySelector("#btnClearCrmOrdersInline")?.addEventListener("click", clearCrmOrders);
     return;
   }
   host.innerHTML = `${tabs}${orders.map((order) => renderCrmOrderCard(order)).join("")}`;
@@ -2367,6 +2378,7 @@ function renderCrmPanel() {
       renderCrmPanel();
     });
   });
+  host.querySelector("#btnClearCrmOrdersInline")?.addEventListener("click", clearCrmOrders);
   bindCrmOrderPanel(host);
   orders.forEach((order) => renderCrmOrderPhotos(order.id));
 }
@@ -2575,6 +2587,79 @@ async function submitProjectToWork() {
   }
 }
 
+async function clearCrmOrders() {
+  if (!window.confirm("Очистить всю историю заказов CRM? Фото и материалы заказов будут удалены.")) return;
+  try {
+    await api("DELETE", "/catalog/crm/orders", undefined, true);
+    state.crm.procurementByOrder = {};
+    state.crm.tab = "active";
+    await loadCrm();
+    toast("История заказов очищена");
+  } catch (error) {
+    toast(`Не удалось очистить историю: ${formatApiError(error)}`, false);
+  }
+}
+
+async function loadUserProjects() {
+  const host = document.getElementById("userProjectsPanel");
+  if (!host || !customerName()) return;
+  try {
+    state.userProjects = await api(
+      "GET",
+      `/planner/projects/user/${encodeURIComponent(customerName())}`,
+      undefined,
+      true
+    );
+    renderUserProjects();
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+function renderUserProjects() {
+  const host = document.getElementById("userProjectsPanel");
+  if (!host) return;
+  if (!state.userProjects.length) {
+    host.innerHTML = `<div class="text-muted">У вас пока нет сохранённых проектов. Спланируйте комнату и нажмите «Сохранить проект».</div>`;
+    return;
+  }
+  host.innerHTML = state.userProjects
+    .map((project) => {
+      const tier = project.selected_tier ? ` · ${tierTitle(project.selected_tier)}` : "";
+      const price = project[`price_${project.selected_tier || "standard"}`];
+      const priceText = price ? ` · ${money(price)}` : "";
+      return `<div class="border rounded p-3 mb-2">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+          <div>
+            <strong>${escapeHtml(project.name)}</strong>
+            <div class="small text-muted">${plannerStatusLabel(project.status)}${tier}${priceText}</div>
+            <div class="small">${Math.round(project.room_width)}×${Math.round(project.room_length)}×${Math.round(project.room_height)} мм</div>
+            ${project.location ? `<div class="small text-muted">${escapeHtml(project.location)}</div>` : ""}
+          </div>
+          <button type="button" class="btn btn-sm btn-primary" data-open-user-project="${project.id}">Открыть</button>
+        </div>
+      </div>`;
+    })
+    .join("");
+  host.querySelectorAll("[data-open-user-project]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await openUserProject(Number(button.dataset.openUserProject));
+      } catch (error) {
+        toast(`Не удалось открыть проект: ${formatApiError(error)}`, false);
+      }
+    });
+  });
+}
+
+async function openUserProject(projectId) {
+  await loadPlannerProject(projectId);
+  const modal = document.getElementById("accountModal");
+  if (modal) bootstrap.Modal.getInstance(modal)?.hide();
+  document.getElementById("planner")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  toast("Проект загружен в планировщик");
+}
+
 async function loadUserOrders() {
   const host = document.getElementById("userOrdersPanel");
   if (!host || !customerName()) return;
@@ -2647,8 +2732,20 @@ function plannerStatusLabel(status) {
 }
 
 async function loadPlannerProject(projectId) {
-  const projects = await api("GET", "/planner/projects");
-  const project = projects.find((row) => row.id === projectId);
+  let project;
+  if (APP_MODE === "admin") {
+    const projects = await api("GET", "/planner/projects");
+    project = projects.find((row) => row.id === projectId);
+  } else {
+    if (!customerName()) throw new Error("Войдите в аккаунт");
+    const projects = await api(
+      "GET",
+      `/planner/projects/user/${encodeURIComponent(customerName())}`,
+      undefined,
+      true
+    );
+    project = projects.find((row) => row.id === projectId);
+  }
   if (!project) throw new Error("Проект не найден");
 
   state.projectId = project.id;
@@ -3220,6 +3317,7 @@ async function boot() {
   bindClick("btnQuoteDelivery", quoteDelivery);
   bindClick("btnSeedDemo", async () => { await seedDemoData(); await loadCatalog(); renderAdminCatalogTable(); toast("Демо-данные загружены"); });
   bindClick("btnSeedCrm", seedCrmDemo);
+  bindClick("btnClearCrmOrders", clearCrmOrders);
   bindClick("btnRefreshJobs", renderCuttingJobs);
   bindClick("btnClearCuttingJobs", clearCuttingJobs);
 
