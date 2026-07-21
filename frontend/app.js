@@ -94,12 +94,12 @@ const texturePresets = {
   wood_dark_oak: { title: "Темный дуб", material: "wood", color: "#6B4423" },
   wood_oak: { title: "Светлый дуб", material: "wood", color: "#B68655" },
   board_black: { title: "Черное ДСП", material: "board", color: "#222629" },
-  board_white: { title: "Белое ДСП", material: "board", color: "#F4F5F7" },
+  board_white: { title: "Белое ДСП", material: "board", color: "#E8E8E4" },
   fabric_gray: { title: "Серая ткань", material: "fabric", color: "#6C757D" },
   metal_graphite: { title: "Графитовый металл", material: "metal", color: "#495057" },
-  mdf_matte: { title: "МДФ матовый", material: "mdf", color: "#E8E4DE" },
-  laminate_grey: { title: "Ламинат серый", material: "laminate", color: "#9CA3AF" },
-  countertop: { title: "Столешница", material: "stone", color: "#D1C7BD" },
+  mdf_matte: { title: "МДФ матовый", material: "mdf", color: "#B8AEA2" },
+  laminate_grey: { title: "Ламинат серый", material: "laminate", color: "#85898B" },
+  countertop: { title: "Столешница", material: "stone", color: "#C4B5A3" },
 };
 
 function sameOriginApiBase() {
@@ -1153,6 +1153,18 @@ function createSurfaceMaterial(type, variant, colorHex) {
   return new THREE.MeshStandardMaterial({ color: colorHex });
 }
 
+function createSurfaceMaterialForPanel(type, variant, colorHex, widthMm, heightMm, orientation = "horizontal") {
+  if (!window.THREE) return null;
+  if (window.Texture3D?.createSurfaceMaterial) {
+    return window.Texture3D.createSurfaceMaterial(type, variant, colorHex, { widthMm, heightMm, orientation });
+  }
+  return new THREE.MeshStandardMaterial({ color: colorHex });
+}
+
+function prepareGeometry(geometry) {
+  return window.Texture3D?.prepareGeometry ? window.Texture3D.prepareGeometry(geometry) : geometry;
+}
+
 function normalizeColorHex(value) {
   if (!value) return "";
   const raw = String(value).trim();
@@ -1166,7 +1178,54 @@ function createFurnitureMaterial(item, texturePreset) {
   if (customColor) {
     return new THREE.MeshStandardMaterial({ color: customColor, roughness: 0.72, metalness: 0.04 });
   }
-  return createSurfaceMaterial(texturePreset.material, item.texture || "default", texturePreset.color);
+  return createSurfaceMaterialForPanel(
+    texturePreset.material,
+    item.texture || "default",
+    texturePreset.color,
+    Number(item.width) || 900,
+    Number(item.height) || 1800,
+    "vertical"
+  );
+}
+
+function createFurnitureMaterialSet(item, texturePreset) {
+  const customColor = normalizeColorHex(item.customColor);
+  if (customColor) {
+    const selected = new THREE.MeshStandardMaterial({ color: customColor, roughness: 0.7, metalness: 0.03 });
+    const caseFurniture = item.type === "wardrobe" || item.type === "cabinet";
+    const body = caseFurniture
+      ? new THREE.MeshStandardMaterial({ color: 0xe8e8e4, roughness: 0.76, metalness: 0 })
+      : selected;
+    return {
+      body,
+      facade: selected.clone(),
+      edge: body.clone(),
+      back: new THREE.MeshStandardMaterial({ color: 0xf3f4f6, roughness: 0.82, metalness: 0 }),
+      countertop: selected.clone(),
+      handles: new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.28, metalness: 0.94 }),
+      interior: body.clone(),
+    };
+  }
+
+  const width = Math.max(Number(item.width) || 350, 350);
+  const depth = Math.max(Number(item.depth) || 350, 350);
+  const height = Math.max(Number(item.height) || 350, 350);
+  const selectedVertical = createSurfaceMaterialForPanel(texturePreset.material, item.texture || "default", texturePreset.color, width, height, "vertical");
+  const selectedHorizontal = createSurfaceMaterialForPanel(texturePreset.material, item.texture || "default", texturePreset.color, width, depth, "horizontal");
+  const caseFurniture = item.type === "wardrobe" || item.type === "cabinet";
+  const neutralVariant = item.texture === "board_white" ? "mdf_matte" : "board_white";
+  const neutralType = neutralVariant === "mdf_matte" ? "mdf" : "board";
+  const neutralColor = neutralVariant === "mdf_matte" ? 0xb8aea2 : 0xe8e8e4;
+  const neutralVertical = createSurfaceMaterialForPanel(neutralType, neutralVariant, neutralColor, width, height, "vertical");
+  const neutralHorizontal = createSurfaceMaterialForPanel(neutralType, neutralVariant, neutralColor, width, depth, "horizontal");
+  const body = caseFurniture ? neutralVertical : selectedVertical;
+  const facade = selectedVertical;
+  const interior = caseFurniture ? neutralHorizontal : selectedHorizontal;
+  const edge = caseFurniture ? neutralVertical.clone() : selectedVertical.clone();
+  const back = createSurfaceMaterialForPanel("board", "board_white", 0xffffff, width, height, "vertical");
+  const countertop = selectedHorizontal;
+  const handles = new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.26, metalness: 0.96 });
+  return { body, facade, edge, back, countertop, handles, interior };
 }
 
 function roomUnitToWorldX(x) {
@@ -1197,6 +1256,7 @@ function furnitureAccessoryDefaults(type) {
 function disposeRoom3D() {
   if (!state.three) return;
   const { renderer, host } = state.three;
+  window.__room3dRenderer = null;
   if (renderer) {
     renderer.dispose();
     if (typeof renderer.forceContextLoss === "function") {
@@ -1258,35 +1318,62 @@ function initRoom3D() {
   const width = host.clientWidth || 640;
   const height = 360;
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1f2937);
+  scene.background = new THREE.Color(0xf3efe8);
 
   const camera = new THREE.PerspectiveCamera(45, width / height, 1, 50000);
   camera.position.set(7000, 5500, 7500);
   camera.lookAt(0, 1000, 0);
 
   const renderer = createRoom3DRenderer(width, height);
+  window.__room3dRenderer = renderer;
+  if (THREE.SRGBColorSpace) {
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+  } else if (THREE.sRGBEncoding) {
+    renderer.outputEncoding = THREE.sRGBEncoding;
+  }
   if (THREE.ACESFilmicToneMapping) {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 1.12;
   }
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   host.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
   host.appendChild(renderer.domElement);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.48);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.3);
   scene.add(ambient);
-  const light = new THREE.DirectionalLight(0xfff4e6, 1.15);
-  light.position.set(4000, 9000, 5000);
+  const hemi = new THREE.HemisphereLight(0xfff7ed, 0xd7dee8, 0.55);
+  scene.add(hemi);
+  const light = new THREE.DirectionalLight(0xfff6eb, 1.5);
+  light.position.set(4200, 9000, 4600);
   light.castShadow = true;
-  light.shadow.mapSize.set(1024, 1024);
+  light.shadow.mapSize.set(2048, 2048);
+  light.shadow.bias = -0.00012;
+  light.shadow.normalBias = 0.015;
+  light.shadow.radius = 2.6;
   scene.add(light);
-  const fill = new THREE.DirectionalLight(0xc7d2fe, 0.42);
-  fill.position.set(-5000, 3000, -2000);
+  const fill = new THREE.DirectionalLight(0xe6edf7, 0.52);
+  fill.position.set(-5400, 3200, -2600);
   scene.add(fill);
-  const rim = new THREE.DirectionalLight(0xffffff, 0.25);
-  rim.position.set(0, 4000, -6000);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.26);
+  rim.position.set(0, 4200, -6200);
   scene.add(rim);
+
+  if (THREE.PMREMGenerator) {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color(0xf3efe8);
+    envScene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const envKey = new THREE.DirectionalLight(0xffffff, 1.2);
+    envKey.position.set(6, 10, 8);
+    envScene.add(envKey);
+    const envFill = new THREE.DirectionalLight(0xdde7f5, 0.45);
+    envFill.position.set(-7, 4, -5);
+    envScene.add(envFill);
+    const envMap = pmrem.fromScene(envScene, 0.04).texture;
+    scene.environment = envMap;
+    pmrem.dispose();
+  }
 
   const roomGroup = new THREE.Group();
   const furnitureGroup = new THREE.Group();
@@ -1397,20 +1484,20 @@ function rebuildRoomGeometry() {
 
   const { width, length, height } = state.roomConfig;
   const floor = new THREE.Mesh(
-    new THREE.BoxGeometry(width, 60, length),
-    createSurfaceMaterial("floor", "default", 0xffffff)
+    prepareGeometry(new THREE.BoxGeometry(width, 60, length)),
+    createSurfaceMaterialForPanel("floor", "default", 0xffffff, width, length, "horizontal")
   );
   floor.position.y = -30;
   floor.receiveShadow = true;
   roomGroup.add(floor);
 
-  const wallMat = createSurfaceMaterial("wall", "default", 0xfaf7f2);
-  const wallBack = new THREE.Mesh(new THREE.BoxGeometry(width, height, 50), wallMat);
+  const wallMat = createSurfaceMaterialForPanel("wall", "default", 0xfaf7f2, width, height, "vertical");
+  const wallBack = new THREE.Mesh(prepareGeometry(new THREE.BoxGeometry(width, height, 50)), wallMat);
   wallBack.position.set(0, height / 2, -length / 2);
   wallBack.receiveShadow = true;
   roomGroup.add(wallBack);
 
-  const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(50, height, length), wallMat.clone());
+  const wallLeft = new THREE.Mesh(prepareGeometry(new THREE.BoxGeometry(50, height, length)), wallMat.clone());
   wallLeft.position.set(-width / 2, height / 2, 0);
   wallLeft.receiveShadow = true;
   roomGroup.add(wallLeft);
@@ -1426,11 +1513,11 @@ function renderRoom3D() {
     const w = Math.max(Number(item.width) || 350, 350);
     const d = Math.max(Number(item.depth) || 350, 350);
     const h = Math.max(Number(item.height) || 350, 350);
-    const bodyMat = createFurnitureMaterial(item, texturePreset);
+    const materialSet = createFurnitureMaterialSet(item, texturePreset);
     const group = window.Texture3D?.buildFurnitureGroup
-      ? window.Texture3D.buildFurnitureGroup(item, w, h, d, bodyMat)
+      ? window.Texture3D.buildFurnitureGroup(item, w, h, d, materialSet)
       : (() => {
-          const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMat);
+          const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), materialSet.body);
           mesh.position.y = h / 2;
           return mesh;
         })();
