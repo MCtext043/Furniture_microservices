@@ -1,5 +1,9 @@
 /** Material and furniture helpers for the 3D planner. */
 (function () {
+  if (!window.THREE) {
+    console.warn("[materials] Three.js unavailable; 3D materials initialization skipped");
+    return;
+  }
   const proceduralBundleCache = new Map();
   const externalBundleCache = new Map();
   const warnedMissingBundles = new Set();

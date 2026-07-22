@@ -2,6 +2,7 @@ const APP_MODE = window.APP_MODE || "user";
 const LS_API = "furniture_gateway_url";
 const LS_TOKEN = "furniture_jwt";
 const LS_CUSTOMER = "furniture_customer_name";
+const LS_THEME = "woodcraft_theme";
 
 const state = {
   categories: [],
@@ -29,6 +30,9 @@ const state = {
   selectedTier: "standard",
   selected3dObjectId: null,
   productPhotoUrls: {},
+  wishlistIds: new Set(),
+  commercePending: new Set(),
+  plannerStep: 1,
 };
 
 const productEditorPhotos = { existing: [], pending: [], removed: [] };
@@ -169,12 +173,17 @@ async function refreshAuth() {
     if (me.username) setCustomerName(me.username);
   } catch {
     setToken("");
+    setCustomerName("");
     state.roles = [];
   }
 }
 
 function customerName() {
   return localStorage.getItem(LS_CUSTOMER) || "";
+}
+
+function isAuthenticated() {
+  return Boolean(token() && customerName());
 }
 
 function setCustomerName(value) {
@@ -184,9 +193,12 @@ function setCustomerName(value) {
 
 function updateAccountButton() {
   const btn = document.getElementById("accountBtn");
-  if (!btn) return;
   const name = customerName();
-  btn.textContent = name ? `Кабинет: ${name}` : "Войти";
+  if (btn) btn.textContent = name ? `Кабинет: ${name}` : "Войти";
+  document.getElementById("accountGuest")?.classList.toggle("d-none", Boolean(name));
+  document.getElementById("accountMember")?.classList.toggle("d-none", !name);
+  const memberName = document.getElementById("accountMemberName");
+  if (memberName) memberName.textContent = name;
   const ordersTab = document.getElementById("userOrdersTabNav");
   const projectsTab = document.getElementById("userProjectsTabNav");
   if (ordersTab) ordersTab.classList.toggle("d-none", !name);
@@ -195,6 +207,45 @@ function updateAccountButton() {
     loadUserOrders();
     loadUserProjects();
   }
+  updatePlannerAuthUi();
+}
+
+function logoutCustomer() {
+  setToken("");
+  setCustomerName("");
+  state.roles = [];
+  state.cart = [];
+  state.wishlistIds.clear();
+  state.userOrders = [];
+  state.userProjects = [];
+  renderCart();
+  renderProducts();
+  toast("Вы вышли из аккаунта");
+}
+
+function updatePlannerAuthUi() {
+  const hint = document.getElementById("plannerHint");
+  if (!hint) return;
+  if (!isAuthenticated()) {
+    hint.textContent = "Войдите, чтобы сохранить проект на сервере.";
+  } else if (hint.textContent.includes("Войдите")) {
+    hint.textContent = "Проект можно сохранить или отправить в работу.";
+  }
+}
+
+function applyTheme(theme) {
+  const resolved = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = resolved;
+  localStorage.setItem(LS_THEME, resolved);
+  const button = document.getElementById("themeToggle");
+  if (button) {
+    button.querySelector("span").textContent = resolved === "dark" ? "☀" : "☾";
+    button.setAttribute("aria-label", resolved === "dark" ? "Включить светлую тему" : "Включить тёмную тему");
+  }
+}
+
+function toggleTheme() {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
 }
 
 function money(value) {
@@ -203,9 +254,11 @@ function money(value) {
 
 function toast(message, ok = true) {
   const host = document.querySelector(".toast-container");
+  if (!host) return;
   const el = document.createElement("div");
   el.className = `toast align-items-center text-bg-${ok ? "success" : "danger"} border-0 show`;
-  el.innerHTML = `<div class="d-flex"><div class="toast-body">${escapeHtml(message)}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+  el.setAttribute("role", ok ? "status" : "alert");
+  el.innerHTML = `<div class="d-flex"><div class="toast-body">${escapeHtml(message)}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Закрыть уведомление"></button></div>`;
   host.appendChild(el);
   setTimeout(() => el.remove(), 4500);
 }
@@ -219,7 +272,39 @@ function formatApiError(error) {
 }
 
 function escapeHtml(value) {
-  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function normalizeSearch(value) {
+  return String(value || "").trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ");
+}
+
+let pdfMakeLoadPromise = null;
+function loadExternalScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) { existing.addEventListener("load", resolve, { once: true }); existing.addEventListener("error", reject, { once: true }); return; }
+    const script = document.createElement("script");
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Не удалось загрузить ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+async function ensurePdfMake() {
+  if (window.pdfMake) return true;
+  if (!pdfMakeLoadPromise) {
+    pdfMakeLoadPromise = loadExternalScript("https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js")
+      .then(() => loadExternalScript("https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"));
+  }
+  try { await pdfMakeLoadPromise; return Boolean(window.pdfMake); }
+  catch (error) { pdfMakeLoadPromise = null; toast("Не удалось загрузить модуль PDF", false); return false; }
 }
 
 function makeId() {
@@ -437,7 +522,6 @@ async function loginCustomer() {
     setToken(data.access_token);
     setCustomerName(username);
     await refreshAuth();
-    closeAccountModal();
     if (APP_MODE === "admin" && !canManageCatalog() && !canRunCutting()) {
       setToken("");
       setCustomerName("");
@@ -446,7 +530,12 @@ async function loginCustomer() {
       return;
     }
     toast(`Добро пожаловать, ${username}`);
-    if (APP_MODE === "admin") bootAdminPanel();
+    if (APP_MODE === "admin") {
+      closeAccountModal();
+      bootAdminPanel();
+    } else {
+      await Promise.all([loadCommerceState(), loadUserProjects(), loadUserOrders()]);
+    }
   } catch (error) {
     toast(`Не удалось войти: ${formatApiError(error)}`, false);
   }
@@ -564,7 +653,10 @@ async function loadCatalog() {
   if (statC) statC.textContent = state.categories.length;
   renderCategories();
   if (APP_MODE === "admin") renderAdminCatalogTable();
-  else renderProducts();
+  else {
+    renderProducts();
+    await loadCommerceState();
+  }
 }
 
 function demoMeta(product) {
@@ -592,41 +684,60 @@ function renderCategories() {
   if (!host) return;
   const counts = new Map();
   state.products.forEach((p) => counts.set(p.category_id, (counts.get(p.category_id) || 0) + 1));
-  const buttons = [`<button class="btn btn-sm category-pill ${state.activeCategory === "all" ? "active" : ""}" data-cat="all">Все (${state.products.length})</button>`];
+  const buttons = [`<button class="category-pill ${state.activeCategory === "all" ? "active" : ""}" data-cat="all" aria-pressed="${state.activeCategory === "all"}">Все <span>${state.products.length}</span></button>`];
   for (const cat of visibleCategories()) {
     const count = counts.get(cat.id) || 0;
     if (!count) continue;
-    buttons.push(`<button class="btn btn-sm category-pill ${state.activeCategory === String(cat.id) ? "active" : ""}" data-cat="${cat.id}">${escapeHtml(categoryName(cat.id))} (${count})</button>`);
+    const isActive = state.activeCategory === String(cat.id);
+    buttons.push(`<button class="category-pill ${isActive ? "active" : ""}" data-cat="${cat.id}" aria-pressed="${isActive}">${escapeHtml(categoryName(cat.id))} <span>${count}</span></button>`);
   }
   host.innerHTML = buttons.join("");
   host.querySelectorAll("[data-cat]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.activeCategory = btn.dataset.cat;
       renderCategories();
-      renderProducts();
+      if (APP_MODE === "admin") renderAdminCatalogTable();
+      else renderProducts();
     });
   });
 }
 
 function filteredProducts() {
-  const q = state.search.trim().toLowerCase();
-  return state.products.filter((p) => {
+  const q = normalizeSearch(state.search);
+  return state.products.map((p, index) => {
     const catOk = state.activeCategory === "all" || String(p.category_id) === state.activeCategory;
-    const qOk =
-      !q ||
-      `${displayProductTitle(p)} ${displayProductBrand(p)} ${displayProductDescription(p)}`
-        .toLowerCase()
-        .includes(q);
-    return catOk && qOk;
-  });
+    if (!catOk) return null;
+    if (!q) return { product: p, score: 0, index };
+    const title = normalizeSearch(displayProductTitle(p));
+    const category = normalizeSearch(categoryName(p.category_id));
+    const description = normalizeSearch(displayProductDescription(p));
+    const brand = normalizeSearch(displayProductBrand(p));
+    let score = -1;
+    if (title === q) score = 500;
+    else if (title.startsWith(q)) score = 400;
+    else if (title.includes(q)) score = 300;
+    else if (category.includes(q)) score = 200;
+    else if (description.includes(q)) score = 100;
+    else if (brand.includes(q) || normalizeSearch(p.sku).includes(q)) score = 50;
+    return score < 0 ? null : { product: p, score, index };
+  }).filter(Boolean).sort((a, b) => b.score - a.score || a.index - b.index).map((row) => row.product);
 }
 
 function renderProducts() {
   const host = document.getElementById("productGrid");
   if (!host) return;
+  host.setAttribute("aria-busy", "false");
   const products = filteredProducts();
   if (!products.length) {
-    host.innerHTML = `<div class="col-12 text-center text-muted py-5">По вашему запросу ничего не найдено.</div>`;
+    host.innerHTML = `<div class="col-12"><div class="empty-state"><strong>Подходящих товаров не нашлось</strong><p>Попробуйте изменить запрос или вернуться ко всем категориям.</p><button class="btn btn-secondary" type="button" data-reset-catalog>Показать все товары</button></div></div>`;
+    host.querySelector("[data-reset-catalog]")?.addEventListener("click", () => {
+      state.search = "";
+      state.activeCategory = "all";
+      const searchInput = document.getElementById("searchInput");
+      if (searchInput) searchInput.value = "";
+      renderCategories();
+      renderProducts();
+    });
     return;
   }
   const adminActions = APP_MODE === "admin";
@@ -635,31 +746,31 @@ function renderProducts() {
       const meta = demoMeta(p);
       const imgUrl = state.productPhotoUrls[p.id];
       const art = imgUrl
-        ? `<div class="product-art product-art-photo"><img src="${imgUrl}" alt="${escapeHtml(displayProductTitle(p))}"></div>`
-        : `<div class="product-art" style="background:${meta.gradient}">${meta.icon}</div>`;
+        ? `<div class="product-art product-art-photo"><img src="${imgUrl}" alt="${escapeHtml(displayProductTitle(p))}" width="640" height="460" loading="lazy" decoding="async"></div>`
+        : `<div class="product-art" style="background:${meta.gradient}" role="img" aria-label="${escapeHtml(displayProductTitle(p))}">${meta.icon}</div>`;
       const actionButtons = adminActions
         ? `<div class="btn-group">
             <button class="btn btn-outline-primary btn-sm" data-edit="${p.id}">Изменить</button>
             <button class="btn btn-outline-danger btn-sm" data-del="${p.id}">Скрыть</button>
           </div>`
-        : `<div class="btn-group">
-            <button class="btn btn-outline-secondary btn-sm" data-wish="${p.id}">♡</button>
-            <button class="btn btn-primary btn-sm" data-cart="${p.id}">В корзину</button>
+        : `<div class="product-actions">
+            <button class="btn btn-quiet btn-sm wishlist-button ${state.wishlistIds.has(p.id) ? "is-active" : ""}" data-wish="${p.id}" aria-pressed="${state.wishlistIds.has(p.id)}" aria-label="${state.wishlistIds.has(p.id) ? "Удалить" : "Добавить"} ${escapeHtml(displayProductTitle(p))} ${state.wishlistIds.has(p.id) ? "из" : "в"} избранное" title="Избранное">${state.wishlistIds.has(p.id) ? "♥" : "♡"}</button>
+            <button class="btn btn-primary btn-sm" data-cart="${p.id}" ${Number(p.stock) <= 0 ? "disabled" : ""}>${state.cart.some((item) => item.id === p.id) ? "✓ Добавлено" : Number(p.stock) <= 0 ? "Нет в наличии" : "В корзину"}</button>
           </div>`;
       return `
         <div class="col-md-6 col-xl-4">
           <article class="card product-card h-100">
             ${art}
             <div class="card-body d-flex flex-column">
-              <div class="d-flex justify-content-between gap-2 mb-2">
+              <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
                 <span class="badge text-bg-light">${escapeHtml(categoryName(p.category_id))}</span>
-                <span class="small text-muted">на складе: ${p.stock}</span>
+                <span class="stock-status ${Number(p.stock) <= 0 ? "is-empty" : ""}">${Number(p.stock) <= 0 ? "Нет в наличии" : `В наличии: ${p.stock}`}</span>
               </div>
-              <h5>${escapeHtml(displayProductTitle(p))}</h5>
-              <div class="text-muted small mb-2">${escapeHtml(displayProductBrand(p))}</div>
-              <p class="text-muted small flex-grow-1">${escapeHtml(displayProductDescription(p) || "Современное мебельное решение для дома.")}</p>
+              <h3 class="card-title">${escapeHtml(displayProductTitle(p))}</h3>
+              <div class="product-brand">${escapeHtml(displayProductBrand(p))}</div>
+              <p class="card-text flex-grow-1">${escapeHtml(displayProductDescription(p) || "Практичное мебельное решение для дома.")}</p>
               <div class="d-flex justify-content-between align-items-center">
-                <span class="price fs-5">${money(Number(p.price))}</span>
+                <span class="price">${money(Number(p.price))}</span>
                 ${actionButtons}
               </div>
             </div>
@@ -672,43 +783,99 @@ function renderProducts() {
     host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openProductEditor(Number(btn.dataset.edit))));
     host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", () => deactivateProduct(Number(btn.dataset.del))));
   } else {
-    host.querySelectorAll("[data-cart]").forEach((btn) => btn.addEventListener("click", () => addToCart(Number(btn.dataset.cart))));
-    host.querySelectorAll("[data-wish]").forEach((btn) => btn.addEventListener("click", () => addToWishlist(Number(btn.dataset.wish))));
+    host.querySelectorAll("[data-cart]").forEach((btn) => btn.addEventListener("click", () => addToCart(Number(btn.dataset.cart), btn)));
+    host.querySelectorAll("[data-wish]").forEach((btn) => btn.addEventListener("click", () => toggleWishlist(Number(btn.dataset.wish), btn)));
   }
 }
 
-async function addToCart(id) {
+async function addToCart(id, button = null) {
   if (!customerName()) {
     toast("Войдите, чтобы добавить товар в корзину", false);
     bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
     return;
   }
+  const pendingKey = `cart:${id}`;
+  if (state.commercePending.has(pendingKey)) return;
   const product = state.products.find((p) => p.id === id);
   if (!product) return;
-  const existing = state.cart.find((item) => item.id === id);
-  existing ? existing.qty++ : state.cart.push({ ...product, qty: 1 });
-  state.deliveryQuote = null;
-  renderCart();
+  state.commercePending.add(pendingKey);
+  if (button) { button.disabled = true; button.textContent = "Добавляем..."; }
   try {
-    await api("POST", `/catalog/users/${cartUserId()}/cart/items`, { product_id: id, quantity: 1 }, true);
+    const serverItem = await api("POST", `/catalog/users/${cartUserId()}/cart/items`, { product_id: id, quantity: 1 }, true);
+    const existing = state.cart.find((item) => item.id === id);
+    if (existing) {
+      existing.qty = serverItem.quantity;
+      existing.cartItemId = serverItem.id;
+    } else {
+      state.cart.push({ ...product, qty: serverItem.quantity, cartItemId: serverItem.id });
+    }
+    state.deliveryQuote = null;
+    renderCart();
+    renderProducts();
     toast(`${displayProductTitle(product)} добавлен в корзину`);
   } catch (error) {
-    toast(`Витрина обновлена, но backend вернул: ${error.message}`, false);
+    if (button) { button.disabled = false; button.textContent = "В корзину"; }
+    toast(`Не удалось добавить в корзину: ${formatApiError(error)}`, false);
+  } finally {
+    state.commercePending.delete(pendingKey);
   }
 }
 
-async function addToWishlist(id) {
+async function toggleWishlist(id, button = null) {
   if (!customerName()) {
     toast("Войдите, чтобы сохранить в избранное", false);
     bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
     return;
   }
+  const pendingKey = `wish:${id}`;
+  if (state.commercePending.has(pendingKey)) return;
   const product = state.products.find((p) => p.id === id);
+  const removing = state.wishlistIds.has(id);
+  state.commercePending.add(pendingKey);
+  if (button) button.disabled = true;
   try {
-    await requestNoBody("POST", `/catalog/users/${cartUserId()}/wishlist/products/${id}`, true);
-    toast(`${product ? displayProductTitle(product) : "Товар"} добавлен в избранное`);
+    await requestNoBody(removing ? "DELETE" : "POST", `/catalog/users/${cartUserId()}/wishlist/products/${id}`, true);
+    removing ? state.wishlistIds.delete(id) : state.wishlistIds.add(id);
+    renderProducts();
+    toast(`${product ? displayProductTitle(product) : "Товар"} ${removing ? "удалён из" : "добавлен в"} избранное`);
   } catch (error) {
-    toast(`Не удалось добавить в избранное: ${error.message}`, false);
+    if (button) button.disabled = false;
+    toast(`Не удалось обновить избранное: ${formatApiError(error)}`, false);
+  } finally {
+    state.commercePending.delete(pendingKey);
+  }
+}
+
+async function loadCommerceState() {
+  if (APP_MODE !== "user" || !isAuthenticated() || !state.products.length) return;
+  try {
+    const [cartItems, wishlistItems] = await Promise.all([
+      api("GET", `/catalog/users/${cartUserId()}/cart/items`, undefined, true),
+      api("GET", `/catalog/users/${cartUserId()}/wishlist`, undefined, true),
+    ]);
+    state.cart = cartItems.map((item) => {
+      const product = state.products.find((row) => row.id === item.product_id);
+      return product ? { ...product, qty: item.quantity, cartItemId: item.id } : null;
+    }).filter(Boolean);
+    state.wishlistIds = new Set(wishlistItems.map((item) => item.product_id));
+    renderCart();
+    renderProducts();
+  } catch (error) {
+    console.warn("Commerce state unavailable:", formatApiError(error));
+  }
+}
+
+async function removeCartItem(productId) {
+  const item = state.cart.find((row) => row.id === productId);
+  if (!item) return;
+  try {
+    if (item.cartItemId) await requestNoBody("DELETE", `/catalog/users/${cartUserId()}/cart/items/${item.cartItemId}`, true);
+    state.cart = state.cart.filter((row) => row.id !== productId);
+    state.deliveryQuote = null;
+    renderCart();
+    renderProducts();
+  } catch (error) {
+    toast(`Не удалось удалить товар: ${formatApiError(error)}`, false);
   }
 }
 
@@ -792,7 +959,7 @@ function renderCart() {
   const host = document.getElementById("cartItems");
   if (!host) return;
   if (!state.cart.length) {
-    host.innerHTML = `<div class="text-muted">Корзина пуста. Добавьте мебель из каталога.</div>`;
+    host.innerHTML = `<div class="empty-state cart-empty"><strong>Корзина пока пуста</strong><p>Добавьте мебель из каталога, чтобы рассчитать покупку и доставку.</p><button class="btn btn-secondary" type="button" data-bs-dismiss="offcanvas" onclick="location.hash='catalog'">Перейти в каталог</button></div>`;
     state.deliveryQuote = null;
   } else {
     host.innerHTML = state.cart
@@ -802,16 +969,12 @@ function renderCart() {
             <strong>${escapeHtml(displayProductTitle(item))}</strong>
             <div class="small text-muted">${item.qty} × ${money(Number(item.price))}</div>
           </div>
-          <button class="btn btn-sm btn-outline-danger" data-remove="${item.id}">×</button>
+          <button class="btn btn-sm btn-outline-danger" data-remove="${item.id}" aria-label="Удалить ${escapeHtml(displayProductTitle(item))} из корзины">×</button>
         </div>`)
       .join("");
   }
   host.querySelectorAll("[data-remove]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.cart = state.cart.filter((item) => item.id !== Number(btn.dataset.remove));
-      state.deliveryQuote = null;
-      renderCart();
-    });
+    btn.addEventListener("click", () => removeCartItem(Number(btn.dataset.remove)));
   });
 
   const subtotal = cartSubtotal();
@@ -1257,8 +1420,10 @@ function furnitureAccessoryDefaults(type) {
 
 function disposeRoom3D() {
   if (!state.three) return;
-  const { renderer, host, dimensionManager, resizeObserver } = state.three;
+  const { renderer, host, dimensionManager, resizeObserver, animationFrame, resizeHandler } = state.three;
   resizeObserver?.disconnect();
+  if (animationFrame) cancelAnimationFrame(animationFrame);
+  if (resizeHandler) window.removeEventListener("resize", resizeHandler);
   dimensionManager?.dispose();
   window.__room3dRenderer = null;
   if (renderer) {
@@ -1320,7 +1485,7 @@ function initRoom3D() {
   disposeRoom3D();
 
   const width = host.clientWidth || 640;
-  const height = 360;
+  const height = Math.max(320, Math.round(host.getBoundingClientRect().height) || 540);
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xf3efe8);
 
@@ -1406,21 +1571,25 @@ function initRoom3D() {
 
   const animate = () => {
     if (!state.three) return;
-    dimensionManager?.update(camera, renderer);
-    renderer.render(scene, camera);
-    requestAnimationFrame(animate);
+    if (!document.hidden) {
+      dimensionManager?.update(camera, renderer);
+      renderer.render(scene, camera);
+    }
+    state.three.animationFrame = requestAnimationFrame(animate);
   };
   animate();
 
-  window.addEventListener("resize", () => {
-    refreshRoom3DLayout();
-  });
+  state.three.resizeHandler = () => refreshRoom3DLayout();
+  window.addEventListener("resize", state.three.resizeHandler, { passive: true });
 }
 
 function refreshRoom3DLayout() {
   if (!state.three) return;
   const { host, camera, renderer } = state.three;
-  const height = 360;
+  const workspace = host.closest(".planner-workspace");
+  const fullscreen = document.fullscreenElement === workspace || workspace?.classList.contains("is-fullscreen-fallback");
+  const cssHeight = Math.round(host.getBoundingClientRect().height);
+  const height = Math.max(320, fullscreen ? window.innerHeight - 180 : cssHeight || 540);
   const width = host.clientWidth || 640;
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
@@ -2006,17 +2175,29 @@ function renderCostEstimate(bom = null) {
   if (!host) return;
   const data = bom || buildBomFromObjects();
   if (!data.parts.length && !state.objects3d.length) {
-    host.innerHTML = `<div class="text-muted">Добавьте мебель в комнату — здесь появится ориентировочная стоимость проекта.</div>`;
+    host.innerHTML = `<div class="estimate-empty"><div><span class="estimate-empty-icon">₽</span><h3>Расчёт появится здесь</h3><p class="estimate-note">Добавьте хотя бы один предмет мебели, чтобы увидеть ориентировочную стоимость.</p><button class="btn btn-secondary" type="button" data-open-furniture>Добавить мебель</button></div></div>`;
+    host.querySelector("[data-open-furniture]")?.addEventListener("click", () => document.getElementById("objType")?.focus());
     return;
   }
   const cost = estimateProjectCost(data);
   const tiers = estimateTierPrices(cost);
   if (APP_MODE !== "admin") {
+    const selectedTotal = tiers[state.selectedTier] || tiers.standard;
     host.innerHTML = `
-      <div class="mb-2 small text-muted">Выберите комплектацию — админ получит расчёт материалов и цену по вашему выбору:</div>
+      <div class="estimate-card">
+        <div class="estimate-kicker">Ориентировочная стоимость</div>
+        <div class="estimate-total">от ${money(selectedTotal)}</div>
+        <p class="estimate-note">Окончательная цена зависит от выбранных материалов, размеров и комплектации. Менеджер уточнит её после проверки проекта.</p>
+        <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
+      </div>
+      <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
       ${renderTierCards(tiers)}
-      <div class="small text-muted mt-3">Точный раскрой и закупка выполняются производством после отправки проекта в работу.</div>`;
+      <div class="small text-muted mt-3">Показана реальная расчётная сумма проекта. Точный раскрой и закупка выполняются производством после отправки.</div>`;
     bindTierCardSelection(host);
+    host.querySelector("[data-exact-quote]")?.addEventListener("click", () => {
+      if (!isAuthenticated()) bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
+      else submitProjectToWork();
+    });
     return;
   }
   host.innerHTML = `
@@ -2283,7 +2464,7 @@ function renderAdminCatalogTable() {
     <table class="table table-sm admin-table">
       <thead><tr><th>ID</th><th>Название</th><th>SKU</th><th>Цена</th><th>Склад</th><th></th></tr></thead>
       <tbody>
-        ${state.products.map((p) => `
+        ${filteredProducts().map((p) => `
           <tr>
             <td>${p.id}</td>
             <td>${escapeHtml(displayProductTitle(p))}</td>
@@ -2395,6 +2576,7 @@ function removeObject3D(id) {
 function renderObjects3dList() {
   const host = document.getElementById("objects3dList");
   if (!host || APP_MODE === "admin") return;
+  updatePlannerProgress();
   if (!state.objects3d.length) {
     host.innerHTML = `<div class="text-muted">Объектов в комнате пока нет.</div>`;
     return;
@@ -2618,16 +2800,13 @@ async function getPhotoViewUrl(objectKey) {
   return assetObjectUrl(objectKey);
 }
 
-function exportCrmProcurementPdf(orderId) {
+async function exportCrmProcurementPdf(orderId) {
   const cached = state.crm.procurementByOrder[orderId];
   if (!cached?.lines?.length) {
     toast("Сначала нажмите «Рассчитать закупку»", false);
     return;
   }
-  if (!window.pdfMake) {
-    toast("Модуль PDF не загружен", false);
-    return;
-  }
+  if (!(await ensurePdfMake())) return;
   const order = state.crm.orders.find((o) => o.id === orderId);
   window.pdfMake
     .createPdf({
@@ -2756,6 +2935,8 @@ async function submitProjectToWork() {
     const tiers = estimateTierPrices(cost);
     const project = await savePlannerProject();
     state.projectId = project.id;
+    state.plannerStep = 4;
+    updatePlannerProgress();
     await syncPlannerObjectsToBackend();
     await api("POST", `/planner/projects/${state.projectId}/submit`, { selected_tier: selectedTier }, true);
     const materials = await buildCrmMaterialsFromBom(bom, selectedTier);
@@ -2797,7 +2978,7 @@ async function clearCrmOrders() {
 }
 
 async function loadUserProjects() {
-  const host = document.getElementById("userProjectsPanel");
+  const host = document.getElementById("memberProjectsPanel") || document.getElementById("userProjectsPanel");
   if (!host || !customerName()) return;
   try {
     state.userProjects = await api(
@@ -2813,7 +2994,7 @@ async function loadUserProjects() {
 }
 
 function renderUserProjects() {
-  const host = document.getElementById("userProjectsPanel");
+  const host = document.getElementById("memberProjectsPanel") || document.getElementById("userProjectsPanel");
   if (!host) return;
   if (!state.userProjects.length) {
     host.innerHTML = `<div class="text-muted">У вас пока нет сохранённых проектов. Спланируйте комнату и нажмите «Сохранить проект».</div>`;
@@ -2824,13 +3005,15 @@ function renderUserProjects() {
       const tier = project.selected_tier ? ` · ${tierTitle(project.selected_tier)}` : "";
       const price = project[`price_${project.selected_tier || "standard"}`];
       const priceText = price ? ` · ${money(price)}` : "";
-      return `<div class="border rounded p-3 mb-2">
+      const updated = project.updated_at || project.created_at;
+      return `<div class="account-record">
         <div class="d-flex justify-content-between align-items-start gap-2">
           <div>
             <strong>${escapeHtml(project.name)}</strong>
             <div class="small text-muted">${plannerStatusLabel(project.status)}${tier}${priceText}</div>
             <div class="small">${Math.round(project.room_width)}×${Math.round(project.room_length)}×${Math.round(project.room_height)} мм</div>
             ${project.location ? `<div class="small text-muted">${escapeHtml(project.location)}</div>` : ""}
+            ${updated ? `<div class="account-record-meta">Обновлён ${new Date(updated).toLocaleDateString("ru-RU")}</div>` : ""}
           </div>
           <button type="button" class="btn btn-sm btn-primary" data-open-user-project="${project.id}">Открыть</button>
         </div>
@@ -2857,7 +3040,7 @@ async function openUserProject(projectId) {
 }
 
 async function loadUserOrders() {
-  const host = document.getElementById("userOrdersPanel");
+  const host = document.getElementById("memberOrdersPanel") || document.getElementById("userOrdersPanel");
   if (!host || !customerName()) return;
   try {
     state.userOrders = await api("GET", `/catalog/crm/orders/user/${encodeURIComponent(customerName())}`, undefined, true);
@@ -2868,7 +3051,7 @@ async function loadUserOrders() {
 }
 
 async function renderUserOrders() {
-  const host = document.getElementById("userOrdersPanel");
+  const host = document.getElementById("memberOrdersPanel") || document.getElementById("userOrdersPanel");
   if (!host) return;
   if (!state.userOrders.length) {
     host.innerHTML = `<div class="text-muted">У вас пока нет заказов в производстве. Спланируйте кухню и нажмите «Отправить в работу».</div>`;
@@ -2884,7 +3067,7 @@ async function renderUserOrders() {
             photos.map(async (photo) => {
               const url = await getPhotoViewUrl(photo.object_key);
               return url
-                ? `<div class="me-2 mb-2 d-inline-block"><img src="${url}" class="rounded border" style="height:72px" alt=""><div class="small text-muted">${escapeHtml(photo.caption || "")}</div></div>`
+                ? `<div class="me-2 mb-2 d-inline-block"><img src="${url}" class="rounded border" style="height:72px" loading="lazy" data-lightbox-image alt="${escapeHtml(photo.caption || order.title)}"><div class="small text-muted">${escapeHtml(photo.caption || "")}</div></div>`
                 : "";
             })
           );
@@ -2898,13 +3081,15 @@ async function renderUserOrders() {
       const prices = price
         ? `<div class="small mt-1">Комплектация <strong>${escapeHtml(tierTitle(tier))}</strong> — ${money(price)}</div>`
         : "";
-      return `<div class="border rounded p-3 mb-2">
+      const created = order.created_at ? new Date(order.created_at).toLocaleDateString("ru-RU") : "";
+      return `<div class="account-record">
         <div class="d-flex justify-content-between gap-2">
           <strong>${escapeHtml(order.title)}</strong>
           <span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(order.status)}</span>
         </div>
         ${prices}
         <div class="small text-muted">Заказ #${order.id}${order.planner_project_id ? ` · проект #${order.planner_project_id}` : ""}</div>
+        ${created ? `<div class="account-record-meta">Создан ${created}</div>` : ""}
         ${photosHtml}
       </div>`;
     })
@@ -3121,16 +3306,13 @@ function sheetCanvasForPdfmake(sheet, sheetWidthMm, sheetHeightMm) {
   return { canvas, width };
 }
 
-function exportCutPdf() {
+async function exportCutPdf() {
   const result = state.lastCutResult;
   if (!result) {
     toast("Сначала выполните раскрой", false);
     return;
   }
-  if (!window.pdfMake) {
-    toast("Модуль PDF не загружен", false);
-    return;
-  }
+  if (!(await ensurePdfMake())) return;
   const sheetW = Number(document.getElementById("sheetW").value);
   const sheetH = Number(document.getElementById("sheetH").value);
   const content = [
@@ -3377,16 +3559,13 @@ function exportDbsFile() {
   toast("Файл DBS сохранён (спецификация для производства)");
 }
 
-function exportAssemblyPdf() {
+async function exportAssemblyPdf() {
   const bom = buildBomFromObjects();
   if (!bom.parts.length) {
     toast("Добавьте объекты, чтобы собрать инструкцию", false);
     return;
   }
-  if (!window.pdfMake) {
-    toast("Модуль PDF не загружен", false);
-    return;
-  }
+  if (!(await ensurePdfMake())) return;
   const objectsTableBody = [
     [{ text: "№", style: "thead" }, { text: "Объект", style: "thead" }, { text: "Тип", style: "thead" }, { text: "Габариты, мм", style: "thead" }, { text: "Текстура", style: "thead" }],
     ...state.objects3d.map((item, idx) => {
@@ -3464,10 +3643,134 @@ function setBackendStatus(ok, message) {
 
 function bindClick(id, handler) {
   const el = document.getElementById(id);
-  if (el) el.addEventListener("click", handler);
+  if (!el) return;
+  el.addEventListener("click", async (event) => {
+    const result = handler(event);
+    if (!result || typeof result.then !== "function") return;
+    el.disabled = true;
+    el.setAttribute("aria-busy", "true");
+    try {
+      await result;
+    } finally {
+      el.disabled = false;
+      el.removeAttribute("aria-busy");
+    }
+  });
+}
+
+function updatePlannerProgress() {
+  const host = document.getElementById("plannerProgress");
+  if (!host) return;
+  const validRoom = state.roomConfig.width >= 2000 && state.roomConfig.length >= 2000;
+  const hasObjects = state.objects3d.length > 0;
+  const maxStep = state.projectId ? 4 : hasObjects ? 4 : validRoom ? 2 : 1;
+  if (state.projectId) state.plannerStep = 4;
+  else if (hasObjects && state.plannerStep < 3) state.plannerStep = 3;
+  else if (validRoom && state.plannerStep < 2) state.plannerStep = 2;
+  if (state.plannerStep > maxStep) state.plannerStep = maxStep;
+  host.querySelectorAll("[data-planner-step]").forEach((button) => {
+    const step = Number(button.dataset.plannerStep);
+    button.disabled = step > maxStep;
+    button.classList.toggle("active", step === state.plannerStep);
+    button.classList.toggle("completed", step < state.plannerStep || (step === 4 && Boolean(state.projectId)));
+    button.setAttribute("aria-current", step === state.plannerStep ? "step" : "false");
+  });
+}
+
+function goToPlannerStep(step) {
+  state.plannerStep = step;
+  updatePlannerProgress();
+  if (step === 1) document.getElementById("roomWidth")?.focus();
+  if (step === 2) document.getElementById("objType")?.focus();
+  if (step === 3) document.querySelector('[data-bs-target="#room3dPane"]')?.click();
+  if (step === 4) document.getElementById("projectName")?.focus();
+}
+
+function initPlannerProgress() {
+  document.getElementById("plannerProgress")?.querySelectorAll("[data-planner-step]").forEach((button) => {
+    button.addEventListener("click", () => goToPlannerStep(Number(button.dataset.plannerStep)));
+  });
+  updatePlannerProgress();
+}
+
+function initProcessAnimation() {
+  const grid = document.querySelector(".process-grid");
+  if (!grid) return;
+  if (!window.IntersectionObserver) { grid.classList.add("is-visible"); return; }
+  const observer = new IntersectionObserver((entries) => {
+    if (!entries[0].isIntersecting) return;
+    grid.classList.add("is-visible");
+    observer.disconnect();
+  }, { threshold: 0.2 });
+  observer.observe(grid);
+}
+
+function initPlannerFullscreen() {
+  const button = document.getElementById("btnPlannerFullscreen");
+  const workspace = document.querySelector(".planner-workspace");
+  if (!button || !workspace) return;
+  const sync = () => {
+    const active = document.fullscreenElement === workspace || workspace.classList.contains("is-fullscreen-fallback");
+    button.textContent = active ? "× Выйти из полного экрана" : "⛶ На весь экран";
+    button.setAttribute("aria-pressed", String(active));
+    requestAnimationFrame(refreshRoom3DLayout);
+  };
+  button.addEventListener("click", async () => {
+    if (document.fullscreenElement === workspace) await document.exitFullscreen();
+    else if (workspace.requestFullscreen) await workspace.requestFullscreen();
+    else workspace.classList.toggle("is-fullscreen-fallback");
+    sync();
+  });
+  document.addEventListener("fullscreenchange", sync);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && workspace.classList.contains("is-fullscreen-fallback")) {
+      workspace.classList.remove("is-fullscreen-fallback");
+      sync();
+    }
+  });
+}
+
+function initLightbox() {
+  const root = document.getElementById("imageLightbox");
+  const image = document.getElementById("lightboxImage");
+  const caption = document.getElementById("lightboxCaption");
+  if (!root || !image || !caption) return;
+  let images = [];
+  let index = 0;
+  let returnFocus = null;
+  const eligible = ".product-art-photo img, .product-photo-thumb img, [data-lightbox-image]";
+  const show = (next) => {
+    if (!images.length) return;
+    index = (next + images.length) % images.length;
+    image.src = images[index].currentSrc || images[index].src;
+    image.alt = images[index].alt || "";
+    caption.textContent = images[index].alt || "Изображение";
+    root.querySelectorAll(".lightbox-nav").forEach((button) => button.classList.toggle("d-none", images.length < 2));
+  };
+  const close = () => {
+    root.hidden = true; root.setAttribute("aria-hidden", "true"); document.body.style.overflow = ""; image.src = ""; returnFocus?.focus();
+  };
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest?.(eligible);
+    if (!target) return;
+    images = [...document.querySelectorAll(eligible)].filter((item) => item.src);
+    index = images.indexOf(target); returnFocus = target; root.hidden = false; root.setAttribute("aria-hidden", "false"); document.body.style.overflow = "hidden"; show(index); root.querySelector("[data-lightbox-close]").focus();
+  });
+  root.addEventListener("click", (event) => { if (event.target === root || event.target.closest("[data-lightbox-close]")) close(); });
+  root.querySelector("[data-lightbox-prev]").addEventListener("click", () => show(index - 1));
+  root.querySelector("[data-lightbox-next]").addEventListener("click", () => show(index + 1));
+  document.addEventListener("keydown", (event) => {
+    if (root.hidden) return;
+    if (event.key === "Escape") close();
+    if (event.key === "ArrowLeft") show(index - 1);
+    if (event.key === "ArrowRight") show(index + 1);
+  });
 }
 
 async function boot() {
+  applyTheme(document.documentElement.dataset.theme || "light");
+  bindClick("themeToggle", toggleTheme);
+  bindClick("btnLogout", logoutCustomer);
   const apiBaseInput = document.getElementById("apiBase");
   if (apiBaseInput) apiBaseInput.value = localStorage.getItem(LS_API) || defaultApiBase();
   bindClick("saveApiBase", () => {
@@ -3476,11 +3779,30 @@ async function boot() {
   });
   const searchInput = document.getElementById("searchInput");
   if (searchInput) {
+    let searchTimer = 0;
     searchInput.addEventListener("input", (event) => {
-      state.search = event.target.value;
-      renderProducts();
+      clearTimeout(searchTimer);
+      const value = event.target.value;
+      document.getElementById("searchClear")?.classList.toggle("d-none", !value);
+      searchTimer = setTimeout(() => {
+        state.search = value;
+        if (APP_MODE === "admin") renderAdminCatalogTable();
+        else renderProducts();
+      }, 250);
     });
   }
+  bindClick("searchClear", () => {
+    if (searchInput) searchInput.value = "";
+    state.search = "";
+    document.getElementById("searchClear")?.classList.add("d-none");
+    if (APP_MODE === "admin") renderAdminCatalogTable();
+    else renderProducts();
+    searchInput?.focus();
+  });
+  initProcessAnimation();
+  initPlannerProgress();
+  initPlannerFullscreen();
+  initLightbox();
 
   bindClick("btnOptimize", () => optimizeCutting());
   bindClick("btnAddPart", addPartFromInputs);

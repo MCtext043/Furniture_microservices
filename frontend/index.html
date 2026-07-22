@@ -3,237 +3,322 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>WoodCraft Market — мебель для дома</title>
+  <meta name="description" content="Подберите мебель, соберите комнату в 3D и получите ориентировочную стоимость проекта." />
+  <title>WoodCraft — мебель и планировщик комнаты</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem("woodcraft_theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Prata&display=swap" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
-  <link href="styles.css?v=20260721-planner-ui-v1" rel="stylesheet" />
+  <link href="styles.css?v=20260722-frontend-redesign-v1" rel="stylesheet" />
 </head>
 <body>
-  <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
+  <a class="skip-link" href="#mainContent">Перейти к содержанию</a>
+
+  <nav class="navbar navbar-expand-lg sticky-top" aria-label="Основная навигация">
     <div class="container">
-      <a class="navbar-brand" href="#top">WoodCraft Market</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+      <a class="navbar-brand" href="#top" aria-label="WoodCraft, на главную">
+        <span class="brand-mark" aria-hidden="true">W</span>
+        <span>WoodCraft</span>
+      </a>
+      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Открыть меню">
         <span class="navbar-toggler-icon"></span>
       </button>
       <div class="collapse navbar-collapse" id="nav">
-        <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
+        <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-1">
+          <li class="nav-item"><a class="nav-link" href="#howItWorks">Как это работает</a></li>
           <li class="nav-item"><a class="nav-link" href="#catalog">Каталог</a></li>
           <li class="nav-item"><a class="nav-link" href="#planner">Планировщик</a></li>
-          <li class="nav-item"><a class="nav-link text-warning" href="admin.html">Админ</a></li>
+          <li class="nav-item"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Включить тёмную тему" title="Сменить тему"><span aria-hidden="true">☾</span></button></li>
           <li class="nav-item">
-            <button class="btn btn-outline-light ms-lg-2" data-bs-toggle="modal" data-bs-target="#accountModal" id="accountBtn">Войти</button>
+            <button class="btn btn-quiet ms-lg-2" data-bs-toggle="modal" data-bs-target="#accountModal" id="accountBtn">Войти</button>
           </li>
           <li class="nav-item">
-            <button class="btn btn-warning ms-lg-2" data-bs-toggle="offcanvas" data-bs-target="#cartCanvas">
-              Корзина <span class="badge text-bg-dark" id="cartCount">0</span>
+            <button class="btn btn-cart ms-lg-1" data-bs-toggle="offcanvas" data-bs-target="#cartCanvas" aria-controls="cartCanvas">
+              Корзина <span class="cart-count" id="cartCount" aria-label="Товаров в корзине">0</span>
             </button>
           </li>
+          <li class="nav-item"><a class="btn btn-primary nav-cta ms-lg-1" href="#planner">Создать проект</a></li>
         </ul>
       </div>
     </div>
   </nav>
 
-  <header class="hero d-flex align-items-center" id="top">
-    <div class="container py-5">
-      <div class="row align-items-center g-4">
-        <div class="col-lg-7 text-white">
-          <div class="muted-title text-warning mb-3">Магазин мебели</div>
-          <h1 class="display-4 fw-bold mb-3">Подберите мебель и спланируйте комнату онлайн</h1>
-          <p class="lead mb-4">Смотрите каталог, расставляйте мебель в 3D и получайте ориентировочную стоимость проекта.</p>
-          <div class="d-flex flex-wrap gap-2">
-            <a href="#catalog" class="btn btn-warning btn-lg">Смотреть каталог</a>
-            <a href="#planner" class="btn btn-outline-light btn-lg">Спланировать комнату</a>
-          </div>
+  <header class="hero" id="top">
+    <div class="container hero-container">
+      <div class="hero-copy reveal-item">
+        <div class="eyebrow">Мебель, которая подходит вашей комнате</div>
+        <h1>Соберите интерьер<br /><span>до покупки</span></h1>
+        <p class="hero-lead">Задайте размеры комнаты, расставьте мебель в 3D и получите ориентировочную стоимость проекта в одном понятном сценарии.</p>
+        <div class="hero-actions">
+          <a href="#planner" class="btn btn-primary btn-lg">Начать планирование</a>
+          <a href="#catalog" class="btn btn-link-arrow">Посмотреть каталог <span aria-hidden="true">→</span></a>
         </div>
-        <div class="col-lg-5">
-          <div class="card hero-card p-4">
-            <div class="d-flex align-items-center gap-2 mb-2">
-              <span class="status-dot" id="backendDot"></span>
-              <strong id="backendStatus">Подключаем витрину...</strong>
-            </div>
-            <div class="row text-center g-2">
-              <div class="col-4"><div class="p-3 bg-light rounded"><div class="h4 mb-0" id="statProducts">0</div><small>товаров</small></div></div>
-              <div class="col-4"><div class="p-3 bg-light rounded"><div class="h4 mb-0" id="statCategories">0</div><small>категорий</small></div></div>
-              <div class="col-4"><div class="p-3 bg-light rounded"><div class="h4 mb-0">3D</div><small>планировщик</small></div></div>
-            </div>
-          </div>
+        <div class="hero-assurances" aria-label="Преимущества сервиса">
+          <span><i aria-hidden="true">01</i> Свои размеры</span>
+          <span><i aria-hidden="true">02</i> Наглядный 3D</span>
+          <span><i aria-hidden="true">03</i> Расчёт проекта</span>
+        </div>
+      </div>
+
+      <div class="hero-visual reveal-item" aria-label="Пример комнаты в планировщике">
+        <div class="room-preview" aria-hidden="true">
+          <div class="preview-wall preview-wall-back"></div>
+          <div class="preview-wall preview-wall-side"></div>
+          <div class="preview-floor"></div>
+          <div class="preview-cabinet"><span></span><span></span><i></i><b></b><em></em></div>
+          <div class="preview-sofa"><div class="sofa-back"><i></i><i></i></div><div class="sofa-seat"><i></i><i></i></div><span></span><span></span></div>
+          <div class="preview-rug"></div>
+        </div>
+        <div class="floating-note note-material">
+          <span class="material-swatch"></span>
+          <span><small>Материал</small><strong>Тёмный дуб</strong></span>
+        </div>
+        <div class="floating-note note-size">
+          <small>Комната</small><strong>6 × 5 м</strong>
+        </div>
+        <div class="connection-card">
+          <span class="status-dot" id="backendDot"></span>
+          <span><small>Состояние сервиса</small><strong id="backendStatus">Подключаем витрину...</strong></span>
         </div>
       </div>
     </div>
   </header>
 
-  <main class="container py-5">
-    <section class="mb-5" id="catalog">
-      <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
-        <div>
-          <div class="muted-title">Каталог</div>
-          <h2 class="section-title mb-1">Готовые решения для дома</h2>
-          <p class="text-muted mb-0">Просмотр товаров, добавление в корзину и избранное.</p>
-        </div>
-        <div class="input-group" style="max-width: 360px">
-          <span class="input-group-text">Поиск</span>
-          <input class="form-control" id="searchInput" placeholder="шкаф, кухня, стол..." />
-        </div>
-      </div>
-      <div class="d-flex flex-wrap gap-2 mb-4" id="categoryPills"></div>
-      <div class="row g-4" id="productGrid">
-        <div class="col-12 text-center text-muted py-5">Загружаем товары...</div>
+  <main id="mainContent">
+    <section class="trust-strip" aria-label="Возможности сервиса">
+      <div class="container trust-grid">
+        <div><strong id="statProducts">0</strong><span>товаров в каталоге</span></div>
+        <div><strong id="statCategories">0</strong><span>категорий мебели</span></div>
+        <div><strong>3D</strong><span>наглядная расстановка</span></div>
+        <div><strong>₽</strong><span>ориентировочный расчёт</span></div>
       </div>
     </section>
 
-    <section class="mb-5" id="planner">
-      <div class="row g-4 align-items-stretch">
-        <div class="col-xl-5">
-          <div class="service-card p-4 h-100">
-            <div class="muted-title">Планировщик</div>
-            <h2 class="section-title">Конструктор комнаты</h2>
-            <p class="text-muted planner-subtitle">Задайте размеры комнаты, расставьте мебель и узнайте ориентировочную стоимость.</p>
+    <section class="section how-section" id="howItWorks">
+      <div class="container">
+        <div class="section-heading section-heading-split">
+          <div>
+            <div class="eyebrow">Простой путь к проекту</div>
+            <h2>От пустой комнаты<br />до готового решения</h2>
+          </div>
+          <p>Планировщик ведёт по шагам и не требует опыта в профессиональных программах.</p>
+        </div>
+        <ol class="process-grid">
+          <li class="process-step"><span>01</span><strong>Укажите размеры</strong><p>Введите ширину, длину и высоту комнаты.</p></li>
+          <li class="process-step"><span>02</span><strong>Добавьте мебель</strong><p>Выберите тип, габариты и подходящий материал.</p></li>
+          <li class="process-step"><span>03</span><strong>Оцените результат</strong><p>Проверьте расстановку в 3D и на плане сверху.</p></li>
+          <li class="process-step"><span>04</span><strong>Сохраните проект</strong><p>Получите расчёт и отправьте решение в работу.</p></li>
+        </ol>
+      </div>
+    </section>
 
-            <div class="border rounded p-3 mb-3 bg-light-subtle">
-              <div class="small fw-semibold mb-2">Размеры комнаты (мм)</div>
-              <div class="row g-2">
-                <div class="col-4"><label class="form-label small text-muted mb-0">Ширина</label><input class="form-control form-control-sm" id="roomWidth" type="number" min="2000" step="100" value="6000"></div>
-                <div class="col-4"><label class="form-label small text-muted mb-0">Длина</label><input class="form-control form-control-sm" id="roomLength" type="number" min="2000" step="100" value="5000"></div>
-                <div class="col-4"><label class="form-label small text-muted mb-0">Высота</label><input class="form-control form-control-sm" id="roomHeight" type="number" min="2000" step="100" value="2800"></div>
-              </div>
-              <button class="btn btn-sm btn-outline-primary mt-2" id="btnApplyRoomSize">Применить размеры</button>
-            </div>
-
-            <div class="border rounded p-3 mb-3 bg-light-subtle">
-              <div class="small fw-semibold mb-2">Добавить объект</div>
-              <div class="row g-2">
-                <div class="col-6">
-                  <select class="form-select form-select-sm" id="objType">
-                    <option value="wardrobe">Шкаф</option>
-                    <option value="cabinet">Тумба</option>
-                    <option value="shelf">Стеллаж</option>
-                    <option value="table">Стол</option>
-                    <option value="sofa">Диван</option>
-                  </select>
-                </div>
-                <div class="col-6"><input class="form-control form-control-sm" id="objName" value="Новый объект"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="objW" type="number" min="300" step="10" value="1200" placeholder="Ш, мм"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="objD" type="number" min="300" step="10" value="600" placeholder="Г, мм"></div>
-                <div class="col-4"><input class="form-control form-control-sm" id="objH" type="number" min="300" step="10" value="2100" placeholder="В, мм"></div>
-                <div class="col-12">
-                  <select class="form-select form-select-sm" id="objTexture">
-                    <option value="wood_dark_oak">Темный дуб</option>
-                    <option value="wood_oak">Светлый дуб</option>
-                    <option value="mdf_matte">МДФ матовый</option>
-                    <option value="board_white">Белое ДСП</option>
-                    <option value="board_black">Черное ДСП</option>
-                    <option value="laminate_grey">Ламинат</option>
-                    <option value="countertop">Столешница</option>
-                    <option value="fabric_gray">Серая ткань</option>
-                    <option value="metal_graphite">Графитовый металл</option>
-                  </select>
-                </div>
-                <div class="col-12">
-                  <div class="form-check mb-1">
-                    <input class="form-check-input" type="checkbox" id="objUseCustomColor" />
-                    <label class="form-check-label small" for="objUseCustomColor">Свой цвет фасада</label>
-                  </div>
-                  <input class="form-control form-control-color form-control-sm w-100" type="color" id="objCustomColor" value="#8B5E3C" title="Свой цвет фасада" disabled />
-                </div>
-              </div>
-              <div class="d-flex gap-2 mt-2">
-                <button class="btn btn-sm btn-success" id="btnAddObject3d">Добавить</button>
-                <button class="btn btn-sm btn-outline-secondary" id="btnAddFurniture">Демо-комплект</button>
-              </div>
-              <div id="objects3dList" class="small mt-2 text-muted">Объектов в комнате пока нет.</div>
-            </div>
-
-            <div class="row g-2 mb-2">
-              <div class="col-6"><input class="form-control form-control-sm" id="projectName" placeholder="Название проекта"></div>
-              <div class="col-6"><input class="form-control form-control-sm" id="projectLocation" placeholder="Город / адрес"></div>
-            </div>
-            <div class="d-flex gap-2 flex-wrap mb-2">
-              <button class="btn btn-sm btn-primary" id="btnCreateRoom">Сохранить проект</button>
-              <button class="btn btn-sm btn-outline-primary d-none" id="btnGenerateBom">Список деталей</button>
-              <button class="btn btn-sm btn-success" id="btnSubmitToWork">Отправить в работу</button>
-            </div>
-            <div class="small text-muted" id="plannerHint">Войдите, чтобы сохранить проект на сервере.</div>
+    <section class="section catalog-section" id="catalog">
+      <div class="container">
+        <div class="section-heading section-heading-split catalog-heading">
+          <div>
+            <div class="eyebrow">Каталог</div>
+            <h2>Основа будущего интерьера</h2>
+            <p>Выбирайте готовую мебель или используйте её как отправную точку для проекта.</p>
+          </div>
+          <div class="search-field">
+            <label for="searchInput">Поиск по каталогу</label>
+            <span class="search-icon" aria-hidden="true"></span>
+            <input class="form-control" id="searchInput" type="search" placeholder="Например, шкаф или стол" autocomplete="off" />
+            <button class="search-clear d-none" id="searchClear" type="button" aria-label="Очистить поиск">×</button>
           </div>
         </div>
+        <div class="catalog-toolbar">
+          <div class="category-list" id="categoryPills" aria-label="Категории товаров"></div>
+          <span class="catalog-hint">Нажмите на категорию, чтобы сузить выбор</span>
+        </div>
+        <div class="row g-4 product-grid" id="productGrid" aria-live="polite" aria-busy="true">
+          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
+          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
+          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
+        </div>
+      </div>
+    </section>
 
-        <div class="col-xl-7">
-          <div class="service-card p-4 h-100">
-            <ul class="nav nav-pills mb-3" role="tablist">
-              <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#room3dPane" type="button">3D</button></li>
-              <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#room2dPane" type="button">План сверху</button></li>
-              <li class="nav-item d-none" id="bomTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#bomPane" type="button">Детали</button></li>
-              <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#costPane" type="button">Стоимость</button></li>
+    <section class="section planner-section" id="planner">
+      <div class="container-fluid planner-container">
+        <div class="section-heading planner-heading">
+          <div class="eyebrow">3D-планировщик</div>
+          <h2>Соберите комнату под себя</h2>
+          <p>Двигайтесь по шагам слева направо. Все изменения сразу появятся в сцене.</p>
+        </div>
+
+        <div class="planner-progress" id="plannerProgress" aria-label="Этапы создания проекта">
+          <button class="active" type="button" data-planner-step="1"><i>1</i><span><strong>Комната</strong><small>Задайте размеры</small></span></button>
+          <button type="button" data-planner-step="2"><i>2</i><span><strong>Мебель</strong><small>Добавьте предметы</small></span></button>
+          <button type="button" data-planner-step="3"><i>3</i><span><strong>Проверка</strong><small>Оцените результат</small></span></button>
+          <button type="button" data-planner-step="4"><i>4</i><span><strong>Сохранение</strong><small>Сохраните проект</small></span></button>
+        </div>
+
+        <div class="planner-workspace">
+          <aside class="planner-controls" aria-label="Параметры проекта">
+            <div class="control-section">
+              <div class="control-heading"><span>01</span><div><h3>Размеры комнаты</h3><p>Укажите габариты в миллиметрах.</p></div></div>
+              <div class="field-grid field-grid-3">
+                <div class="form-field"><label for="roomWidth">Ширина <span>мм</span></label><input class="form-control" id="roomWidth" type="number" min="2000" step="100" value="6000" /></div>
+                <div class="form-field"><label for="roomLength">Длина <span>мм</span></label><input class="form-control" id="roomLength" type="number" min="2000" step="100" value="5000" /></div>
+                <div class="form-field"><label for="roomHeight">Высота <span>мм</span></label><input class="form-control" id="roomHeight" type="number" min="2000" step="100" value="2800" /></div>
+              </div>
+              <button class="btn btn-secondary w-100" id="btnApplyRoomSize">Применить размеры</button>
+            </div>
+
+            <div class="control-section">
+              <div class="control-heading"><span>02</span><div><h3>Мебель</h3><p>Добавьте предмет и настройте его вид.</p></div></div>
+              <div class="field-grid field-grid-2">
+                <div class="form-field"><label for="objType">Тип предмета</label><select class="form-select" id="objType"><option value="wardrobe">Шкаф</option><option value="cabinet">Тумба</option><option value="shelf">Стеллаж</option><option value="table">Стол</option><option value="sofa">Диван</option></select></div>
+                <div class="form-field"><label for="objName">Название</label><input class="form-control" id="objName" value="Новый объект" /></div>
+              </div>
+              <div class="field-grid field-grid-3">
+                <div class="form-field"><label for="objW">Ширина <span>мм</span></label><input class="form-control" id="objW" type="number" min="300" step="10" value="1200" /></div>
+                <div class="form-field"><label for="objD">Глубина <span>мм</span></label><input class="form-control" id="objD" type="number" min="300" step="10" value="600" /></div>
+                <div class="form-field"><label for="objH">Высота <span>мм</span></label><input class="form-control" id="objH" type="number" min="300" step="10" value="2100" /></div>
+              </div>
+              <div class="form-field">
+                <label for="objTexture">Материал</label>
+                <select class="form-select" id="objTexture">
+                  <option value="wood_dark_oak">Тёмный дуб</option><option value="wood_oak">Светлый дуб</option><option value="mdf_matte">МДФ матовый</option><option value="board_white">Белое ДСП</option><option value="board_black">Чёрное ДСП</option><option value="laminate_grey">Ламинат</option><option value="countertop">Столешница</option><option value="fabric_gray">Серая ткань</option><option value="metal_graphite">Графитовый металл</option>
+                </select>
+              </div>
+              <div class="custom-color-row">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="objUseCustomColor" />
+                  <label class="form-check-label" for="objUseCustomColor">Свой цвет фасада</label>
+                </div>
+                <input class="form-control form-control-color" type="color" id="objCustomColor" value="#8B5E3C" title="Выберите цвет фасада" disabled />
+              </div>
+              <div class="control-actions">
+                <button class="btn btn-primary" id="btnAddObject3d">Добавить в комнату</button>
+                <button class="btn btn-quiet" id="btnAddFurniture">Добавить демо-комплект</button>
+              </div>
+              <div id="objects3dList" class="object-list" aria-live="polite">Объектов в комнате пока нет.</div>
+            </div>
+
+            <div class="control-section save-section">
+              <div class="control-heading"><span>03</span><div><h3>Сохранение</h3><p>Назовите проект, чтобы вернуться к нему позже.</p></div></div>
+              <div class="field-grid field-grid-2">
+                <div class="form-field"><label for="projectName">Название проекта</label><input class="form-control" id="projectName" placeholder="Например, кухня дома" /></div>
+                <div class="form-field"><label for="projectLocation">Город или адрес</label><input class="form-control" id="projectLocation" placeholder="Самара" /></div>
+              </div>
+              <div class="control-actions save-actions">
+                <button class="btn btn-secondary" id="btnCreateRoom">Сохранить проект</button>
+                <button class="btn btn-quiet d-none" id="btnGenerateBom">Обновить детали</button>
+                <button class="btn btn-primary" id="btnSubmitToWork">Отправить в работу</button>
+              </div>
+              <div class="planner-hint" id="plannerHint" role="status">Войдите, чтобы сохранить проект на сервере.</div>
+            </div>
+          </aside>
+
+          <div class="planner-preview">
+            <div class="preview-header">
+              <div><span class="live-indicator"><i></i> Предпросмотр</span><h3>Ваша комната</h3></div>
+              <div class="preview-header-actions"><p>Выберите объект, чтобы увидеть его размеры и изменить положение.</p><button class="btn btn-quiet btn-sm" id="btnPlannerFullscreen" type="button" aria-pressed="false">⛶ На весь экран</button></div>
+            </div>
+            <ul class="nav nav-pills planner-tabs" role="tablist" aria-label="Режим просмотра проекта">
+              <li class="nav-item" role="presentation"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#room3dPane" type="button" role="tab">3D-вид</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#room2dPane" type="button" role="tab">План сверху</button></li>
+              <li class="nav-item d-none" id="bomTabNav" role="presentation"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#bomPane" type="button" role="tab">Детали</button></li>
+              <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#costPane" type="button" role="tab">Стоимость</button></li>
             </ul>
-            <div class="tab-content">
-              <div class="tab-pane fade show active" id="room3dPane">
-                <div class="viewer-3d" id="room3d"><span class="badge text-bg-warning viewer-badge">3D-планировщик</span></div>
+            <div class="tab-content preview-content">
+              <div class="tab-pane fade show active" id="room3dPane" role="tabpanel">
+                <div class="viewer-3d" id="room3d"><span class="viewer-badge">3D-планировщик</span></div>
+                <div class="viewer-help"><span>Перетаскивайте для вращения</span><span>Колесо мыши меняет масштаб</span></div>
               </div>
-              <div class="tab-pane fade" id="room2dPane">
+              <div class="tab-pane fade" id="room2dPane" role="tabpanel">
+                <div class="top-plan-header"><div><strong>План сверху</strong><p>Перетаскивайте предметы. Кнопка ↻ поворачивает объект.</p></div></div>
                 <div class="room-plan" id="roomPlan"></div>
-                <div class="small text-muted mt-2">Перетаскивайте объекты. Кнопка ↻ — вращение.</div>
               </div>
-              <div class="tab-pane fade" id="bomPane">
-                <div id="bomList" class="small"></div>
-              </div>
-              <div class="tab-pane fade" id="costPane">
-                <div id="costEstimate" class="small"></div>
+              <div class="tab-pane fade" id="bomPane" role="tabpanel"><div id="bomList" class="detail-list"></div></div>
+              <div class="tab-pane fade" id="costPane" role="tabpanel">
+                <div id="costEstimate" class="cost-panel"></div>
+                <button class="btn btn-secondary mt-3" id="btnEstimateCost">Пересчитать стоимость</button>
               </div>
             </div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section class="final-cta">
+      <div class="container final-cta-inner">
+        <div><div class="eyebrow">Можно начать без регистрации</div><h2>Посмотрите, как мебель впишется в вашу комнату</h2></div>
+        <a class="btn btn-primary btn-lg" href="#planner">Открыть планировщик</a>
       </div>
     </section>
   </main>
 
-  <div class="offcanvas offcanvas-end" tabindex="-1" id="cartCanvas">
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div><a class="navbar-brand" href="#top"><span class="brand-mark" aria-hidden="true">W</span><span>WoodCraft</span></a><p>Подбор мебели и проектирование комнаты в одном сервисе.</p></div>
+      <nav aria-label="Навигация в подвале"><a href="#catalog">Каталог</a><a href="#planner">Планировщик</a><a href="#howItWorks">Как это работает</a></nav>
+      <div class="footer-service"><span>Для сотрудников</span><a href="admin.html">Панель администратора</a></div>
+    </div>
+  </footer>
+
+  <div class="offcanvas offcanvas-end" tabindex="-1" id="cartCanvas" aria-labelledby="cartCanvasTitle">
     <div class="offcanvas-header">
-      <h5 class="offcanvas-title">Корзина</h5>
-      <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
+      <div><div class="eyebrow">Ваш выбор</div><h2 class="offcanvas-title" id="cartCanvasTitle">Корзина</h2></div>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Закрыть корзину"></button>
     </div>
     <div class="offcanvas-body d-flex flex-column">
-      <div id="cartItems" class="vstack gap-3 flex-grow-1"></div>
-      <div class="border-top pt-3 mt-3">
-        <label class="form-label small fw-semibold" for="deliveryAddress">Адрес доставки</label>
-        <textarea class="form-control form-control-sm mb-2" id="deliveryAddress" rows="2" placeholder="Город, улица, дом"></textarea>
-        <button class="btn btn-sm btn-outline-primary w-100 mb-2" id="btnQuoteDelivery">Рассчитать доставку</button>
-        <div class="small text-muted mb-3" id="deliveryHint">Загрузка условий доставки...</div>
-        <div class="d-flex justify-content-between small mb-1"><span>Товары</span><span id="cartSubtotal">0 ₽</span></div>
-        <div class="d-flex justify-content-between small mb-1"><span>Доставка</span><span id="cartDeliveryLine">—</span></div>
-        <div class="small text-muted mb-2" id="cartDeliveryExtra"></div>
-        <div class="d-flex justify-content-between h5 mb-0"><span>Итого</span><span id="cartTotal">0 ₽</span></div>
+      <div id="cartItems" class="vstack gap-3 flex-grow-1" aria-live="polite"></div>
+      <div class="cart-summary">
+        <div class="form-field"><label for="deliveryAddress">Адрес доставки</label><textarea class="form-control" id="deliveryAddress" rows="2" placeholder="Город, улица, дом"></textarea></div>
+        <button class="btn btn-secondary w-100 mb-2" id="btnQuoteDelivery">Рассчитать доставку</button>
+        <div class="helper-text" id="deliveryHint">Загружаем условия доставки...</div>
+        <div class="summary-row"><span>Товары</span><span id="cartSubtotal">0 ₽</span></div>
+        <div class="summary-row"><span>Доставка</span><span id="cartDeliveryLine">—</span></div>
+        <div class="helper-text" id="cartDeliveryExtra"></div>
+        <div class="summary-row summary-total"><span>Итого</span><span id="cartTotal">0 ₽</span></div>
       </div>
     </div>
   </div>
 
-  <div class="modal fade" id="accountModal" tabindex="-1" aria-hidden="true">
+  <div class="modal fade" id="accountModal" tabindex="-1" aria-labelledby="accountModalTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
-      <div class="modal-content border-0 rounded-4 overflow-hidden">
-        <div class="modal-header bg-dark text-white">
-          <h5 class="modal-title">Личный кабинет</h5>
-          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      <div class="modal-content">
+        <div class="modal-header">
+          <div><div class="eyebrow">Личное пространство</div><h2 class="modal-title" id="accountModalTitle">Ваш кабинет</h2></div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
         </div>
-        <div class="modal-body p-4">
-          <ul class="nav nav-pills mb-3" id="accountTabs">
+        <div class="modal-body">
+          <div id="accountGuest">
+          <p class="account-benefit">Войдите, чтобы сохранять проекты, продолжать планирование и отслеживать заказы.</p>
+          <ul class="nav nav-pills account-tabs" id="accountTabs" role="tablist">
             <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#loginPane" type="button">Вход</button></li>
             <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#registerPane" type="button">Регистрация</button></li>
-            <li class="nav-item d-none" id="userProjectsTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#userProjectsPane" type="button">Мои проекты</button></li>
-            <li class="nav-item d-none" id="userOrdersTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#userOrdersPane" type="button">Мои заказы</button></li>
+            <li class="nav-item d-none" id="userProjectsTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#userProjectsPane" type="button">Проекты</button></li>
+            <li class="nav-item d-none" id="userOrdersTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#userOrdersPane" type="button">Заказы</button></li>
           </ul>
           <div class="tab-content">
             <div class="tab-pane fade show active" id="loginPane">
-              <input class="form-control mb-3" id="loginUser" placeholder="Логин" autocomplete="username" />
-              <input type="password" class="form-control mb-3" id="loginPass" placeholder="Пароль" autocomplete="current-password" />
+              <div class="form-field"><label for="loginUser">Логин</label><input class="form-control" id="loginUser" autocomplete="username" /></div>
+              <div class="form-field"><label for="loginPass">Пароль</label><input type="password" class="form-control" id="loginPass" autocomplete="current-password" /></div>
               <button class="btn btn-primary w-100" id="btnLogin">Войти</button>
             </div>
             <div class="tab-pane fade" id="registerPane">
-              <input class="form-control mb-3" id="regUser" placeholder="Имя" autocomplete="username" />
-              <input type="password" class="form-control mb-3" id="regPass" placeholder="Пароль (мин. 8 символов)" autocomplete="new-password" />
-              <button class="btn btn-success w-100" id="btnRegister">Создать аккаунт</button>
+              <div class="form-field"><label for="regUser">Имя пользователя</label><input class="form-control" id="regUser" autocomplete="username" /></div>
+              <div class="form-field"><label for="regPass">Пароль <span>не менее 8 символов</span></label><input type="password" class="form-control" id="regPass" autocomplete="new-password" /></div>
+              <button class="btn btn-primary w-100" id="btnRegister">Создать аккаунт</button>
             </div>
-            <div class="tab-pane fade" id="userProjectsPane">
-              <div id="userProjectsPanel" class="small text-muted">Войдите, чтобы видеть сохранённые проекты комнат.</div>
-            </div>
-            <div class="tab-pane fade" id="userOrdersPane">
-              <div id="userOrdersPanel" class="small text-muted">Войдите, чтобы видеть заказы в производстве.</div>
+            <div class="tab-pane fade" id="userProjectsPane"><div id="userProjectsPanel" class="empty-copy">Войдите, чтобы увидеть сохранённые проекты.</div></div>
+            <div class="tab-pane fade" id="userOrdersPane"><div id="userOrdersPanel" class="empty-copy">Войдите, чтобы увидеть заказы в производстве.</div></div>
+          </div>
+          </div>
+          <div class="d-none" id="accountMember">
+            <div class="account-member-head"><div><span>Вы вошли как</span><strong id="accountMemberName"></strong></div><button class="btn btn-quiet btn-sm" id="btnLogout" type="button">Выйти</button></div>
+            <ul class="nav nav-pills account-tabs" role="tablist">
+              <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#memberProjectsPane" type="button">Мои проекты</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#memberOrdersPane" type="button">Мои заказы</button></li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="memberProjectsPane"><div id="memberProjectsPanel" class="loading-state">Загружаем проекты...</div></div>
+              <div class="tab-pane fade" id="memberOrdersPane"><div id="memberOrdersPanel" class="loading-state">Загружаем заказы...</div></div>
             </div>
           </div>
         </div>
@@ -241,14 +326,19 @@
     </div>
   </div>
 
-  <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+  <div class="lightbox" id="imageLightbox" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Просмотр изображения">
+    <button class="lightbox-close" type="button" data-lightbox-close aria-label="Закрыть просмотр">×</button>
+    <button class="lightbox-nav lightbox-prev" type="button" data-lightbox-prev aria-label="Предыдущее изображение">‹</button>
+    <figure><img id="lightboxImage" alt="" /><figcaption id="lightboxCaption"></figcaption></figure>
+    <button class="lightbox-nav lightbox-next" type="button" data-lightbox-next aria-label="Следующее изображение">›</button>
+  </div>
+
+  <div class="toast-container position-fixed bottom-0 end-0 p-3" aria-live="polite" aria-atomic="true"></div>
   <script>window.APP_MODE = "user";</script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="dimensions3d.js?v=20260721-cad-dimensions-v2"></script>
   <script src="textures3d.js?v=20260721-cad-dimensions-v1"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script defer src="app.js?v=20260721-room-walls-v1"></script>
+  <script defer src="app.js?v=20260723-frontend-improvements-v1"></script>
 </body>
 </html>

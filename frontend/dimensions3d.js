@@ -1,5 +1,9 @@
 /** Screen-stable CAD-style dimension annotations for the 3D planner. */
 (function () {
+  if (!window.THREE) {
+    console.warn("[dimensions] Three.js unavailable; 3D dimensions initialization skipped");
+    return;
+  }
   const DEFAULT_CONFIG = {
     targetFontSizePx: 23,
     minFontSizePx: 19,

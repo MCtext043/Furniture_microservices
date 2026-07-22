@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>WoodCraft Admin — производство</title>
+  <script>document.documentElement.dataset.theme=localStorage.getItem("woodcraft_theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
   <link href="styles.css?v=20260721-planner-ui-v1" rel="stylesheet" />
 </head>
@@ -21,6 +22,7 @@
           <li class="nav-item"><a class="nav-link" href="#cutting">Раскрой</a></li>
           <li class="nav-item"><a class="nav-link" href="#planner">Проекты</a></li>
           <li class="nav-item"><a class="nav-link" href="index.html">Витрина</a></li>
+          <li class="nav-item"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Включить тёмную тему"><span aria-hidden="true">☾</span></button></li>
           <li class="nav-item">
             <button class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#accountModal" id="accountBtn">Войти</button>
           </li>
@@ -88,7 +90,8 @@
           <div class="d-flex flex-wrap gap-2 mb-3" id="categoryPills"></div>
           <div class="input-group mb-3" style="max-width: 360px">
             <span class="input-group-text">Поиск</span>
-            <input class="form-control" id="searchInput" placeholder="название, SKU..." />
+            <input class="form-control" id="searchInput" type="search" placeholder="название, SKU, бренд, категория..." />
+            <button class="btn btn-outline-secondary d-none" id="searchClear" type="button" aria-label="Очистить поиск">×</button>
           </div>
           <div id="adminCatalogTable"></div>
         </div>
@@ -263,14 +266,19 @@
     </div>
   </div>
 
+  <div class="lightbox" id="imageLightbox" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Просмотр изображения">
+    <button class="lightbox-close" type="button" data-lightbox-close aria-label="Закрыть просмотр">×</button>
+    <button class="lightbox-nav lightbox-prev" type="button" data-lightbox-prev aria-label="Предыдущее изображение">‹</button>
+    <figure><img id="lightboxImage" alt="" /><figcaption id="lightboxCaption"></figcaption></figure>
+    <button class="lightbox-nav lightbox-next" type="button" data-lightbox-next aria-label="Следующее изображение">›</button>
+  </div>
+
   <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
   <script>window.APP_MODE = "admin";</script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="dimensions3d.js?v=20260721-cad-dimensions-v2"></script>
   <script src="textures3d.js?v=20260721-cad-dimensions-v1"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"></script>
-  <script defer src="app.js?v=20260721-room-walls-v1"></script>
+  <script defer src="app.js?v=20260723-frontend-improvements-v1"></script>
 </body>
 </html>
