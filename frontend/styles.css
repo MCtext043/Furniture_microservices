@@ -38,12 +38,18 @@ body { background: #f7f3ee; color: #2f2924; }
 .product-photo-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 0.5rem; border: 1px solid #dee2e6; }
 .price { color: var(--brand); font-weight: 800; }
 .service-card { border: 1px solid #eadccc; border-radius: 1.25rem; background: #fff; box-shadow: 0 12px 30px rgba(71, 48, 29, .08); }
+.planner-subtitle { line-height: 1.2; }
+#btnApplyRoomSize,
+#btnApplyRoomSize:hover,
+#btnApplyRoomSize:active,
+#btnApplyRoomSize:focus,
+#btnApplyRoomSize:disabled { color: #111 !important; }
 .room-plan { min-height: 260px; border: 10px solid #d9c2aa; background: repeating-linear-gradient(45deg, #fbf6ef 0 12px, #f3e7d7 12px 24px); position: relative; overflow: hidden; border-radius: .75rem; margin-inline: auto; transition: min-height .2s ease, aspect-ratio .2s ease; }
 .furniture-chip-wrap { position: absolute; pointer-events: none; }
-.furniture-chip { position: absolute; left: 50%; top: 50%; transform-origin: center center; border-radius: .65rem; background: rgba(122,79,43,.86); color: #fff; font-size: .75rem; box-shadow: 0 8px 20px rgba(0,0,0,.18); pointer-events: auto; display: flex; align-items: flex-start; justify-content: space-between; padding: .35rem .4rem; }
-.furniture-chip-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: .25rem; }
-.furniture-rotate-handle { position: absolute; top: -0.35rem; right: -0.35rem; width: 1.35rem; height: 1.35rem; border: 0; border-radius: 50%; background: #fff; color: #7a4f2b; font-size: .72rem; line-height: 1; cursor: grab; box-shadow: 0 2px 8px rgba(0,0,0,.22); pointer-events: auto; padding: 0; }
-.furniture-delete-handle { position: absolute; top: -0.35rem; left: -0.35rem; width: 1.35rem; height: 1.35rem; border: 0; border-radius: 50%; background: #fee2e2; color: #b91c1c; font-size: .95rem; line-height: 1; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.22); pointer-events: auto; padding: 0; }
+.furniture-chip { position: absolute; left: 50%; top: 50%; transform-origin: center center; border-radius: .65rem; background: rgba(122,79,43,.86); color: #fff; font-size: .75rem; box-shadow: 0 8px 20px rgba(0,0,0,.18); pointer-events: auto; display: flex; align-items: flex-start; justify-content: space-between; padding: .65rem 1.75rem .5rem .65rem; }
+.furniture-chip-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.furniture-rotate-handle { position: absolute; bottom: -0.35rem; right: -0.35rem; width: 1.35rem; height: 1.35rem; border: 0; border-radius: 50%; background: #fff; color: #7a4f2b; font-size: .72rem; line-height: 1; cursor: grab; box-shadow: 0 2px 8px rgba(0,0,0,.22); pointer-events: auto; padding: 0; }
+.furniture-delete-handle { position: absolute; top: .3rem; right: .3rem; width: 1.35rem; height: 1.35rem; border: 0; border-radius: 50%; background: #fee2e2; color: #b91c1c; font-size: .95rem; line-height: 1; cursor: pointer; box-shadow: 0 2px 8px rgba(0,0,0,.22); pointer-events: auto; padding: 0; }
 .furniture-delete-handle:hover { background: #fecaca; }
 .furniture-rotate-handle:active { cursor: grabbing; background: #fef3c7; }
 .viewer-3d { min-height: 360px; border-radius: .9rem; overflow: hidden; background: linear-gradient(180deg, #111827, #384152); position: relative; }

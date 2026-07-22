@@ -4,7 +4,6 @@
   const externalBundleCache = new Map();
   const warnedMissingBundles = new Set();
   const panelGeometryCache = new Map();
-  const dimensionTextureCache = new Map();
   const PBR_ASSET_BASE = "./frontend-assets/textures";
   const TEXTURE_SIZE = 1024;
   const DEV_MODE = typeof window !== "undefined" && /localhost|127\.0\.0\.1/i.test(window.location.hostname);
@@ -547,48 +546,6 @@
     return new THREE.Mesh(geometry, material);
   }
 
-  function dimensionTexture(text) {
-    if (dimensionTextureCache.has(text)) return dimensionTextureCache.get(text);
-    const canvas = document.createElement("canvas");
-    canvas.width = 256;
-    canvas.height = 64;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "rgba(15,23,42,0.88)";
-    ctx.fillRect(4, 4, 248, 56);
-    ctx.strokeStyle = "rgba(255,255,255,0.35)";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(4, 4, 248, 56);
-    ctx.fillStyle = "#f8fafc";
-    ctx.font = "bold 26px Segoe UI, Arial, sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(text, 128, 32);
-    const texture = new THREE.CanvasTexture(canvas);
-    if ("colorSpace" in texture) texture.colorSpace = THREE.SRGBColorSpace;
-    dimensionTextureCache.set(text, texture);
-    return texture;
-  }
-
-  function makeDimLabel(text) {
-    const mat = new THREE.SpriteMaterial({ map: dimensionTexture(text), depthTest: false, transparent: true });
-    const sprite = new THREE.Sprite(mat);
-    sprite.scale.set(420, 105, 1);
-    sprite.renderOrder = 10;
-    return sprite;
-  }
-
-  function addDimLabels(group, w, h, d) {
-    const wLabel = makeDimLabel(`${Math.round(w)} мм`);
-    wLabel.position.set(0, 24, d / 2 + 140);
-    group.add(wLabel);
-    const hLabel = makeDimLabel(`${Math.round(h)} мм`);
-    hLabel.position.set(w / 2 + 120, h / 2, 0);
-    group.add(hLabel);
-    const dLabel = makeDimLabel(`${Math.round(d)} мм`);
-    dLabel.position.set(0, h + 80, 0);
-    group.add(dLabel);
-  }
-
   function bodyLuminance(bodyMat) {
     const color = bodyMat?.color || new THREE.Color(0xcccccc);
     return 0.299 * color.r + 0.587 * color.g + 0.114 * color.b;
@@ -649,7 +606,6 @@
       child.castShadow = true;
       child.receiveShadow = true;
     });
-    addDimLabels(group, w, h, d);
     return group;
   }
 
@@ -765,8 +721,7 @@
       group.add(leg);
     });
 
-    addDimLabels(group, w, h, d);
-    return group;
+    return finishFurnitureGroup(group, w, h, d);
   }
 
   function buildFurnitureGroup(item, w, h, d, materialsInput) {
@@ -891,7 +846,6 @@
       child.receiveShadow = true;
     });
 
-    addDimLabels(group, w, h, d);
     return group;
   }
 

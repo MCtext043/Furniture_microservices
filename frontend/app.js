@@ -27,6 +27,7 @@ const state = {
   userOrders: [],
   userProjects: [],
   selectedTier: "standard",
+  selected3dObjectId: null,
   productPhotoUrls: {},
 };
 
@@ -1130,6 +1131,7 @@ function createDemoObjects() {
     { id: makeId(), type: "sofa", texture: "fabric_gray", name: "Диван Soft Cloud", width: 2200, depth: 1000, height: 900, x: 1500, z: 3500, rotationY: 90 },
     { id: makeId(), type: "cabinet", texture: "board_black", name: "Остров Chef", width: 1800, depth: 800, height: 900, x: 3000, z: 2200, rotationY: 0 },
   ];
+  state.selected3dObjectId = state.objects3d[0]?.id || null;
 }
 
 function addFurnitureSet() {
@@ -1255,7 +1257,9 @@ function furnitureAccessoryDefaults(type) {
 
 function disposeRoom3D() {
   if (!state.three) return;
-  const { renderer, host } = state.three;
+  const { renderer, host, dimensionManager, resizeObserver } = state.three;
+  resizeObserver?.disconnect();
+  dimensionManager?.dispose();
   window.__room3dRenderer = null;
   if (renderer) {
     renderer.dispose();
@@ -1287,7 +1291,7 @@ function createRoom3DRenderer(width, height) {
     try {
       const renderer = new THREE.WebGLRenderer(options);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, options.antialias ? 2 : 1));
-      renderer.setSize(width, height);
+      renderer.setSize(width, height, false);
       return renderer;
     } catch (error) {
       lastError = error;
@@ -1379,6 +1383,9 @@ function initRoom3D() {
   const furnitureGroup = new THREE.Group();
   scene.add(roomGroup);
   scene.add(furnitureGroup);
+  const dimensionManager = window.Dimension3D?.DimensionManager
+    ? new window.Dimension3D.DimensionManager(camera, renderer)
+    : null;
 
   const orbit = {
     theta: 0.78,
@@ -1386,7 +1393,12 @@ function initRoom3D() {
     radius: 11000,
     target: new THREE.Vector3(0, 1000, 0),
   };
-  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, host, orbit };
+  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, dimensionManager, host, orbit };
+  if (window.ResizeObserver) {
+    const resizeObserver = new ResizeObserver(() => refreshRoom3DLayout());
+    resizeObserver.observe(host);
+    state.three.resizeObserver = resizeObserver;
+  }
   init3DPointerControls(renderer.domElement);
   updateOrbitCamera();
   rebuildRoomGeometry();
@@ -1394,6 +1406,7 @@ function initRoom3D() {
 
   const animate = () => {
     if (!state.three) return;
+    dimensionManager?.update(camera, renderer);
     renderer.render(scene, camera);
     requestAnimationFrame(animate);
   };
@@ -1411,7 +1424,7 @@ function refreshRoom3DLayout() {
   const width = host.clientWidth || 640;
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  renderer.setSize(width, height);
+  renderer.setSize(width, height, false);
   updateOrbitCamera();
 }
 
@@ -1437,6 +1450,39 @@ function updateOrbitCamera() {
   const z = orbit.target.z + orbit.radius * sinPhi * Math.cos(orbit.theta);
   camera.position.set(x, y, z);
   camera.lookAt(orbit.target);
+  updateDynamicWallVisibility();
+}
+
+function wallSideWithHysteresis(value, currentSide) {
+  const enterThreshold = 0.2;
+  const exitThreshold = 0.1;
+  if (currentSide === 1) {
+    if (value < -enterThreshold) return -1;
+    return value < exitThreshold ? 0 : 1;
+  }
+  if (currentSide === -1) {
+    if (value > enterThreshold) return 1;
+    return value > -exitThreshold ? 0 : -1;
+  }
+  if (value > enterThreshold) return 1;
+  if (value < -enterThreshold) return -1;
+  return 0;
+}
+
+function updateDynamicWallVisibility() {
+  if (!state.three?.walls) return;
+  const { camera, orbit, walls } = state.three;
+  const directionX = (camera.position.x - orbit.target.x) / Math.max(orbit.radius, 1);
+  const directionZ = (camera.position.z - orbit.target.z) / Math.max(orbit.radius, 1);
+  const sideState = state.three.wallSideState || { x: 0, z: 0 };
+  sideState.x = wallSideWithHysteresis(directionX, sideState.x);
+  sideState.z = wallSideWithHysteresis(directionZ, sideState.z);
+  state.three.wallSideState = sideState;
+
+  walls.left.visible = sideState.x !== -1;
+  walls.right.visible = sideState.x !== 1;
+  walls.back.visible = sideState.z !== -1;
+  walls.front.visible = sideState.z !== 1;
 }
 
 function init3DPointerControls(canvas) {
@@ -1445,6 +1491,7 @@ function init3DPointerControls(canvas) {
     state.cameraDrag.active = true;
     state.cameraDrag.startX = event.clientX;
     state.cameraDrag.startY = event.clientY;
+    state.cameraDrag.moved = false;
     canvas.style.cursor = "grabbing";
     canvas.setPointerCapture(event.pointerId);
   });
@@ -1452,13 +1499,17 @@ function init3DPointerControls(canvas) {
     if (!state.cameraDrag.active || !state.three) return;
     const dx = event.clientX - state.cameraDrag.startX;
     const dy = event.clientY - state.cameraDrag.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) state.cameraDrag.moved = true;
     state.cameraDrag.startX = event.clientX;
     state.cameraDrag.startY = event.clientY;
     state.three.orbit.theta -= dx * 0.01;
     state.three.orbit.phi = Math.min(Math.max(state.three.orbit.phi + dy * 0.01, 0.22), Math.PI / 2 - 0.04);
     updateOrbitCamera();
   });
-  const stopDrag = () => {
+  const stopDrag = (event) => {
+    if (event?.type === "pointerup" && !state.cameraDrag.moved) {
+      selectFurnitureAtPointer(event, canvas);
+    }
     state.cameraDrag.active = false;
     canvas.style.cursor = "grab";
   };
@@ -1477,6 +1528,28 @@ function init3DPointerControls(canvas) {
   );
 }
 
+function selectFurnitureAtPointer(event, canvas) {
+  if (!state.three) return;
+  const { camera, furnitureGroup, dimensionManager } = state.three;
+  const rect = canvas.getBoundingClientRect();
+  const pointer = new THREE.Vector2(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -((event.clientY - rect.top) / rect.height) * 2 + 1
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObjects(furnitureGroup.children, true)[0];
+  let object = hit?.object || null;
+  while (object && object.parent !== furnitureGroup) object = object.parent;
+  if (!object?.userData?.objectId) {
+    state.selected3dObjectId = null;
+    dimensionManager?.setSelected(null);
+    return;
+  }
+  state.selected3dObjectId = object.userData.objectId;
+  dimensionManager?.setSelected(object);
+}
+
 function rebuildRoomGeometry() {
   if (!state.three) return;
   const { roomGroup } = state.three;
@@ -1492,21 +1565,36 @@ function rebuildRoomGeometry() {
   roomGroup.add(floor);
 
   const wallMat = createSurfaceMaterialForPanel("wall", "default", 0xfaf7f2, width, height, "vertical");
-  const wallBack = new THREE.Mesh(prepareGeometry(new THREE.BoxGeometry(width, height, 50)), wallMat);
-  wallBack.position.set(0, height / 2, -length / 2);
-  wallBack.receiveShadow = true;
-  roomGroup.add(wallBack);
+  const createWall = (name, geometry, position) => {
+    const wall = new THREE.Group();
+    wall.name = name;
+    wall.userData.isRoomWall = true;
+    const surface = new THREE.Mesh(prepareGeometry(geometry), wallMat.clone());
+    surface.position.copy(position);
+    surface.receiveShadow = true;
+    wall.add(surface);
+    roomGroup.add(wall);
+    return wall;
+  };
 
-  const wallLeft = new THREE.Mesh(prepareGeometry(new THREE.BoxGeometry(50, height, length)), wallMat.clone());
-  wallLeft.position.set(-width / 2, height / 2, 0);
-  wallLeft.receiveShadow = true;
-  roomGroup.add(wallLeft);
+  state.three.walls = {
+    back: createWall("wall-back", new THREE.BoxGeometry(width, height, 50), new THREE.Vector3(0, height / 2, -length / 2)),
+    front: createWall("wall-front", new THREE.BoxGeometry(width, height, 50), new THREE.Vector3(0, height / 2, length / 2)),
+    left: createWall("wall-left", new THREE.BoxGeometry(50, height, length), new THREE.Vector3(-width / 2, height / 2, 0)),
+    right: createWall("wall-right", new THREE.BoxGeometry(50, height, length), new THREE.Vector3(width / 2, height / 2, 0)),
+  };
+  state.three.wallSideState = { x: 0, z: 0 };
+  updateDynamicWallVisibility();
 }
 
 function renderRoom3D() {
   if (!state.three) return;
-  const { furnitureGroup } = state.three;
+  const { furnitureGroup, dimensionManager } = state.three;
+  dimensionManager?.clear();
   furnitureGroup.clear();
+
+  if (!state.objects3d.some((item) => item.id === state.selected3dObjectId)) state.selected3dObjectId = null;
+  let selectedGroup = null;
 
   state.objects3d.forEach((item) => {
     const texturePreset = resolveTexturePreset(item);
@@ -1532,7 +1620,19 @@ function renderRoom3D() {
     group.userData.kind = "furniture";
     group.userData.objectId = item.id;
     furnitureGroup.add(group);
+    dimensionManager?.attach(group, { width: w, height: h, depth: d });
+    if (item.id === state.selected3dObjectId) selectedGroup = group;
   });
+  dimensionManager?.setSelected(selectedGroup);
+}
+
+function updateFurnitureTransform(item) {
+  if (!state.three || !item) return;
+  const group = state.three.furnitureGroup.children.find((child) => child.userData.objectId === item.id);
+  if (!group) return;
+  group.position.set(roomUnitToWorldX(item.x), 0, roomUnitToWorldZ(item.z));
+  group.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
+  group.updateMatrixWorld(true);
 }
 
 function renderRoomTopView() {
@@ -1590,6 +1690,10 @@ function beginDrag(ev, id) {
   if (state.rotate.active) return;
   const item = state.objects3d.find((obj) => obj.id === id);
   if (!item) return;
+  state.selected3dObjectId = id;
+  state.three?.dimensionManager?.setSelected(
+    state.three.furnitureGroup.children.find((child) => child.userData.objectId === id) || null
+  );
   state.drag.active = true;
   state.drag.id = id;
   state.drag.startX = ev.clientX;
@@ -1606,6 +1710,10 @@ function beginRotate(ev, id) {
   ev.preventDefault();
   const item = state.objects3d.find((obj) => obj.id === id);
   if (!item) return;
+  state.selected3dObjectId = id;
+  state.three?.dimensionManager?.setSelected(
+    state.three.furnitureGroup.children.find((child) => child.userData.objectId === id) || null
+  );
   const host = document.getElementById("roomPlan");
   const hostRect = host.getBoundingClientRect();
   const { width, length } = state.roomConfig;
@@ -1644,7 +1752,7 @@ function handleDragMove(ev) {
   item.z = state.drag.baseZ + dz;
   clampObjectPosition(item, width, length);
   renderRoomTopView();
-  renderRoom3D();
+  updateFurnitureTransform(item);
 }
 
 function handleRotateMove(ev) {
@@ -1655,7 +1763,7 @@ function handleRotateMove(ev) {
   item.rotationY = Math.round(normalizeAngle(state.rotate.baseRotation + delta) * 10) / 10;
   clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
   renderRoomTopView();
-  renderRoom3D();
+  updateFurnitureTransform(item);
 }
 
 function endDrag() {
@@ -1663,7 +1771,6 @@ function endDrag() {
     state.rotate.active = false;
     state.rotate.id = null;
     renderRoomTopView();
-    renderRoom3D();
     renderBom();
     return;
   }
@@ -1724,6 +1831,7 @@ function addObject3DFromForm() {
     rotationY: 0,
   };
   state.objects3d.push(item);
+  state.selected3dObjectId = item.id;
   renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
@@ -2276,6 +2384,7 @@ function removeObject3D(id) {
   const index = state.objects3d.findIndex((obj) => obj.id === id);
   if (index < 0) return;
   const [removed] = state.objects3d.splice(index, 1);
+  if (state.selected3dObjectId === removed.id) state.selected3dObjectId = null;
   renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
@@ -2859,6 +2968,7 @@ async function loadPlannerProject(projectId) {
     drawers: row.drawers ?? 0,
     handles: row.handles ?? 0,
   }));
+  state.selected3dObjectId = state.objects3d[0]?.id || null;
 
   if (project.bom_json) {
     try {
