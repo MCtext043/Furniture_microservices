@@ -1,0 +1,4 @@
+import { describe,expect,it } from 'vitest';
+import { apiFurnitureToEditor,editorToProjectPayload,projectSnapshot } from './planner';
+import type { Project } from './api';
+describe('planner adapters',()=>{it('maps legacy furniture coordinates and material',()=>{const item=apiFurnitureToEditor({id:3,project_id:2,name:'Шкаф',width:1200,depth:600,height:2100,x:900,y:0,z:800,rotation_y:90,furniture_type:'wardrobe',texture:'wood_dark_oak',custom_color:'',drawers:1,handles:2});expect(item).toMatchObject({backendId:3,type:'wardrobe',x:900,z:800,rotation:90,texture:'wood_dark_oak'})});it('stores a versioned editor snapshot in bom_json',()=>{const payload=editorToProjectPayload({name:'Тест',location:'Онлайн',user:'user',room:{width:5000,length:4000,height:2700},items:[]});expect(projectSnapshot({...payload,id:1,status:'draft',submitted_at:null} as Project)).toEqual({version:1,room:{width:5000,length:4000,height:2700},items:[]})})});

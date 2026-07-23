@@ -1,0 +1,10 @@
+services:
+  react-frontend:
+    build:
+      context: ./frontend-react
+      dockerfile: Dockerfile
+    container_name: furniture-react-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - gateway-service
