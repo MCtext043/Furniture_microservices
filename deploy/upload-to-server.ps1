@@ -68,6 +68,7 @@ try {
         --exclude="./.pytest_cache" `
         --exclude="./.cursor" `
         --exclude="./agent-transcripts" `
+        --exclude="./frontend-react" `
         --exclude="./deploy/local.env" `
         --exclude="*.pyc" `
         .
