@@ -20,6 +20,7 @@ from .models import (
     CrmOrderMaterial,
     CrmOrderPhoto,
     CrmOrderProcurement,
+    CrmOrderReceipt,
     CrmProductionOrder,
     CrmWarehouseStock,
 )
@@ -33,6 +34,8 @@ from .schemas import (
     CrmOrderPhotoCreate,
     CrmOrderPhotoOut,
     CrmOrderProcurementOut,
+    CrmOrderReceiptCreate,
+    CrmOrderReceiptOut,
     CrmOrderStatusUpdate,
     CrmProcurementLine,
     CrmProcurementLineUpdateIn,
@@ -235,6 +238,7 @@ def list_user_orders(user_id: str, session: Session = Depends(get_session)) -> l
 @crm_db_guard
 def clear_orders(session: Session = Depends(get_session)) -> dict[str, str]:
     session.execute(delete(CrmOrderPhoto))
+    session.execute(delete(CrmOrderReceipt))
     session.execute(delete(CrmOrderMaterial))
     session.execute(delete(CrmProductionOrder))
     session.commit()
@@ -350,6 +354,69 @@ def list_order_photos(order_id: int, session: Session = Depends(get_session)) ->
             created_at=photo.created_at.isoformat(),
         )
         for photo in photos
+    ]
+
+
+@router.post(
+    "/orders/{order_id}/receipts",
+    response_model=CrmOrderReceiptOut,
+    status_code=201,
+    dependencies=[Depends(ensure_catalog_writer)],
+)
+@crm_db_guard
+def add_order_receipt(
+    order_id: int,
+    payload: CrmOrderReceiptCreate,
+    session: Session = Depends(get_session),
+) -> CrmOrderReceiptOut:
+    """Один админ фотографирует чек закупки; другой позже видит его в списке чеков заказа."""
+    order = session.get(CrmProductionOrder, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    receipt = CrmOrderReceipt(
+        order_id=order_id,
+        object_key=payload.object_key,
+        note=payload.note,
+        amount_rub=payload.amount_rub,
+        uploaded_by=payload.uploaded_by,
+        created_at=datetime.now(timezone.utc),
+    )
+    session.add(receipt)
+    session.commit()
+    session.refresh(receipt)
+    return CrmOrderReceiptOut(
+        id=receipt.id,
+        order_id=receipt.order_id,
+        object_key=receipt.object_key,
+        note=receipt.note,
+        amount_rub=float(receipt.amount_rub) if receipt.amount_rub is not None else None,
+        uploaded_by=receipt.uploaded_by,
+        created_at=receipt.created_at.isoformat(),
+    )
+
+
+@router.get("/orders/{order_id}/receipts", response_model=list[CrmOrderReceiptOut])
+@crm_db_guard
+def list_order_receipts(order_id: int, session: Session = Depends(get_session)) -> list[CrmOrderReceiptOut]:
+    order = session.get(CrmProductionOrder, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    receipts = list(
+        session.scalars(
+            select(CrmOrderReceipt).where(CrmOrderReceipt.order_id == order_id).order_by(CrmOrderReceipt.id.desc())
+        )
+    )
+    return [
+        CrmOrderReceiptOut(
+            id=receipt.id,
+            order_id=receipt.order_id,
+            object_key=receipt.object_key,
+            note=receipt.note,
+            amount_rub=float(receipt.amount_rub) if receipt.amount_rub is not None else None,
+            uploaded_by=receipt.uploaded_by,
+            created_at=receipt.created_at.isoformat(),
+        )
+        for receipt in receipts
     ]
 
 

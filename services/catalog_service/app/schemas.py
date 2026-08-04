@@ -208,6 +208,20 @@ class CrmOrderPhotoOut(CrmOrderPhotoCreate):
     model_config = ConfigDict(from_attributes=True)
 
 
+class CrmOrderReceiptCreate(BaseModel):
+    object_key: str = Field(min_length=3, max_length=255)
+    note: str = Field(default="", max_length=255)
+    amount_rub: float | None = Field(default=None, ge=0)
+    uploaded_by: str = Field(default="", max_length=120)
+
+
+class CrmOrderReceiptOut(CrmOrderReceiptCreate):
+    id: int
+    order_id: int
+    created_at: str
+    model_config = ConfigDict(from_attributes=True)
+
+
 class CrmPricingIn(BaseModel):
     standard: float = Field(ge=0)
     comfort: float = Field(ge=0)

@@ -1093,6 +1093,50 @@ function clampObjectPosition(item, roomWidth, roomLength) {
   item.z = Math.min(Math.max(item.z, planD / 2), roomLength - planD / 2);
 }
 
+const SNAP_DISTANCE_MM = 70;
+
+// Edges (in room mm coordinates) that a dragged object's own edges can "stick" to: the room
+// walls plus the near/far edges of every other placed object along that axis.
+function collectSnapEdges(axis, excludeId, roomSize) {
+  const edges = [0, roomSize];
+  state.objects3d.forEach((obj) => {
+    if (obj.id === excludeId) return;
+    const { planW, planD } = getObjectPlanSize(obj);
+    if (axis === "x") edges.push(obj.x - planW / 2, obj.x + planW / 2);
+    else edges.push(obj.z - planD / 2, obj.z + planD / 2);
+  });
+  return edges;
+}
+
+// Finds the smallest shift (within SNAP_DISTANCE_MM) that would bring one of the dragged
+// object's edges flush against a wall or a neighboring object's edge along one axis.
+function findSnapShift(edges, itemMin, itemMax) {
+  let bestShift = 0;
+  let bestDist = SNAP_DISTANCE_MM;
+  edges.forEach((edge) => {
+    const shiftMin = edge - itemMin;
+    const shiftMax = edge - itemMax;
+    if (Math.abs(shiftMin) < bestDist) {
+      bestDist = Math.abs(shiftMin);
+      bestShift = shiftMin;
+    }
+    if (Math.abs(shiftMax) < bestDist) {
+      bestDist = Math.abs(shiftMax);
+      bestShift = shiftMax;
+    }
+  });
+  return bestShift;
+}
+
+// "Приклеивает" объект к стене/соседней мебели, если его подтащили достаточно близко.
+function snapObjectPosition(item, roomWidth, roomLength) {
+  const { planW, planD } = getObjectPlanSize(item);
+  const edgesX = collectSnapEdges("x", item.id, roomWidth);
+  const edgesZ = collectSnapEdges("z", item.id, roomLength);
+  item.x += findSnapShift(edgesX, item.x - planW / 2, item.x + planW / 2);
+  item.z += findSnapShift(edgesZ, item.z - planD / 2, item.z + planD / 2);
+}
+
 function normalizePartsForCutting(parts) {
   return parts.map((part) => ({
     name: part.name,
@@ -1998,6 +2042,7 @@ function handleDragMove(ev) {
 
   item.x = state.drag.baseX + dx;
   item.z = state.drag.baseZ + dz;
+  snapObjectPosition(item, width, length);
   clampObjectPosition(item, width, length);
   updateRoomPlanChipDom(item, scale, state.drag.wrapEl, state.drag.chipEl);
   updateFurnitureTransform(item);
@@ -2792,6 +2837,10 @@ function renderCrmProcurementTable(orderId, data) {
               <th colspan="5" class="text-end">Уже закупили</th>
               <th colspan="2"><span class="fw-semibold" data-crm-proc-progress>${progressText}</span></th>
             </tr>
+            <tr class="table-success">
+              <th colspan="5" class="text-end">Итоговая сумма (закупка × ${RETAIL_MULTIPLIER})</th>
+              <th colspan="2"><span class="fw-bold" data-crm-proc-final-sum>${money(numOrZero(data.procurement_sum_rub) * RETAIL_MULTIPLIER)}</span></th>
+            </tr>
           </tfoot>
         </table>
       </div>
@@ -2855,6 +2904,8 @@ function recalcCrmProcurementTable(wrapper) {
   wrapper.querySelector("[data-crm-proc-sum]").textContent = money(sum);
   wrapper.querySelector("[data-crm-proc-progress]").textContent = progressText;
   wrapper.querySelector("[data-crm-proc-progress-inline]").textContent = progressText;
+  const finalSumEl = wrapper.querySelector("[data-crm-proc-final-sum]");
+  if (finalSumEl) finalSumEl.textContent = money(sum * RETAIL_MULTIPLIER);
 }
 
 function bindCrmProcurementTable(host, orderId) {
@@ -2943,9 +2994,12 @@ function renderCrmOrderCard(order) {
           </select>
           <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>
           <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
+          <button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>
           <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>
         </div>
         <div id="crm-proc-${order.id}"></div>
+        <div id="crm-receipts-${order.id}" class="mt-2"></div>
         <div id="crm-photos-${order.id}" class="mt-2"></div>
       </div>`;
 }
@@ -2963,6 +3017,12 @@ function bindCrmOrderPanel(host) {
   });
   host.querySelectorAll("[data-crm-photo]").forEach((btn) => {
     btn.addEventListener("click", () => uploadCrmOrderPhoto(Number(btn.dataset.crmPhoto)));
+  });
+  host.querySelectorAll("[data-crm-receipt-upload]").forEach((btn) => {
+    btn.addEventListener("click", () => uploadCrmOrderReceipt(Number(btn.dataset.crmReceiptUpload)));
+  });
+  host.querySelectorAll("[data-crm-receipt-view]").forEach((btn) => {
+    btn.addEventListener("click", () => toggleCrmOrderReceipts(Number(btn.dataset.crmReceiptView), btn));
   });
 }
 
@@ -3045,6 +3105,94 @@ async function uploadCrmOrderPhoto(orderId) {
 async function getPhotoViewUrl(objectKey) {
   if (!objectKey) return "";
   return assetObjectUrl(objectKey);
+}
+
+// Позволяет одному админу сфотографировать чек закупки, а другому — посмотреть,
+// что и на какую сумму уже куплено по заказу.
+async function uploadCrmOrderReceipt(orderId) {
+  const note = window.prompt("Что купили (необязательно)?", "") || "";
+  const amountRaw = window.prompt("Сумма по чеку, ₽ (необязательно)", "") || "";
+  const amount = numOrZero(amountRaw);
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.capture = "environment";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const objectKey = `receipts/${orderId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
+    try {
+      await uploadAssetFile(file, objectKey);
+      await api(
+        "POST",
+        `/catalog/crm/orders/${orderId}/receipts`,
+        {
+          object_key: objectKey,
+          note,
+          amount_rub: amount > 0 ? amount : null,
+          uploaded_by: customerName(),
+        },
+        true
+      );
+      toast("Чек загружен");
+      const host = document.getElementById(`crm-receipts-${orderId}`);
+      if (host?.dataset.open === "1") await renderCrmOrderReceipts(orderId);
+    } catch (error) {
+      toast(`Чек: ${formatApiError(error)}`, false);
+    }
+  };
+  input.click();
+}
+
+async function toggleCrmOrderReceipts(orderId, btn) {
+  const host = document.getElementById(`crm-receipts-${orderId}`);
+  if (!host) return;
+  if (host.dataset.open === "1") {
+    host.dataset.open = "0";
+    host.innerHTML = "";
+    if (btn) btn.textContent = "Посмотреть чеки";
+    return;
+  }
+  host.dataset.open = "1";
+  if (btn) btn.textContent = "Скрыть чеки";
+  await renderCrmOrderReceipts(orderId);
+}
+
+async function renderCrmOrderReceipts(orderId) {
+  const host = document.getElementById(`crm-receipts-${orderId}`);
+  if (!host) return;
+  host.innerHTML = `<span class="text-muted small">Загружаем чеки...</span>`;
+  try {
+    const receipts = await api("GET", `/catalog/crm/orders/${orderId}/receipts`, undefined, true);
+    if (!receipts.length) {
+      host.innerHTML = `<div class="small text-muted border rounded p-2">Чеков пока нет — нажмите «Загрузить чек», когда что-то купите.</div>`;
+      return;
+    }
+    const totalAmount = receipts.reduce((sum, r) => sum + numOrZero(r.amount_rub), 0);
+    const items = receipts
+      .map((receipt) => {
+        const url = assetObjectUrl(receipt.object_key);
+        const when = receipt.created_at ? new Date(receipt.created_at).toLocaleString("ru-RU") : "";
+        return `<div class="d-inline-block me-2 mb-2 text-center align-top" style="max-width:150px">
+          <a href="${url}" target="_blank" rel="noopener">
+            <img src="${url}" alt="Чек" class="img-fluid rounded border" style="max-height:120px">
+          </a>
+          ${numOrZero(receipt.amount_rub) > 0 ? `<div class="small fw-semibold mt-1">${money(numOrZero(receipt.amount_rub))}</div>` : ""}
+          ${receipt.note ? `<div class="small text-muted">${escapeHtml(receipt.note)}</div>` : ""}
+          <div class="small text-muted">${escapeHtml(receipt.uploaded_by || "—")}${when ? ` · ${when}` : ""}</div>
+        </div>`;
+      })
+      .join("");
+    host.innerHTML = `<div class="border rounded p-2 bg-light">
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <span class="small fw-semibold">Чеки закупки (${receipts.length})</span>
+        ${totalAmount > 0 ? `<span class="small fw-semibold">Сумма по чекам: ${money(totalAmount)}</span>` : ""}
+      </div>
+      ${items}
+    </div>`;
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
+  }
 }
 
 async function exportCrmProcurementPdf(orderId) {
@@ -3702,45 +3850,6 @@ function buildBasisCabinetScript(item, offsetX, offsetZ) {
   return lines.join("\n");
 }
 
-function exportBasisScript() {
-  if (!state.objects3d.length) {
-    toast("Добавьте объекты в планировщик для экспорта в Базис", false);
-    return;
-  }
-
-  const blocks = state.objects3d.map((item, index) => {
-    const offsetX = Math.round(item.x - getObjectManufacturingSize(item).width / 2);
-    const offsetZ = Math.round(item.z - getObjectManufacturingSize(item).depth / 2) + index * 120;
-    return buildBasisCabinetScript(item, offsetX, offsetZ);
-  });
-
-  const cutComment = state.lastCutResult
-    ? `\n// Раскрой: ${state.lastCutResult.placed_count}/${state.lastCutResult.requested_count} деталей, ${state.lastCutResult.total_sheets} лист(ов)\n`
-    : "\n// Раскрой ещё не рассчитан — запустите расчёт перед экспортом\n";
-
-  const script = [
-    "// WoodCraft Market → БАЗИС-Мебельщик",
-    "// Как открыть: Скрипты → Выбрать этот файл → Запустить",
-    "// Все размеры в миллиметрах",
-    cutComment,
-    "Undo.changing();",
-    "try {",
-    ...blocks,
-    "  alert('Импорт завершён: корпуса построены.');",
-    "} finally {",
-    "  Undo.commit();",
-    "}",
-  ].join("\n");
-
-  const blob = new Blob([script], { type: "text/javascript;charset=utf-8" });
-  const link = document.createElement("a");
-  link.href = URL.createObjectURL(blob);
-  link.download = "woodcraft-basis-import.js";
-  link.click();
-  URL.revokeObjectURL(link.href);
-  toast("Скрипт для Базис сохранён — запустите его через меню «Скрипты»");
-}
-
 function exportBasisB3d() {
   if (!state.objects3d.length) {
     toast("Добавьте объекты в планировщик для экспорта в Базис", false);
@@ -4125,7 +4234,6 @@ async function boot() {
   });
   bindClick("btnSubmitToWork", submitProjectToWork);
   bindClick("btnCutFrom3d", cutFrom3D);
-  bindClick("btnExportBasis", exportBasisScript);
   bindClick("btnExportBasisB3d", exportBasisB3d);
   bindClick("btnExportDbs", exportDbsFile);
   bindClick("btnExportCutPdf", exportCutPdf);

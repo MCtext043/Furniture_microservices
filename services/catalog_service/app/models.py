@@ -130,6 +130,22 @@ class CrmOrderPhoto(Base):
     order: Mapped[CrmProductionOrder] = relationship()
 
 
+class CrmOrderReceipt(Base):
+    """Photo of a purchase receipt uploaded by one admin so another can verify the buy."""
+
+    __tablename__ = "crm_order_receipts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("crm_production_orders.id", ondelete="CASCADE"), index=True)
+    object_key: Mapped[str] = mapped_column(String(255))
+    note: Mapped[str] = mapped_column(String(255), default="")
+    amount_rub: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    uploaded_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    order: Mapped[CrmProductionOrder] = relationship()
+
+
 class CrmOrderMaterial(Base):
     __tablename__ = "crm_order_materials"
 
