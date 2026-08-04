@@ -19,9 +19,9 @@ const state = {
   cuttingParts: [],
   roomConfig: { width: 6000, length: 5000, height: 2800 },
   objects3d: [],
-  drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0 },
-  rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0 },
-  cameraDrag: { active: false, startX: 0, startY: 0 },
+  drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0, scale: 1, wrapEl: null, chipEl: null },
+  rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0, scale: 1, wrapEl: null, chipEl: null },
+  cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0 },
   lastCutResult: null,
   selectedCutJobId: null,
   crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active" },
@@ -1656,13 +1656,19 @@ function updateDynamicWallVisibility() {
 
 function init3DPointerControls(canvas) {
   canvas.style.cursor = "grab";
+  canvas.style.touchAction = "none";
+  canvas.style.userSelect = "none";
   canvas.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "touch" && event.isPrimary === false) return;
     state.cameraDrag.active = true;
     state.cameraDrag.startX = event.clientX;
     state.cameraDrag.startY = event.clientY;
     state.cameraDrag.moved = false;
+    state.cameraDrag.pendingTheta = 0;
+    state.cameraDrag.pendingPhi = 0;
     canvas.style.cursor = "grabbing";
     canvas.setPointerCapture(event.pointerId);
+    event.preventDefault();
   });
   canvas.addEventListener("pointermove", (event) => {
     if (!state.cameraDrag.active || !state.three) return;
@@ -1671,9 +1677,22 @@ function init3DPointerControls(canvas) {
     if (Math.abs(dx) + Math.abs(dy) > 3) state.cameraDrag.moved = true;
     state.cameraDrag.startX = event.clientX;
     state.cameraDrag.startY = event.clientY;
-    state.three.orbit.theta -= dx * 0.01;
-    state.three.orbit.phi = Math.min(Math.max(state.three.orbit.phi + dy * 0.01, 0.22), Math.PI / 2 - 0.04);
-    updateOrbitCamera();
+    const sens = event.pointerType === "touch" ? 0.006 : 0.01;
+    state.cameraDrag.pendingTheta -= dx * sens;
+    state.cameraDrag.pendingPhi += dy * sens;
+    if (!state.cameraDrag.raf) {
+      state.cameraDrag.raf = requestAnimationFrame(() => {
+        if (!state.three) return;
+        const { orbit } = state.three;
+        orbit.theta += state.cameraDrag.pendingTheta;
+        orbit.phi = Math.min(Math.max(orbit.phi + state.cameraDrag.pendingPhi, 0.22), Math.PI / 2 - 0.04);
+        state.cameraDrag.pendingTheta = 0;
+        state.cameraDrag.pendingPhi = 0;
+        state.cameraDrag.raf = 0;
+        updateOrbitCamera();
+      });
+    }
+    event.preventDefault();
   });
   const stopDrag = (event) => {
     if (event?.type === "pointerup" && !state.cameraDrag.moved) {
@@ -1854,6 +1873,27 @@ function renderRoomTopView() {
   });
 }
 
+function getRoomPlanScale(host) {
+  const { width, length } = state.roomConfig;
+  const viewW = host.clientWidth || 400;
+  const viewH = host.clientHeight || 260;
+  return Math.min(viewW / width, viewH / length);
+}
+
+function updateRoomPlanChipDom(item, scale, wrapEl, chipEl) {
+  if (!item || !wrapEl || !chipEl) return;
+  const { planW, planD } = getObjectPlanSize(item);
+  const left = (item.x - planW / 2) * scale;
+  const top = (item.z - planD / 2) * scale;
+  wrapEl.style.left = `${left}px`;
+  wrapEl.style.top = `${top}px`;
+  wrapEl.style.width = `${Math.max(planW * scale, 24)}px`;
+  wrapEl.style.height = `${Math.max(planD * scale, 18)}px`;
+  chipEl.style.width = `${Math.max(item.width * scale, 24)}px`;
+  chipEl.style.height = `${Math.max(item.depth * scale, 18)}px`;
+  chipEl.style.transform = `translate(-50%, -50%) rotate(${normalizeAngle(item.rotationY)}deg)`;
+}
+
 function beginDrag(ev, id) {
   if (APP_MODE === "admin") return;
   if (state.rotate.active) return;
@@ -1869,6 +1909,13 @@ function beginDrag(ev, id) {
   state.drag.startY = ev.clientY;
   state.drag.baseX = item.x;
   state.drag.baseZ = item.z;
+  const host = document.getElementById("roomPlan");
+  const scale = host ? getRoomPlanScale(host) : 1;
+  state.drag.scale = scale || 1;
+  state.drag.chipEl = ev.currentTarget;
+  state.drag.wrapEl = ev.currentTarget.closest(".furniture-chip-wrap");
+  if (state.drag.wrapEl) state.drag.wrapEl.style.willChange = "left, top, width, height";
+  if (state.drag.chipEl) state.drag.chipEl.style.willChange = "transform, width, height";
   ev.currentTarget.setPointerCapture(ev.pointerId);
   ev.preventDefault();
 }
@@ -1897,6 +1944,11 @@ function beginRotate(ev, id) {
   state.rotate.centerY = centerY;
   state.rotate.startAngle = Math.atan2(ev.clientY - centerY, ev.clientX - centerX);
   state.rotate.baseRotation = normalizeAngle(item.rotationY);
+  state.rotate.scale = scale || 1;
+  state.rotate.chipEl = host.querySelector(`[data-drag-id="${CSS.escape(id)}"]`);
+  state.rotate.wrapEl = state.rotate.chipEl?.closest(".furniture-chip-wrap") || null;
+  if (state.rotate.wrapEl) state.rotate.wrapEl.style.willChange = "left, top, width, height";
+  if (state.rotate.chipEl) state.rotate.chipEl.style.willChange = "transform, width, height";
   ev.currentTarget.setPointerCapture(ev.pointerId);
 }
 
@@ -1906,11 +1958,8 @@ function handleDragMove(ev) {
     return;
   }
   if (!state.drag.active) return;
-  const host = document.getElementById("roomPlan");
   const { width, length } = state.roomConfig;
-  const viewW = host.clientWidth || 400;
-  const viewH = host.clientHeight || 260;
-  const scale = Math.min(viewW / width, viewH / length);
+  const scale = state.drag.scale || 1;
 
   const dx = (ev.clientX - state.drag.startX) / scale;
   const dz = (ev.clientY - state.drag.startY) / scale;
@@ -1920,8 +1969,9 @@ function handleDragMove(ev) {
   item.x = state.drag.baseX + dx;
   item.z = state.drag.baseZ + dz;
   clampObjectPosition(item, width, length);
-  renderRoomTopView();
+  updateRoomPlanChipDom(item, scale, state.drag.wrapEl, state.drag.chipEl);
   updateFurnitureTransform(item);
+  ev.preventDefault();
 }
 
 function handleRotateMove(ev) {
@@ -1931,20 +1981,25 @@ function handleRotateMove(ev) {
   const delta = ((angle - state.rotate.startAngle) * 180) / Math.PI;
   item.rotationY = Math.round(normalizeAngle(state.rotate.baseRotation + delta) * 10) / 10;
   clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
-  renderRoomTopView();
+  updateRoomPlanChipDom(item, state.rotate.scale || 1, state.rotate.wrapEl, state.rotate.chipEl);
   updateFurnitureTransform(item);
+  ev.preventDefault();
 }
 
 function endDrag() {
   if (state.rotate.active) {
     state.rotate.active = false;
     state.rotate.id = null;
+    state.rotate.wrapEl = null;
+    state.rotate.chipEl = null;
     renderRoomTopView();
     renderBom();
     return;
   }
   state.drag.active = false;
   state.drag.id = null;
+  state.drag.wrapEl = null;
+  state.drag.chipEl = null;
 }
 
 function applyRoomSize() {
