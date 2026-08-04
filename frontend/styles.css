@@ -213,6 +213,14 @@ button, input, select, textarea { font: inherit; }
 
 /* Existing admin and production views inherit the same tokens without changing behavior. */
 .hero-admin { min-height: 280px; border-radius: 0 0 var(--radius-lg) var(--radius-lg); background: linear-gradient(125deg, #2e2925, #644534); }.hero-card, .service-card, .asset-tile { border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-sm); }.section-title { color: var(--color-brown); font-family: "Prata", Georgia, serif; }.admin-gate { display: grid; min-height: 60vh; place-items: center; }.admin-table td, .admin-table th { vertical-align: middle; }.cut-rect { position: absolute; border: 1px solid rgba(255,255,255,.75); border-radius: .35rem; }.cut-rect-label { position: absolute; max-width: 92%; overflow: hidden; padding: .12rem .3rem; transform: translateY(-92%); border-radius: .35rem; box-shadow: 0 2px 6px rgba(0,0,0,.2); color: #fff; font-size: .62rem; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }.cut-sheet { display: grid; min-height: 240px; place-items: center; border: 2px dashed #c8a984; border-radius: .75rem; background: #fffdf8; }.product-photo-thumb { width: 88px; height: 88px; }.product-photo-thumb img { width: 100%; height: 100%; border: 1px solid #ded5cc; border-radius: 0.5rem; object-fit: cover; }
+.crm-proc-table input.form-control { min-height: 38px; padding: 0.35rem 0.5rem; font-size: 0.78rem; }
+.crm-proc-table td { background: transparent; }
+.crm-proc-table th, .crm-proc-table td { white-space: nowrap; }
+
+@media (max-width: 767.98px) {
+  .admin-table th, .admin-table td { padding: 0.55rem 0.6rem; }
+  .crm-proc-table th:first-child, .crm-proc-table td:first-child { white-space: normal; min-width: 180px; }
+}
 
 @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0 0; } }
 @keyframes rise { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }

@@ -134,11 +134,13 @@ class DeliveryQuoteOut(BaseModel):
 class CrmMaterialCreate(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     unit: str = Field(default="шт", max_length=20)
+    purchase_price_rub: float = Field(default=0, ge=0)
 
 
 class CrmMaterialUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=120)
     unit: str | None = Field(default=None, max_length=20)
+    purchase_price_rub: float | None = Field(default=None, ge=0)
 
 
 class CrmMaterialOut(CrmMaterialCreate):
@@ -229,7 +231,21 @@ class CrmProcurementLine(BaseModel):
     unit: str
     required_qty: float
     in_stock_qty: float
+    to_buy_qty_base: float
     to_buy_qty: float
+    unit_price_rub: float
+    line_total_rub: float
+    purchased_qty: float
+    purchased_total_rub: float
+    is_purchased: bool
+
+
+class CrmProcurementLineUpdateIn(BaseModel):
+    material_id: int
+    to_buy_qty: float | None = Field(default=None, ge=0)
+    unit_price_rub: float | None = Field(default=None, ge=0)
+    purchased_qty: float | None = Field(default=None, ge=0)
+    is_purchased: bool | None = None
 
 
 class CrmOrderProcurementOut(BaseModel):
@@ -238,3 +254,6 @@ class CrmOrderProcurementOut(BaseModel):
     customer: str
     status: str
     lines: list[CrmProcurementLine]
+    procurement_sum_rub: float
+    purchased_sum_rub: float
+    progress_percent: float

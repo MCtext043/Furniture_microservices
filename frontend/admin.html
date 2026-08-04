@@ -192,9 +192,20 @@
                 <button class="btn btn-sm btn-outline-primary" id="btnGenerateBom">Детали</button>
                 <button class="btn btn-sm btn-warning" id="btnCutFrom3d">Раскрой из 3D</button>
                 <button class="btn btn-sm btn-outline-dark" id="btnExportBasis">Базис</button>
+                <button class="btn btn-sm btn-outline-dark" id="btnExportBasisB3d">B3D</button>
                 <button class="btn btn-sm btn-outline-dark" id="btnExport3d">GLTF</button>
                 <button class="btn btn-sm btn-outline-dark" id="btnExportDbs">DBS</button>
                 <button class="btn btn-sm btn-outline-dark" id="btnExportAssemblyPdf">PDF</button>
+              </div>
+              <div class="alert alert-light border mt-3 small mb-0">
+                <div class="fw-semibold mb-1">Инструкция: экспорт в .b3d</div>
+                <ol class="mb-2 ps-3">
+                  <li>В админке нажмите <strong>B3D</strong> — сохранится файл <code>woodcraft-basis-export-b3d.js</code>.</li>
+                  <li>Откройте <strong>БАЗИС‑Мебельщик</strong>.</li>
+                  <li>Меню <strong>Скрипты</strong> → выбрать скачанный файл → <strong>Запустить</strong>.</li>
+                  <li>Скрипт построит модель и сохранит <code>woodcraft-export.b3d</code>.</li>
+                </ol>
+                <div class="text-muted">Если нужно другое имя/путь — откройте <code>woodcraft-basis-export-b3d.js</code> и измените переменную <code>OUT_FILE</code>.</div>
               </div>
               <div class="alert alert-light border mt-2 small mb-0" id="plannerCutResult">Раскрой из 3D ещё не запускался.</div>
             </div>

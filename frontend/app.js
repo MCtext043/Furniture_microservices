@@ -2073,14 +2073,7 @@ function renderBom() {
 
 const LDSP_PRICE_M2 = 3200;
 const EDGE_PRICE_M = 180;
-const LABOR_RATE = 0.38;
-const OBJECT_BASE_PRICES = { wardrobe: 45000, cabinet: 18000, shelf: 12000, table: 22000, sofa: 35000 };
-
-function estimateObjectRetailCost(item) {
-  const base = OBJECT_BASE_PRICES[item.type] || 15000;
-  const volumeFactor = (item.width * item.depth * item.height) / (1200 * 600 * 2100);
-  return Math.round(base * Math.max(volumeFactor, 0.6));
-}
+const RETAIL_MULTIPLIER = 2.2;
 
 function estimateProjectCost(bom) {
   let materialCost = 0;
@@ -2090,23 +2083,14 @@ function estimateProjectCost(bom) {
     materialCost += areaM2 * LDSP_PRICE_M2;
     edgeCost += ((part.width + part.height) * 2 * part.quantity) / 1000 * EDGE_PRICE_M;
   }
-  const laborCost = Math.round((materialCost + edgeCost) * LABOR_RATE);
-  const furnitureCost = state.objects3d.reduce((sum, item) => sum + estimateObjectRetailCost(item), 0);
-  const subtotal = Math.round(materialCost + edgeCost + laborCost + furnitureCost);
-  return { materialCost: Math.round(materialCost), edgeCost: Math.round(edgeCost), laborCost, furnitureCost, total: subtotal };
+  const procurementCost = Math.round(materialCost + edgeCost);
+  const total = Math.round(procurementCost * RETAIL_MULTIPLIER);
+  return { materialCost: Math.round(materialCost), edgeCost: Math.round(edgeCost), procurementCost, total };
 }
 
 function estimateTierPrices(cost) {
-  const hardwareCost = cost.edgeCost;
   const result = {};
-  for (const tier of PRICING_TIERS) {
-    result[tier.key] = Math.round(
-      cost.materialCost * tier.material
-        + hardwareCost * tier.hardware
-        + cost.laborCost * tier.labor
-        + cost.furnitureCost
-    );
-  }
+  for (const tier of PRICING_TIERS) result[tier.key] = Math.round(cost.procurementCost * RETAIL_MULTIPLIER);
   return result;
 }
 
@@ -2187,12 +2171,12 @@ function renderCostEstimate(bom = null) {
       <div class="estimate-card">
         <div class="estimate-kicker">Ориентировочная стоимость</div>
         <div class="estimate-total">от ${money(selectedTotal)}</div>
-        <p class="estimate-note">Окончательная цена зависит от выбранных материалов, размеров и комплектации. Менеджер уточнит её после проверки проекта.</p>
+        <p class="estimate-note">Итоговая цена считается по формуле: закупочная сумма × 2.2. Закупочная сумма — это себестоимость материалов проекта.</p>
         <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
       </div>
       <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
       ${renderTierCards(tiers)}
-      <div class="small text-muted mt-3">Показана реальная расчётная сумма проекта. Точный раскрой и закупка выполняются производством после отправки.</div>`;
+      <div class="small text-muted mt-3">Закупочная сумма: <strong>${money(cost.procurementCost)}</strong>. Итог: <strong>${money(selectedTotal)}</strong>.</div>`;
     bindTierCardSelection(host);
     host.querySelector("[data-exact-quote]")?.addEventListener("click", () => {
       if (!isAuthenticated()) bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
@@ -2204,8 +2188,8 @@ function renderCostEstimate(bom = null) {
     <div class="row g-3">
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Материалы (ЛДСП)</div><div class="fw-semibold">${money(cost.materialCost)}</div></div></div>
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Кромка</div><div class="fw-semibold">${money(cost.edgeCost)}</div></div></div>
-      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Работа</div><div class="fw-semibold">${money(cost.laborCost)}</div></div></div>
-      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Мебель в проекте</div><div class="fw-semibold">${money(cost.furnitureCost)}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Закупочная сумма</div><div class="fw-semibold">${money(cost.procurementCost)}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Итог (×2.2)</div><div class="fw-semibold">${money(tiers.standard)}</div></div></div>
     </div>
     <div class="mt-3">${renderTierCards(tiers)}</div>
     <div class="mt-3 p-3 border rounded bg-white">
@@ -2461,23 +2445,25 @@ function renderAdminCatalogTable() {
   const host = document.getElementById("adminCatalogTable");
   if (!host) return;
   host.innerHTML = `
-    <table class="table table-sm admin-table">
-      <thead><tr><th>ID</th><th>Название</th><th>SKU</th><th>Цена</th><th>Склад</th><th></th></tr></thead>
-      <tbody>
-        ${filteredProducts().map((p) => `
-          <tr>
-            <td>${p.id}</td>
-            <td>${escapeHtml(displayProductTitle(p))}</td>
-            <td class="small text-muted">${escapeHtml(p.sku)}</td>
-            <td>${money(Number(p.price))}</td>
-            <td>${p.stock}</td>
-            <td class="text-end">
-              <button class="btn btn-sm btn-outline-primary" data-edit="${p.id}">Изменить</button>
-              <button class="btn btn-sm btn-outline-danger" data-del="${p.id}">Скрыть</button>
-            </td>
-          </tr>`).join("")}
-      </tbody>
-    </table>`;
+    <div class="table-responsive">
+      <table class="table table-sm admin-table mb-0">
+        <thead><tr><th>ID</th><th>Название</th><th>SKU</th><th>Цена</th><th>Склад</th><th></th></tr></thead>
+        <tbody>
+          ${filteredProducts().map((p) => `
+            <tr>
+              <td>${p.id}</td>
+              <td>${escapeHtml(displayProductTitle(p))}</td>
+              <td class="small text-muted">${escapeHtml(p.sku)}</td>
+              <td>${money(Number(p.price))}</td>
+              <td>${p.stock}</td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-primary" data-edit="${p.id}">Изменить</button>
+                <button class="btn btn-sm btn-outline-danger" data-del="${p.id}">Скрыть</button>
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
   host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openProductEditor(Number(btn.dataset.edit))));
   host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", () => deactivateProduct(Number(btn.dataset.del))));
 }
@@ -2492,6 +2478,7 @@ async function renderCuttingJobs() {
       return;
     }
     host.innerHTML = `
+      <div class="table-responsive">
       <table class="table table-sm admin-table mb-0">
         <thead><tr><th>#</th><th>Дата</th><th>Лист</th><th>Деталей</th><th>Загрузка</th><th></th></tr></thead>
         <tbody>${jobs
@@ -2511,7 +2498,8 @@ async function renderCuttingJobs() {
             </tr>`;
           })
           .join("")}</tbody>
-      </table>`;
+      </table>
+      </div>`;
     host.querySelectorAll("[data-view-cut]").forEach((button) => {
       button.addEventListener("click", () => viewCuttingJob(Number(button.dataset.viewCut)));
     });
@@ -2635,27 +2623,200 @@ async function renderCrmOrderProcurement(orderId) {
   try {
     const data = await api("GET", `/catalog/crm/orders/${orderId}/procurement`, undefined, true);
     state.crm.procurementByOrder[orderId] = data;
-    host.innerHTML = `
-      <table class="table table-sm table-bordered mb-0 mt-2">
-        <thead class="table-light">
-          <tr><th>Материал</th><th>Нужно</th><th>На складе</th><th class="text-danger">Купить</th></tr>
-        </thead>
-        <tbody>${data.lines
-          .map(
-            (line) => `<tr>
-              <td>${escapeHtml(line.material_name)}</td>
-              <td>${line.required_qty} ${escapeHtml(line.unit)}</td>
-              <td>${line.in_stock_qty} ${escapeHtml(line.unit)}</td>
-              <td class="${line.to_buy_qty > 0 ? "text-danger fw-semibold" : "text-success"}">${line.to_buy_qty > 0 ? line.to_buy_qty : "—"} ${line.to_buy_qty > 0 ? escapeHtml(line.unit) : ""}</td>
-            </tr>`
-          )
-          .join("")}</tbody>
-      </table>
-      <button type="button" class="btn btn-sm btn-outline-dark mt-2" data-crm-pdf="${orderId}">PDF закупки</button>`;
-    host.querySelector(`[data-crm-pdf="${orderId}"]`)?.addEventListener("click", () => exportCrmProcurementPdf(orderId));
+    host.innerHTML = renderCrmProcurementTable(orderId, data);
+    bindCrmProcurementTable(host, orderId);
   } catch (error) {
     host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
   }
+}
+
+function numOrZero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function renderCrmProcurementTable(orderId, data) {
+  const hasPrices = (data.lines || []).some((l) => numOrZero(l.unit_price_rub) > 0);
+  const progressText = `${money(numOrZero(data.purchased_sum_rub))} / ${money(numOrZero(data.procurement_sum_rub))} · ${Math.round(
+    numOrZero(data.progress_percent)
+  )}%`;
+
+  return `
+    <div data-crm-proc-wrapper="${orderId}">
+      <div class="table-responsive mt-2">
+        <table class="table table-sm table-bordered mb-0 align-middle crm-proc-table" data-crm-proc-table="${orderId}">
+          <thead class="table-light">
+            <tr>
+              <th style="min-width:220px">Материал</th>
+              <th style="min-width:130px">Нужно</th>
+              <th style="min-width:120px">Склад</th>
+              <th style="min-width:130px" class="text-danger">Купить</th>
+              <th style="min-width:120px">Цена, ₽</th>
+              <th style="min-width:120px">Итого, ₽</th>
+              <th style="min-width:170px">Закуплено</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(data.lines || [])
+              .map((line) => {
+                const toBuy = numOrZero(line.to_buy_qty);
+                const unitPrice = numOrZero(line.unit_price_rub);
+                const lineTotal = numOrZero(line.line_total_rub) || toBuy * unitPrice;
+                const purchasedQty = numOrZero(line.purchased_qty);
+                const isPurchased = !!line.is_purchased;
+                const baseToBuy = Number.isFinite(Number(line.to_buy_qty_base)) ? numOrZero(line.to_buy_qty_base) : toBuy;
+                const baseHint = baseToBuy !== toBuy ? ` (по складу: ${baseToBuy})` : "";
+                return `<tr data-crm-proc-row="${line.material_id}">
+                  <td>
+                    <div class="fw-semibold">${escapeHtml(line.material_name)}</div>
+                    <div class="small text-muted">ед.: ${escapeHtml(line.unit)}${baseHint}</div>
+                  </td>
+                  <td>${line.required_qty} ${escapeHtml(line.unit)}</td>
+                  <td>${line.in_stock_qty} ${escapeHtml(line.unit)}</td>
+                  <td>
+                    <input class="form-control form-control-sm" type="number" min="0" step="0.01"
+                      value="${toBuy}" data-crm-proc-to-buy />
+                  </td>
+                  <td>
+                    <input class="form-control form-control-sm" type="number" min="0" step="1"
+                      value="${unitPrice}" data-crm-proc-unit-price />
+                  </td>
+                  <td class="fw-semibold"><span data-crm-proc-line-total>${money(lineTotal)}</span></td>
+                  <td>
+                    <div class="d-flex align-items-center gap-2">
+                      <input class="form-check-input mt-0" type="checkbox" ${isPurchased ? "checked" : ""} data-crm-proc-done />
+                      <input class="form-control form-control-sm" style="max-width:110px" type="number" min="0" step="0.01"
+                        value="${purchasedQty}" ${isPurchased ? "disabled" : ""} data-crm-proc-purchased-qty />
+                      <span class="small text-muted">${escapeHtml(line.unit)}</span>
+                    </div>
+                    <div class="small text-muted mt-1"><span data-crm-proc-purchased-total>${money(
+                      numOrZero(line.purchased_total_rub)
+                    )}</span></div>
+                  </td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+          <tfoot class="table-light">
+            <tr>
+              <th colspan="5" class="text-end">Закупочная сумма</th>
+              <th colspan="2"><span class="fw-bold" data-crm-proc-sum>${money(numOrZero(data.procurement_sum_rub))}</span></th>
+            </tr>
+            <tr>
+              <th colspan="5" class="text-end">Уже закупили</th>
+              <th colspan="2"><span class="fw-semibold" data-crm-proc-progress>${progressText}</span></th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="d-flex flex-wrap gap-2 mt-2 align-items-center">
+        <button type="button" class="btn btn-sm btn-outline-primary" data-crm-proc-save="${orderId}">Сохранить закупку</button>
+        <button type="button" class="btn btn-sm btn-outline-dark" data-crm-pdf="${orderId}">PDF закупки</button>
+        <span class="small text-muted ms-auto">Прогресс: <strong data-crm-proc-progress-inline>${progressText}</strong></span>
+      </div>
+      ${
+        hasPrices
+          ? ""
+          : `<div class="small text-muted mt-2">Укажите цены закупки — тогда появится «Закупочная сумма» и прогресс закупки.</div>`
+      }
+    </div>
+  `;
+}
+
+function collectCrmProcurementEdits(table) {
+  return Array.from(table.querySelectorAll("[data-crm-proc-row]")).map((row) => {
+    const materialId = Number(row.dataset.crmProcRow);
+    const toBuyQty = numOrZero(row.querySelector("[data-crm-proc-to-buy]")?.value);
+    const unitPrice = numOrZero(row.querySelector("[data-crm-proc-unit-price]")?.value);
+    const purchasedQty = numOrZero(row.querySelector("[data-crm-proc-purchased-qty]")?.value);
+    const isPurchased = !!row.querySelector("[data-crm-proc-done]")?.checked;
+    return {
+      material_id: materialId,
+      to_buy_qty: toBuyQty,
+      unit_price_rub: unitPrice,
+      purchased_qty: purchasedQty,
+      is_purchased: isPurchased,
+    };
+  });
+}
+
+function recalcCrmProcurementTable(wrapper) {
+  const table = wrapper.querySelector("[data-crm-proc-table]");
+  if (!table) return;
+
+  let sum = 0;
+  let purchasedSum = 0;
+
+  table.querySelectorAll("[data-crm-proc-row]").forEach((row) => {
+    const toBuyQty = numOrZero(row.querySelector("[data-crm-proc-to-buy]")?.value);
+    const unitPrice = numOrZero(row.querySelector("[data-crm-proc-unit-price]")?.value);
+    const purchasedQtyRaw = numOrZero(row.querySelector("[data-crm-proc-purchased-qty]")?.value);
+    const done = !!row.querySelector("[data-crm-proc-done]")?.checked;
+    const purchasedQty = done ? toBuyQty : Math.min(Math.max(0, purchasedQtyRaw), toBuyQty);
+
+    const lineTotal = toBuyQty * unitPrice;
+    const purchasedTotal = purchasedQty * unitPrice;
+    sum += lineTotal;
+    purchasedSum += purchasedTotal;
+
+    row.querySelector("[data-crm-proc-line-total]").textContent = money(lineTotal);
+    row.querySelector("[data-crm-proc-purchased-total]").textContent = money(purchasedTotal);
+  });
+
+  const percent = sum > 0 ? Math.round((purchasedSum / sum) * 100) : 0;
+  const progressText = `${money(purchasedSum)} / ${money(sum)} · ${percent}%`;
+
+  wrapper.querySelector("[data-crm-proc-sum]").textContent = money(sum);
+  wrapper.querySelector("[data-crm-proc-progress]").textContent = progressText;
+  wrapper.querySelector("[data-crm-proc-progress-inline]").textContent = progressText;
+}
+
+function bindCrmProcurementTable(host, orderId) {
+  const wrapper = host.querySelector(`[data-crm-proc-wrapper="${orderId}"]`);
+  const table = host.querySelector(`[data-crm-proc-table="${orderId}"]`);
+  if (!wrapper || !table) return;
+
+  const recalc = () => recalcCrmProcurementTable(wrapper);
+
+  table.querySelectorAll("[data-crm-proc-to-buy],[data-crm-proc-unit-price],[data-crm-proc-purchased-qty]").forEach((input) => {
+    input.addEventListener("input", recalc);
+    input.addEventListener("change", recalc);
+  });
+
+  table.querySelectorAll("[data-crm-proc-done]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const row = checkbox.closest("[data-crm-proc-row]");
+      if (!row) return;
+      const purchasedInput = row.querySelector("[data-crm-proc-purchased-qty]");
+      const toBuyInput = row.querySelector("[data-crm-proc-to-buy]");
+      if (purchasedInput && toBuyInput) {
+        if (checkbox.checked) {
+          purchasedInput.value = String(numOrZero(toBuyInput.value));
+          purchasedInput.disabled = true;
+        } else {
+          purchasedInput.disabled = false;
+        }
+      }
+      recalc();
+    });
+  });
+
+  wrapper.querySelector(`[data-crm-proc-save="${orderId}"]`)?.addEventListener("click", async () => {
+    try {
+      const payload = collectCrmProcurementEdits(table);
+      const updated = await api("PUT", `/catalog/crm/orders/${orderId}/procurement`, payload, true);
+      state.crm.procurementByOrder[orderId] = updated;
+      host.innerHTML = renderCrmProcurementTable(orderId, updated);
+      bindCrmProcurementTable(host, orderId);
+      toast("Закупка сохранена");
+    } catch (error) {
+      toast(`Не удалось сохранить закупку: ${formatApiError(error)}`, false);
+    }
+  });
+
+  wrapper.querySelector(`[data-crm-pdf="${orderId}"]`)?.addEventListener("click", () => exportCrmProcurementPdf(orderId));
+
+  recalc();
 }
 
 function crmStatusBadge(status) {
@@ -2815,22 +2976,32 @@ async function exportCrmProcurementPdf(orderId) {
       content: [
         { text: "Закупка материалов", style: "title" },
         { text: order ? `${order.title} · ${order.customer}` : `Заказ #${orderId}`, style: "meta" },
-        { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta", margin: [0, 0, 0, 12] },
+        { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta" },
+        { text: `Закупочная сумма: ${money(Number(cached.procurement_sum_rub || 0))}`, style: "meta" },
+        {
+          text: `Закуплено: ${money(Number(cached.purchased_sum_rub || 0))} (${Math.round(Number(cached.progress_percent || 0))}%)`,
+          style: "meta",
+          margin: [0, 0, 0, 12],
+        },
         {
           table: {
-            widths: ["*", 70, 70, 70],
+            widths: ["*", 60, 55, 55, 55, 60],
             body: [
               [
                 { text: "Материал", style: "thead" },
                 { text: "Нужно", style: "thead" },
                 { text: "Склад", style: "thead" },
                 { text: "Купить", style: "thead" },
+                { text: "Цена", style: "thead" },
+                { text: "Итого", style: "thead" },
               ],
               ...cached.lines.map((line) => [
                 line.material_name,
                 `${line.required_qty} ${line.unit}`,
                 `${line.in_stock_qty}`,
                 line.to_buy_qty > 0 ? `${line.to_buy_qty} ${line.unit}` : "—",
+                money(Number(line.unit_price_rub || 0)),
+                money(Number(line.line_total_rub || 0)),
               ]),
             ],
           },
@@ -3484,6 +3655,53 @@ function exportBasisScript() {
   toast("Скрипт для Базис сохранён — запустите его через меню «Скрипты»");
 }
 
+function exportBasisB3d() {
+  if (!state.objects3d.length) {
+    toast("Добавьте объекты в планировщик для экспорта в Базис", false);
+    return;
+  }
+  const blocks = state.objects3d.map((item, index) => {
+    const offsetX = Math.round(item.x - getObjectManufacturingSize(item).width / 2);
+    const offsetZ = Math.round(item.z - getObjectManufacturingSize(item).depth / 2) + index * 120;
+    return buildBasisCabinetScript(item, offsetX, offsetZ);
+  });
+  const cutComment = state.lastCutResult
+    ? `\n// Раскрой: ${state.lastCutResult.placed_count}/${state.lastCutResult.requested_count} деталей, ${state.lastCutResult.total_sheets} лист(ов)\n`
+    : "\n// Раскрой ещё не рассчитан — запустите расчёт перед экспортом\n";
+
+  const script = [
+    "// WoodCraft Market → БАЗИС-Мебельщик: экспорт в .b3d",
+    "// Как использовать:",
+    "// 1) Откройте БАЗИС-Мебельщик",
+    "// 2) Скрипты → Выбрать этот файл → Запустить",
+    "// 3) После выполнения рядом появится файл .b3d (путь можно поменять в OUT_FILE ниже)",
+    "// Все размеры в миллиметрах",
+    cutComment,
+    "var OUT_FILE = 'woodcraft-export.b3d';",
+    "Undo.changing();",
+    "try {",
+    ...blocks,
+    "  if (typeof historyOperations !== 'undefined' && historyOperations.CommitCurrentChanges) {",
+    "    historyOperations.CommitCurrentChanges('WoodCraft export');",
+    "  }",
+    "  if (typeof modelIOOperations !== 'undefined' && modelIOOperations.SaveModelToFile) {",
+    "    modelIOOperations.SaveModelToFile(OUT_FILE);",
+    "  }",
+    "  alert('Экспорт завершён. Файл: ' + OUT_FILE);",
+    "} finally {",
+    "  Undo.commit();",
+    "}",
+  ].join("\n");
+
+  const blob = new Blob([script], { type: "text/javascript;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "woodcraft-basis-export-b3d.js";
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast("Скрипт сохранён — запустите в Базис, он сохранит .b3d");
+}
+
 function buildDbsDocument() {
   const bom = buildBomFromObjects();
   const cost = estimateProjectCost(bom);
@@ -3822,6 +4040,7 @@ async function boot() {
   bindClick("btnSubmitToWork", submitProjectToWork);
   bindClick("btnCutFrom3d", cutFrom3D);
   bindClick("btnExportBasis", exportBasisScript);
+  bindClick("btnExportBasisB3d", exportBasisB3d);
   bindClick("btnExportDbs", exportDbsFile);
   bindClick("btnExportCutPdf", exportCutPdf);
   bindClick("btnExportAssemblyPdf", exportAssemblyPdf);

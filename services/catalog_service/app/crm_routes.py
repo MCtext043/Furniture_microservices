@@ -15,7 +15,14 @@ from sqlalchemy.orm import Session, joinedload
 from common.jwt_auth import ensure_catalog_writer
 
 from .db import get_session
-from .models import CrmMaterial, CrmOrderMaterial, CrmOrderPhoto, CrmProductionOrder, CrmWarehouseStock
+from .models import (
+    CrmMaterial,
+    CrmOrderMaterial,
+    CrmOrderPhoto,
+    CrmOrderProcurement,
+    CrmProductionOrder,
+    CrmWarehouseStock,
+)
 from .schemas import (
     CrmMaterialCreate,
     CrmMaterialOut,
@@ -28,6 +35,7 @@ from .schemas import (
     CrmOrderProcurementOut,
     CrmOrderStatusUpdate,
     CrmProcurementLine,
+    CrmProcurementLineUpdateIn,
     CrmSubmitProjectIn,
     CrmWarehouseStockOut,
     CrmWarehouseStockUpdate,
@@ -153,6 +161,8 @@ def update_material(
         material.name = payload.name
     if payload.unit is not None:
         material.unit = payload.unit
+    if payload.purchase_price_rub is not None:
+        material.purchase_price_rub = payload.purchase_price_rub
     session.commit()
     session.refresh(material)
     return material
@@ -349,13 +359,36 @@ def order_procurement(order_id: int, session: Session = Depends(get_session)) ->
     order = session.get(CrmProductionOrder, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    overrides = list(
+        session.scalars(select(CrmOrderProcurement).where(CrmOrderProcurement.order_id == order_id))
+    )
+    overrides_by_material = {row.material_id: row for row in overrides}
     stock = _stock_map(session)
     lines = _order_material_lines(session, order_id)
     procurement: list[CrmProcurementLine] = []
+    procurement_sum = 0.0
+    purchased_sum = 0.0
     for line in lines:
         required = float(line.required_qty)
         in_stock = stock.get(line.material_id, 0.0)
-        _, _, to_buy = _procurement_lines(required, in_stock)
+        _, _, to_buy_base = _procurement_lines(required, in_stock)
+        override = overrides_by_material.get(line.material_id)
+        to_buy = float(override.to_buy_qty) if (override and override.to_buy_qty is not None) else float(to_buy_base)
+        unit_price = 0.0
+        if override and override.unit_price_rub is not None:
+            unit_price = float(override.unit_price_rub)
+        else:
+            unit_price = float(getattr(line.material, "purchase_price_rub", 0) or 0)
+        purchased_qty = float(override.purchased_qty) if override else 0.0
+        is_purchased = bool(override.is_purchased) if override else False
+        if is_purchased:
+            purchased_qty_effective = to_buy
+        else:
+            purchased_qty_effective = min(max(0.0, purchased_qty), to_buy)
+        line_total = to_buy * unit_price
+        purchased_total = purchased_qty_effective * unit_price
+        procurement_sum += line_total
+        purchased_sum += purchased_total
         procurement.append(
             CrmProcurementLine(
                 material_id=line.material_id,
@@ -363,16 +396,67 @@ def order_procurement(order_id: int, session: Session = Depends(get_session)) ->
                 unit=line.material.unit,
                 required_qty=required,
                 in_stock_qty=in_stock,
+                to_buy_qty_base=float(to_buy_base),
                 to_buy_qty=to_buy,
+                unit_price_rub=unit_price,
+                line_total_rub=line_total,
+                purchased_qty=purchased_qty_effective,
+                purchased_total_rub=purchased_total,
+                is_purchased=is_purchased,
             )
         )
+    progress = (purchased_sum / procurement_sum * 100.0) if procurement_sum > 0 else 0.0
     return CrmOrderProcurementOut(
         order_id=order.id,
         title=order.title,
         customer=order.customer,
         status=order.status,
         lines=procurement,
+        procurement_sum_rub=procurement_sum,
+        purchased_sum_rub=purchased_sum,
+        progress_percent=progress,
     )
+
+
+@router.put(
+    "/orders/{order_id}/procurement",
+    response_model=CrmOrderProcurementOut,
+    dependencies=[Depends(ensure_catalog_writer)],
+)
+@crm_db_guard
+def update_order_procurement(
+    order_id: int,
+    payload: list[CrmProcurementLineUpdateIn],
+    session: Session = Depends(get_session),
+) -> CrmOrderProcurementOut:
+    order = session.get(CrmProductionOrder, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    existing = list(
+        session.scalars(select(CrmOrderProcurement).where(CrmOrderProcurement.order_id == order_id))
+    )
+    by_material = {row.material_id: row for row in existing}
+
+    for line in payload:
+        row = by_material.get(line.material_id)
+        if not row:
+            row = CrmOrderProcurement(order_id=order_id, material_id=line.material_id)
+            session.add(row)
+            by_material[line.material_id] = row
+
+        if line.to_buy_qty is not None:
+            row.to_buy_qty = line.to_buy_qty
+        if line.unit_price_rub is not None:
+            row.unit_price_rub = line.unit_price_rub
+        if line.purchased_qty is not None:
+            row.purchased_qty = line.purchased_qty
+        if line.is_purchased is not None:
+            row.is_purchased = line.is_purchased
+
+    session.commit()
+    # Return the updated computed view using the same logic as GET.
+    return order_procurement(order_id=order_id, session=session)
 
 
 @router.post("/seed-demo", dependencies=[Depends(ensure_catalog_writer)])
@@ -386,11 +470,18 @@ def seed_crm_demo(session: Session = Depends(get_session)) -> dict[str, int]:
         ("Кромка ПВХ 2мм", "м"),
         ("Направляющая ящика 450", "шт"),
     ]
+    demo_prices = {
+        "Лист ДСП 16мм": 300,
+        "Саморез 4×16": 0.35,
+        "Петля Blum 110°": 120,
+        "Кромка ПВХ 2мм": 18,
+        "Направляющая ящика 450": 260,
+    }
     by_name: dict[str, CrmMaterial] = {}
     for name, unit in demo_materials:
         row = session.scalar(select(CrmMaterial).where(CrmMaterial.name == name))
         if not row:
-            row = CrmMaterial(name=name, unit=unit)
+            row = CrmMaterial(name=name, unit=unit, purchase_price_rub=demo_prices.get(name, 0))
             session.add(row)
             session.flush()
         by_name[name] = row
