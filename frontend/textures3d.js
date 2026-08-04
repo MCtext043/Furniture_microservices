@@ -604,6 +604,22 @@
     return mesh;
   }
 
+  // Some decorative panels (edge banding, countertop caps) are intentionally placed almost
+  // exactly flush with another panel's face. Coplanar/overlapping triangles make the GPU
+  // depth test unstable, which shows up as flickering "noise" that changes with the camera
+  // angle (classic z-fighting). polygonOffset nudges such a mesh slightly toward the camera
+  // in a *deterministic* way so it always wins the depth test instead of flickering.
+  function biasTowardCamera(mesh, factor = -1, units = -4) {
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    materials.forEach((mat) => {
+      if (!mat) return;
+      mat.polygonOffset = true;
+      mat.polygonOffsetFactor = factor;
+      mat.polygonOffsetUnits = units;
+    });
+    return mesh;
+  }
+
   function finishFurnitureGroup(group, w, h, d) {
     group.traverse((child) => {
       if (!child.isMesh) return;
@@ -832,15 +848,17 @@
     }
 
     if (edgeTh > 0.8) {
-      const edgeTop = panelMesh(innerW, edgeTh, 6, materialSet.edge, { radiusMm: 0.6 });
+      const edgeTop = panelMesh(innerW, edgeTh, 6, materialSet.edge.clone(), { radiusMm: 0.6 });
       edgeTop.position.set(0, h - edgeTh / 2, d / 2 + 2);
+      biasTowardCamera(edgeTop);
       group.add(edgeTop);
     }
 
     if (item.type === "cabinet") {
       const capThickness = clamp(panelTh * 1.45, 24, 34);
-      const cap = panelMesh(w + 18, capThickness, d + 14, materialSet.countertop, { radiusMm: 2 });
+      const cap = panelMesh(w + 18, capThickness, d + 14, materialSet.countertop.clone(), { radiusMm: 2 });
       cap.position.set(0, h - capThickness / 2 + 3, 0);
+      biasTowardCamera(cap);
       group.add(cap);
     }
 

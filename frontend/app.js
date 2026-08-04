@@ -1446,16 +1446,26 @@ function canUseWebGL() {
 }
 
 function createRoom3DRenderer(width, height) {
+  // logarithmicDepthBuffer greatly improves depth-buffer precision for scenes with a large
+  // near/far ratio (our camera spans 1mm..50000mm). Without it, panels that sit only a few mm
+  // apart (e.g. edge banding flush on a shelf top) can lose the depth test unpredictably as the
+  // camera rotates, which looks like flickering/"shimmering" noise on those surfaces.
   const attempts = [
-    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default" },
-    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default" },
+    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "high-performance", logarithmicDepthBuffer: true },
+    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default", logarithmicDepthBuffer: true },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "high-performance", logarithmicDepthBuffer: true },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default", logarithmicDepthBuffer: true },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "low-power", logarithmicDepthBuffer: true },
+    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "high-performance" },
     { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "low-power" },
   ];
   let lastError = null;
   for (const options of attempts) {
     try {
       const renderer = new THREE.WebGLRenderer(options);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, options.antialias ? 2 : 1));
+      // On mobile some GPUs fall back to antialias:false; keep DPR high anyway to avoid "pixelated" look.
+      const dpr = Math.min(Number(window.devicePixelRatio) || 1, 2);
+      renderer.setPixelRatio(dpr);
       renderer.setSize(width, height, false);
       return renderer;
     } catch (error) {
@@ -1489,7 +1499,10 @@ function initRoom3D() {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xf3efe8);
 
-  const camera = new THREE.PerspectiveCamera(45, width / height, 1, 50000);
+  // near=20mm keeps close-up zoom usable while avoiding an extreme near/far ratio; far=30000mm
+  // comfortably covers even oversized rooms. Combined with logarithmicDepthBuffer above, this
+  // fixes depth-buffer precision loss that caused nearby coplanar panels to z-fight/flicker.
+  const camera = new THREE.PerspectiveCamera(45, width / height, 20, 30000);
   camera.position.set(7000, 5500, 7500);
   camera.lookAt(0, 1000, 0);
 
@@ -1506,6 +1519,9 @@ function initRoom3D() {
   }
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Shadows are expensive on mobile; update only when scene changes to keep rotation smooth.
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   host.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
   host.appendChild(renderer.domElement);
 
@@ -1560,7 +1576,15 @@ function initRoom3D() {
   };
   state.three = { scene, camera, renderer, roomGroup, furnitureGroup, dimensionManager, host, orbit };
   if (window.ResizeObserver) {
-    const resizeObserver = new ResizeObserver(() => refreshRoom3DLayout());
+    const resizeObserver = new ResizeObserver(() => {
+      if (!state.three) return;
+      // Mobile browsers may change viewport height while dragging (address bar). Avoid "jerky" resizes mid-rotation.
+      if (state.cameraDrag?.active) {
+        state.three.pendingLayoutRefresh = true;
+        return;
+      }
+      refreshRoom3DLayout();
+    });
     resizeObserver.observe(host);
     state.three.resizeObserver = resizeObserver;
   }
@@ -1593,6 +1617,7 @@ function refreshRoom3DLayout() {
   const width = host.clientWidth || 640;
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(Number(window.devicePixelRatio) || 1, 2));
   renderer.setSize(width, height, false);
   updateOrbitCamera();
 }
@@ -1700,6 +1725,10 @@ function init3DPointerControls(canvas) {
     }
     state.cameraDrag.active = false;
     canvas.style.cursor = "grab";
+    if (state.three?.pendingLayoutRefresh) {
+      state.three.pendingLayoutRefresh = false;
+      refreshRoom3DLayout();
+    }
   };
   canvas.addEventListener("pointerup", stopDrag);
   canvas.addEventListener("pointerleave", stopDrag);
@@ -1821,6 +1850,7 @@ function updateFurnitureTransform(item) {
   group.position.set(roomUnitToWorldX(item.x), 0, roomUnitToWorldZ(item.z));
   group.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
   group.updateMatrixWorld(true);
+  if (state.three.renderer?.shadowMap) state.three.renderer.shadowMap.needsUpdate = true;
 }
 
 function renderRoomTopView() {
@@ -2105,6 +2135,7 @@ function buildBomFromObjects() {
     parts: parts.map(({ key, ...rest }) => rest),
     assembly,
   };
+  if (state.three.renderer?.shadowMap) state.three.renderer.shadowMap.needsUpdate = true;
 }
 
 function renderBom() {
