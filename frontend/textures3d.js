@@ -22,6 +22,14 @@
     mdf_matte: { material: "mdf", dir: "mdf/matte-soft", files: { map: "basecolor-v2.png" }, realWidthMm: 800, realHeightMm: 800, roughness: 0.82, normalScale: 0.12, thicknessMm: 18 },
     laminate_grey: { material: "laminate", dir: "laminate/gray-laminate", files: { map: "basecolor-v2.png" }, realWidthMm: 1100, realHeightMm: 1100, roughness: 0.5, normalScale: 0.28, clearcoat: 0.1, thicknessMm: 18 },
     countertop: { material: "stone", dir: "stone/countertop-sand", files: { map: "basecolor-v2.png" }, realWidthMm: 1000, realHeightMm: 1000, roughness: 0.44, normalScale: 0.2, thicknessMm: 38 },
+    mdf_film_matte: { material: "mdf", dir: "mdf/matte-soft", files: { map: "basecolor-v2.png" }, realWidthMm: 900, realHeightMm: 900, roughness: 0.72, normalScale: 0.11, clearcoat: 0.08, thicknessMm: 18 },
+    mdf_film_gloss: { material: "laminate", dir: "laminate/gray-laminate", files: { map: "basecolor-v2.png" }, realWidthMm: 900, realHeightMm: 900, roughness: 0.22, normalScale: 0.12, clearcoat: 0.6, thicknessMm: 18 },
+    mdf_enamel: { material: "mdf", dir: "mdf/matte-soft", files: { map: "basecolor-v2.png" }, realWidthMm: 900, realHeightMm: 900, roughness: 0.38, normalScale: 0.1, clearcoat: 0.25, thicknessMm: 18 },
+    mdf_plastic: { material: "laminate", dir: "laminate/gray-laminate", files: { map: "basecolor-v2.png" }, realWidthMm: 900, realHeightMm: 900, roughness: 0.32, normalScale: 0.12, clearcoat: 0.35, thicknessMm: 18 },
+    countertop_skif: { material: "laminate", dir: "laminate/gray-laminate", files: { map: "basecolor-v2.png" }, realWidthMm: 1000, realHeightMm: 1000, roughness: 0.46, normalScale: 0.14, clearcoat: 0.12, thicknessMm: 38 },
+    countertop_kedr: { material: "wood", dir: "wood/light-oak", files: { map: "basecolor.png" }, realWidthMm: 1000, realHeightMm: 1000, roughness: 0.55, normalScale: 0.22, thicknessMm: 38 },
+    countertop_quartz: { material: "stone", dir: "stone/countertop-sand", files: { map: "basecolor-v2.png" }, realWidthMm: 1000, realHeightMm: 1000, roughness: 0.42, normalScale: 0.18, thicknessMm: 38 },
+    countertop_compact: { material: "laminate", dir: "laminate/gray-laminate", files: { map: "basecolor-v2.png" }, realWidthMm: 1000, realHeightMm: 1000, roughness: 0.35, normalScale: 0.14, clearcoat: 0.22, thicknessMm: 12 },
     "wood:default": { material: "wood", dir: "wood/light-oak", files: { map: "basecolor.png" }, realWidthMm: 1250, realHeightMm: 1250, thicknessMm: 18 },
     "board:default": { material: "board", dir: "board/white-board", files: { map: "basecolor.png" }, realWidthMm: 1250, realHeightMm: 1250, thicknessMm: 18 },
     "fabric:default": { material: "fabric", dir: "fabric/gray-weave", files: { map: "basecolor.png" }, realWidthMm: 1250, realHeightMm: 1250, thicknessMm: 30 },
@@ -744,8 +752,152 @@
     return finishFurnitureGroup(group, w, h, d);
   }
 
+  function addKnob(group, x, y, z, radius, material) {
+    const knob = new THREE.Mesh(prepareGeometry(new THREE.CylinderGeometry(radius, radius, 7, 16)), material);
+    knob.rotation.x = Math.PI / 2;
+    knob.position.set(x, y, z);
+    group.add(knob);
+    return knob;
+  }
+
+  function addBurnerRing(group, x, y, z, outerR, tubeR, material) {
+    const ring = new THREE.Mesh(prepareGeometry(new THREE.TorusGeometry(outerR, tubeR, 8, 22)), material);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.set(x, y, z);
+    group.add(ring);
+    return ring;
+  }
+
+  function buildApplianceGroup(item, w, h, d, materialSet) {
+    const group = new THREE.Group();
+    const type = String(item.type || "");
+    const bodyMat = materialSet?.body
+      || createSurfaceMaterial("metal", "metal_graphite", 0xbfc5cc, { widthMm: w, heightMm: h, orientation: "vertical" });
+    const doorMat = cloneMaterialTone(bodyMat, 1.04);
+    const handleMat = materialSet?.handles || createMetalHandleMaterial(bodyMat);
+    const trimMat = new THREE.MeshStandardMaterial({ color: 0x1d2127, metalness: 0.7, roughness: 0.34 });
+    const glassMat = new THREE.MeshStandardMaterial({ color: 0x10141a, metalness: 0.35, roughness: 0.1 });
+    const knobMat = new THREE.MeshStandardMaterial({ color: 0xe7e9ec, metalness: 0.85, roughness: 0.3 });
+    const grateMat = new THREE.MeshStandardMaterial({ color: 0x14171d, metalness: 0.5, roughness: 0.42 });
+    const ringMat = new THREE.MeshStandardMaterial({ color: 0x2a2f38, metalness: 0.3, roughness: 0.25 });
+
+    const bodyRadius = clamp(Math.min(w, d) * 0.02, 3, 10);
+    const body = panelMesh(w, h, d, bodyMat, { radiusMm: bodyRadius });
+    body.position.y = h / 2;
+    group.add(body);
+
+    const frontZ = d / 2 + 1.5;
+    const doorDepth = 14;
+
+    if (type === "appliance_fridge") {
+      const gap = 6;
+      const freezerH = clamp(h * 0.3, 220, 620);
+      const fridgeH = h - freezerH - gap;
+      const doorW = w - 28;
+
+      addPanel(group, doorW, fridgeH - 10, doorDepth, doorMat, 0, freezerH + gap + (fridgeH - 10) / 2, frontZ, 4);
+      addPanel(group, doorW, freezerH - 10, doorDepth, doorMat, 0, freezerH / 2, frontZ, 4);
+      addPanel(group, doorW, 3, 6, trimMat, 0, freezerH + gap / 2, frontZ + doorDepth * 0.5, 0.5);
+
+      addHandleBar(group, w / 2 - 26, freezerH + gap + fridgeH * 0.42, frontZ + doorDepth * 0.85, true, handleMat);
+      addHandleBar(group, w / 2 - 26, freezerH * 0.4, frontZ + doorDepth * 0.85, true, handleMat);
+    }
+
+    if (type === "appliance_microwave") {
+      const doorW = w * 0.76;
+      const doorH = h * 0.84;
+      const panelW = Math.max(w - doorW - 12, 60);
+      const doorX = -(w - doorW) / 2;
+      const panelX = w / 2 - panelW / 2 - 6;
+
+      addPanel(group, doorW, doorH, doorDepth, doorMat, doorX, h / 2, frontZ, 3);
+      addPanel(group, doorW * 0.72, doorH * 0.6, 4, glassMat, doorX, h / 2, frontZ + doorDepth * 0.5 + 2, 2);
+      addHandleBar(group, doorX + doorW / 2 - 18, h / 2, frontZ + doorDepth * 0.85, true, handleMat);
+
+      addPanel(group, panelW, doorH, 6, trimMat, panelX, h / 2, frontZ, 2);
+      addKnob(group, panelX, h * 0.66, frontZ + 6, clamp(panelW * 0.26, 14, 26), knobMat);
+      addKnob(group, panelX, h * 0.34, frontZ + 6, clamp(panelW * 0.18, 10, 18), knobMat);
+    }
+
+    if (type === "appliance_oven") {
+      const stripH = clamp(h * 0.16, 55, 120);
+      const doorH = h - stripH - 16;
+
+      addPanel(group, w - 20, stripH, 8, trimMat, 0, h - stripH / 2 - 6, frontZ, 2);
+      [-0.32, -0.11, 0.11, 0.32].forEach((k) => {
+        addKnob(group, k * w, h - stripH / 2 - 6, frontZ + 6, clamp(w * 0.03, 12, 18), knobMat);
+      });
+
+      addPanel(group, w - 24, doorH, doorDepth, doorMat, 0, doorH / 2 + 8, frontZ, 4);
+      addPanel(group, w * 0.72, doorH * 0.6, 4, glassMat, 0, doorH / 2 + 8, frontZ + doorDepth * 0.5 + 2, 3);
+      addHandleBar(group, 0, doorH + 8 - 18, frontZ + doorDepth * 0.85, false, handleMat);
+    }
+
+    if (type === "appliance_hood") {
+      const canopyH = clamp(h * 0.34, 140, 320);
+      const flueH = h - canopyH;
+      const flueW = clamp(w * 0.4, 160, w * 0.6);
+      const flueD = clamp(d * 0.5, 120, d * 0.8);
+
+      addPanel(group, w, canopyH, d, bodyMat, 0, canopyH / 2, 0, 6);
+      if (flueH > 20) {
+        addPanel(group, flueW, flueH, flueD, bodyMat, 0, canopyH + flueH / 2, -d * 0.08, 3);
+      }
+      addPanel(group, w * 0.7, 26, 4, glassMat, 0, canopyH * 0.42, frontZ, 1.5);
+      addPanel(group, w * 0.18, 8, 4, trimMat, w * 0.28, canopyH * 0.42, frontZ + 1, 1);
+    }
+
+    if (type === "appliance_hood_builtin") {
+      addPanel(group, w * 0.9, 10, d * 0.7, trimMat, 0, h * 0.14, frontZ * 0.2, 1);
+      addPanel(group, w * 0.5, 8, 4, glassMat, 0, h * 0.5, frontZ, 1.5);
+    }
+
+    if (type === "appliance_stove_gas" || type === "appliance_stove_electric") {
+      const isGas = type === "appliance_stove_gas";
+      const stripH = clamp(h * 0.16, 55, 110);
+      const doorH = h - stripH - 16;
+
+      addPanel(group, w - 24, stripH, 8, trimMat, 0, h - stripH / 2 - 6, frontZ, 2);
+      [-0.32, -0.11, 0.11, 0.32].forEach((k) => {
+        addKnob(group, k * w, h - stripH / 2 - 6, frontZ + 6, clamp(w * 0.028, 11, 17), knobMat);
+      });
+
+      addPanel(group, w - 24, doorH, doorDepth, doorMat, 0, doorH / 2 + 6, frontZ, 3);
+      addPanel(group, w * 0.7, doorH * 0.55, 4, glassMat, 0, doorH / 2 + 6, frontZ + doorDepth * 0.5 + 2, 2);
+      addHandleBar(group, 0, doorH + 6 - 16, frontZ + doorDepth * 0.85, false, handleMat);
+
+      const burnerR = clamp(Math.min(w, d) * 0.07, 28, 55);
+      const positions = [
+        [-w * 0.22, -d * 0.2],
+        [w * 0.22, -d * 0.2],
+        [-w * 0.22, d * 0.2],
+        [w * 0.22, d * 0.2],
+      ];
+
+      if (isGas) {
+        addPanel(group, w * 0.98, 14, d * 0.98, cloneMaterialTone(bodyMat, 0.92), 0, h - 7, 0, 3);
+        positions.forEach(([x, z]) => {
+          addBurnerRing(group, x, h - 2, z, burnerR, 4, grateMat);
+          const cap = new THREE.Mesh(prepareGeometry(new THREE.CylinderGeometry(7, 7, 7, 12)), grateMat);
+          cap.position.set(x, h + 1, z);
+          group.add(cap);
+        });
+      } else {
+        addPanel(group, w * 0.98, 12, d * 0.98, glassMat, 0, h - 6, 0, 3);
+        positions.forEach(([x, z]) => {
+          addBurnerRing(group, x, h + 1, z, burnerR, 2, ringMat);
+        });
+      }
+    }
+
+    return finishFurnitureGroup(group, w, h, d);
+  }
+
   function buildFurnitureGroup(item, w, h, d, materialsInput) {
     const materialSet = resolveFurnitureMaterials(item, w, h, d, materialsInput);
+    if (String(item.type || "").startsWith("appliance_")) {
+      return buildApplianceGroup(item, w, h, d, materialSet);
+    }
     if (item.type === "wardrobe") {
       return buildWardrobeGroup(item, w, h, d, materialSet);
     }

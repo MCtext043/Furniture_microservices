@@ -164,14 +164,48 @@
                 <div class="form-field"><label for="roomLength">Длина <span>мм</span></label><input class="form-control" id="roomLength" type="number" min="2000" step="100" value="5000" /></div>
                 <div class="form-field"><label for="roomHeight">Высота <span>мм</span></label><input class="form-control" id="roomHeight" type="number" min="2000" step="100" value="2800" /></div>
               </div>
+              <div class="field-grid field-grid-2">
+                <div class="form-field">
+                  <label for="roomFloorTexture">Пол</label>
+                  <select class="form-select" id="roomFloorTexture">
+                    <option value="wood_oak">Дерево (светлое)</option>
+                    <option value="wood_dark_oak">Дерево (тёмное)</option>
+                    <option value="laminate_grey">Ламинат (серый)</option>
+                    <option value="countertop">Камень / кварц</option>
+                    <option value="board_white">Светлый нейтральный</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="roomWallTexture">Стены</label>
+                  <select class="form-select" id="roomWallTexture">
+                    <option value="wall_default">Штукатурка</option>
+                    <option value="board_white">Светлые панели</option>
+                    <option value="mdf_matte">МДФ (матовый)</option>
+                    <option value="laminate_grey">Ламинат</option>
+                    <option value="board_black">Тёмные панели</option>
+                  </select>
+                </div>
+              </div>
+              <div class="custom-color-row">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="roomUseCustomColors" />
+                  <label class="form-check-label" for="roomUseCustomColors">Свои цвета пола/стен</label>
+                </div>
+                <div class="d-flex gap-2">
+                  <input class="form-control form-control-color" type="color" id="roomFloorColor" value="#E9DCCB" title="Цвет пола" disabled />
+                  <input class="form-control form-control-color" type="color" id="roomWallColor" value="#FAF7F2" title="Цвет стен" disabled />
+                </div>
+              </div>
               <button class="btn btn-secondary w-100" id="btnApplyRoomSize">Применить размеры</button>
             </div>
 
             <div class="control-section">
               <div class="control-heading"><span>02</span><div><h3>Мебель</h3><p>Добавьте предмет и настройте его вид.</p></div></div>
-              <div class="field-grid field-grid-2">
-                <div class="form-field"><label for="objType">Тип предмета</label><select class="form-select" id="objType"><option value="wardrobe">Шкаф</option><option value="cabinet">Тумба</option><option value="shelf">Стеллаж</option><option value="table">Стол</option><option value="sofa">Диван</option></select></div>
-                <div class="form-field"><label for="objName">Название</label><input class="form-control" id="objName" value="Новый объект" /></div>
+              <button class="btn btn-quiet w-100 mb-2" type="button" data-bs-toggle="modal" data-bs-target="#objectPickerModal" id="btnOpenObjectPicker">Каталог предметов</button>
+              <input type="hidden" id="objType" value="wardrobe" />
+              <div class="form-field">
+                <label for="objName">Название</label>
+                <input class="form-control" id="objName" value="Новый объект" />
               </div>
               <div class="field-grid field-grid-3">
                 <div class="form-field"><label for="objW">Ширина <span>мм</span></label><input class="form-control" id="objW" type="number" min="300" step="10" value="1200" /></div>
@@ -179,9 +213,36 @@
                 <div class="form-field"><label for="objH">Высота <span>мм</span></label><input class="form-control" id="objH" type="number" min="300" step="10" value="2100" /></div>
               </div>
               <div class="form-field">
-                <label for="objTexture">Материал</label>
+                <label for="objTexture">Фасад / материал</label>
                 <select class="form-select" id="objTexture">
-                  <option value="wood_dark_oak">Тёмный дуб</option><option value="wood_oak">Светлый дуб</option><option value="mdf_matte">МДФ матовый</option><option value="board_white">Белое ДСП</option><option value="board_black">Чёрное ДСП</option><option value="laminate_grey">Ламинат</option><option value="countertop">Столешница</option><option value="fabric_gray">Серая ткань</option><option value="metal_graphite">Графитовый металл</option>
+                  <option value="wood_dark_oak">Тёмный дуб</option>
+                  <option value="wood_oak">Светлый дуб</option>
+                  <option value="mdf_matte">МДФ матовый</option>
+                  <option value="board_white">Белое ДСП</option>
+                  <option value="board_black">Чёрное ДСП</option>
+                  <option value="laminate_grey">Ламинат</option>
+                  <option value="countertop">Столешница</option>
+                  <option value="fabric_gray">Серая ткань</option>
+                  <option value="metal_graphite">Графитовый металл</option>
+                  <option value="mdf_film_matte">МДФ в плёнке (матовая)</option>
+                  <option value="mdf_film_gloss">МДФ в плёнке (глянцевая)</option>
+                  <option value="mdf_enamel">МДФ в эмали</option>
+                  <option value="mdf_plastic">МДФ пластик</option>
+                </select>
+              </div>
+              <div class="custom-color-row d-none" id="objMillingRow">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="objMilling" />
+                  <label class="form-check-label" for="objMilling">Фрезеровка фасада (+30%)</label>
+                </div>
+              </div>
+              <div class="form-field d-none" id="objCountertopRow">
+                <label for="objCountertopType">Столешница</label>
+                <select class="form-select" id="objCountertopType">
+                  <option value="skif">Скиф</option>
+                  <option value="kedr">Кедр</option>
+                  <option value="quartz">Кварцевый агломерат</option>
+                  <option value="compact">Компакт плита</option>
                 </select>
               </div>
               <div class="custom-color-row">
@@ -321,6 +382,164 @@
               <div class="tab-pane fade" id="memberOrdersPane"><div id="memberOrdersPanel" class="loading-state">Загружаем заказы...</div></div>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="objectPickerModal" tabindex="-1" aria-labelledby="objectPickerTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <div class="eyebrow">Каталог предметов</div>
+            <h2 class="modal-title" id="objectPickerTitle">Выберите предмет</h2>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+            <symbol id="icon-wardrobe" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                d="M6 4.5h12v15H6zM12 4.5v15M9.3 10.5h0.1M14.6 10.5h0.1" />
+            </symbol>
+            <symbol id="icon-cabinet" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                d="M5.5 7h13v12h-13zM5.5 12h13M8.8 10.2h0.1M15.1 10.2h0.1" />
+            </symbol>
+            <symbol id="icon-shelf" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                d="M6 5h12v14H6zM6 10h12M6 14.5h12" />
+            </symbol>
+            <symbol id="icon-table" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                d="M5 9h14M7 9v10M17 9v10" />
+            </symbol>
+            <symbol id="icon-sofa" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                d="M6 13V9.8c0-1.1.9-2 2-2h8c1.1 0 2 .9 2 2V13M5.5 13.2h13V17H5.5zM7 17v2M17 17v2" />
+            </symbol>
+            <symbol id="icon-fridge" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                d="M7 3.8h10v16.4H7zM7 11.5h10M9.2 7.5h0.1M9.2 15.5h0.1" />
+            </symbol>
+            <symbol id="icon-microwave" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                d="M5.5 8h13v9h-13zM7.5 10h7v5h-7zM16.6 10.3h0.1M16.6 12.5h0.1M16.6 14.7h0.1" />
+            </symbol>
+            <symbol id="icon-hood" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                d="M10 4h4v4h-4zM6 8h12l-2 10H8z" />
+            </symbol>
+            <symbol id="icon-stove" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                d="M6 8h12v11H6zM9 12h0.1M15 12h0.1M9 16h0.1M15 16h0.1" />
+            </symbol>
+            <symbol id="icon-oven" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
+                d="M6.5 6.5h11v13h-11zM8.5 9h7v7h-7zM9 8.1h0.1M11 8.1h0.1M13 8.1h0.1" />
+            </symbol>
+          </svg>
+          <div class="accordion" id="objectPickerAccordion">
+            <div class="accordion-item">
+              <h3 class="accordion-header">
+                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerLiving" aria-expanded="true">
+                  Гостиная
+                </button>
+              </h3>
+              <div id="objectPickerLiving" class="accordion-collapse collapse show" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body">
+                  <div class="small text-muted mb-2">Корпусная мебель</div>
+                  <div class="list-group mb-3">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="living" data-type="wardrobe" data-name="Шкаф" data-w="1200" data-d="600" data-h="2100" data-texture="wood_oak">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-wardrobe"></use></svg></span>
+                      <span><strong>Шкаф</strong><small>1200×600×2100 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="living" data-type="cabinet" data-name="Тумба" data-w="900" data-d="500" data-h="900" data-texture="wood_oak">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-cabinet"></use></svg></span>
+                      <span><strong>Тумба</strong><small>900×500×900 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="living" data-type="shelf" data-name="Стеллаж" data-w="900" data-d="350" data-h="1800" data-texture="wood_oak">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-shelf"></use></svg></span>
+                      <span><strong>Стеллаж</strong><small>900×350×1800 мм</small></span>
+                    </button>
+                  </div>
+                  <div class="small text-muted mb-2">Мебель</div>
+                  <div class="list-group">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="living" data-type="table" data-name="Стол" data-w="1400" data-d="800" data-h="750" data-texture="metal_graphite" data-countertop="skif">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-table"></use></svg></span>
+                      <span><strong>Стол</strong><small>1400×800×750 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="living" data-type="sofa" data-name="Диван" data-w="2200" data-d="900" data-h="900" data-texture="fabric_gray">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-sofa"></use></svg></span>
+                      <span><strong>Диван</strong><small>2200×900×900 мм</small></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h3 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerKitchen" aria-expanded="false">
+                  Кухня
+                </button>
+              </h3>
+              <div id="objectPickerKitchen" class="accordion-collapse collapse" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body">
+                  <div class="small text-muted mb-2">Корпусная мебель</div>
+                  <div class="list-group mb-3">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="cabinet" data-name="Кухонный модуль" data-w="600" data-d="560" data-h="850" data-texture="mdf_film_matte" data-countertop="skif">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-cabinet"></use></svg></span>
+                      <span><strong>Нижний модуль (шкаф)</strong><small>600×560×850 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="wardrobe" data-name="Пенал" data-w="600" data-d="560" data-h="2200" data-texture="mdf_film_matte" data-countertop="skif">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-wardrobe"></use></svg></span>
+                      <span><strong>Пенал</strong><small>600×560×2200 мм</small></span>
+                    </button>
+                  </div>
+                  <div class="small text-muted mb-2">Техника</div>
+                  <div class="list-group">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_fridge" data-name="Холодильник" data-w="600" data-d="650" data-h="2000" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-fridge"></use></svg></span>
+                      <span><strong>Холодильник</strong><small>600×650×2000 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_microwave" data-name="СВЧ" data-w="600" data-d="420" data-h="380" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-microwave"></use></svg></span>
+                      <span><strong>СВЧ</strong><small>600×420×380 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_hood" data-name="Вытяжка (отдельная)" data-w="600" data-d="500" data-h="700" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-hood"></use></svg></span>
+                      <span><strong>Вытяжка (отдельная)</strong><small>600×500×700 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_hood_builtin" data-name="Вытяжка (встраиваемая)" data-w="600" data-d="300" data-h="260" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-hood"></use></svg></span>
+                      <span><strong>Вытяжка (встраиваемая)</strong><small>600×300×260 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_stove_gas" data-name="Плита (газовая)" data-w="600" data-d="600" data-h="850" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-stove"></use></svg></span>
+                      <span><strong>Плита (газовая)</strong><small>600×600×850 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_stove_electric" data-name="Плита (электро)" data-w="600" data-d="600" data-h="850" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-stove"></use></svg></span>
+                      <span><strong>Плита (электро)</strong><small>600×600×850 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_oven" data-name="Духовой шкаф" data-w="600" data-d="560" data-h="600" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-oven"></use></svg></span>
+                      <span><strong>Духовой шкаф</strong><small>600×560×600 мм</small></span>
+                    </button>
+                  </div>
+                  <div class="alert alert-light border mt-3 small mb-0">
+                    <div class="fw-semibold mb-1">Фасады кухни</div>
+                    <div class="text-muted">После выбора модуля откройте «Фасад / материал» и выберите: МДФ в плёнке (мат/глянец, с фрезеровкой), МДФ в эмали или МДФ пластик.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-quiet" data-bs-dismiss="modal">Закрыть</button>
         </div>
       </div>
     </div>

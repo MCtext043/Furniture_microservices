@@ -18,7 +18,15 @@ const state = {
   three: null,
   cuttingParts: [],
   roomConfig: { width: 6000, length: 5000, height: 2800 },
+  roomFinish: {
+    floorTexture: "wood_oak",
+    wallTexture: "wall_default",
+    useCustomColors: false,
+    floorColor: "#E9DCCB",
+    wallColor: "#FAF7F2",
+  },
   objects3d: [],
+  objectEditor: { section: "living" },
   drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0, scale: 1, wrapEl: null, chipEl: null },
   rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0, scale: 1, wrapEl: null, chipEl: null },
   cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0 },
@@ -93,6 +101,13 @@ const typePresets = {
   shelf: { title: "Стеллаж", color: "#B08968", texture: "wood" },
   table: { title: "Стол", color: "#4B5563", texture: "metal" },
   sofa: { title: "Диван", color: "#64748B", texture: "fabric" },
+  appliance_fridge: { title: "Холодильник", color: "#D1D5DB", texture: "metal" },
+  appliance_microwave: { title: "СВЧ", color: "#9CA3AF", texture: "metal" },
+  appliance_hood: { title: "Вытяжка", color: "#9CA3AF", texture: "metal" },
+  appliance_hood_builtin: { title: "Вытяжка (встраиваемая)", color: "#9CA3AF", texture: "metal" },
+  appliance_stove_gas: { title: "Плита (газовая)", color: "#6B7280", texture: "metal" },
+  appliance_stove_electric: { title: "Плита (электро)", color: "#6B7280", texture: "metal" },
+  appliance_oven: { title: "Духовой шкаф", color: "#6B7280", texture: "metal" },
 };
 
 const texturePresets = {
@@ -105,6 +120,14 @@ const texturePresets = {
   mdf_matte: { title: "МДФ матовый", material: "mdf", color: "#B8AEA2" },
   laminate_grey: { title: "Ламинат серый", material: "laminate", color: "#85898B" },
   countertop: { title: "Столешница", material: "stone", color: "#C4B5A3" },
+  mdf_film_matte: { title: "МДФ в плёнке (матовая)", material: "mdf", color: "#C8BBAA" },
+  mdf_film_gloss: { title: "МДФ в плёнке (глянцевая)", material: "laminate", color: "#D7CBBF" },
+  mdf_enamel: { title: "МДФ в эмали", material: "mdf", color: "#E5E7EB" },
+  mdf_plastic: { title: "МДФ пластик", material: "laminate", color: "#9CA3AF" },
+  countertop_skif: { title: "Скиф", material: "laminate", color: "#B9B3AA" },
+  countertop_kedr: { title: "Кедр", material: "wood", color: "#9B6B4A" },
+  countertop_quartz: { title: "Кварцевый агломерат", material: "stone", color: "#D6CEC3" },
+  countertop_compact: { title: "Компакт плита", material: "laminate", color: "#8B8F93" },
 };
 
 function sameOriginApiBase() {
@@ -1397,6 +1420,15 @@ function createFurnitureMaterial(item, texturePreset) {
   );
 }
 
+function countertopTextureKey(countertopType) {
+  const t = String(countertopType || "").toLowerCase();
+  if (t === "skif") return "countertop_skif";
+  if (t === "kedr") return "countertop_kedr";
+  if (t === "quartz") return "countertop_quartz";
+  if (t === "compact") return "countertop_compact";
+  return "";
+}
+
 function createFurnitureMaterialSet(item, texturePreset) {
   const customColor = normalizeColorHex(item.customColor);
   if (customColor) {
@@ -1432,7 +1464,11 @@ function createFurnitureMaterialSet(item, texturePreset) {
   const interior = caseFurniture ? neutralHorizontal : selectedHorizontal;
   const edge = caseFurniture ? neutralVertical.clone() : selectedVertical.clone();
   const back = createSurfaceMaterialForPanel("board", "board_white", 0xffffff, width, height, "vertical");
-  const countertop = selectedHorizontal;
+  const countertopKey = countertopTextureKey(item.countertopType);
+  const countertopPreset = countertopKey ? texturePresets[countertopKey] : null;
+  const countertop = countertopPreset
+    ? createSurfaceMaterialForPanel(countertopPreset.material, countertopKey, countertopPreset.color, width, depth, "horizontal")
+    : selectedHorizontal;
   const handles = new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.26, metalness: 0.96 });
   return { body, facade, edge, back, countertop, handles, interior };
 }
@@ -1459,6 +1495,7 @@ function furnitureAccessoryDefaults(type) {
   if (type === "cabinet") return { drawers: 2, handles: 2 };
   if (type === "wardrobe") return { drawers: 0, handles: 2 };
   if (type === "shelf") return { drawers: 0, handles: 0 };
+  if (String(type || "").startsWith("appliance_")) return { drawers: 0, handles: 0 };
   return { drawers: 0, handles: 1 };
 }
 
@@ -1811,21 +1848,56 @@ function selectFurnitureAtPointer(event, canvas) {
   dimensionManager?.setSelected(object);
 }
 
+function resolveRoomSurfaceMaterial(textureKey, fallbackType, fallbackVariant, fallbackColor, widthMm, heightMm, orientation) {
+  if (textureKey === "wall_default") {
+    return createSurfaceMaterialForPanel("wall", "default", fallbackColor, widthMm, heightMm, orientation);
+  }
+  const preset = texturePresets[textureKey];
+  if (!preset) {
+    return createSurfaceMaterialForPanel(fallbackType, fallbackVariant, fallbackColor, widthMm, heightMm, orientation);
+  }
+  return createSurfaceMaterialForPanel(preset.material, textureKey, preset.color, widthMm, heightMm, orientation);
+}
+
 function rebuildRoomGeometry() {
   if (!state.three) return;
   const { roomGroup } = state.three;
   roomGroup.clear();
 
   const { width, length, height } = state.roomConfig;
+  const finish = state.roomFinish || {};
+  const floorMat = resolveRoomSurfaceMaterial(
+    finish.floorTexture || "wood_oak",
+    "floor",
+    "default",
+    0xffffff,
+    width,
+    length,
+    "horizontal"
+  );
+  if (finish.useCustomColors && floorMat?.color && finish.floorColor) {
+    floorMat.color.set(normalizeColorHex(finish.floorColor));
+  }
   const floor = new THREE.Mesh(
     prepareGeometry(new THREE.BoxGeometry(width, 60, length)),
-    createSurfaceMaterialForPanel("floor", "default", 0xffffff, width, length, "horizontal")
+    floorMat
   );
   floor.position.y = -30;
   floor.receiveShadow = true;
   roomGroup.add(floor);
 
-  const wallMat = createSurfaceMaterialForPanel("wall", "default", 0xfaf7f2, width, height, "vertical");
+  const wallMat = resolveRoomSurfaceMaterial(
+    finish.wallTexture || "wall_default",
+    "wall",
+    "default",
+    0xfaf7f2,
+    width,
+    height,
+    "vertical"
+  );
+  if (finish.useCustomColors && wallMat?.color && finish.wallColor) {
+    wallMat.color.set(normalizeColorHex(finish.wallColor));
+  }
   const createWall = (name, geometry, position) => {
     const wall = new THREE.Group();
     wall.name = name;
@@ -1900,6 +1972,8 @@ function updateFurnitureTransform(item) {
 function renderRoomTopView() {
   const host = document.getElementById("roomPlan");
   const { width, length } = state.roomConfig;
+  const finish = state.roomFinish || {};
+  host.style.background = finish.useCustomColors && finish.floorColor ? normalizeColorHex(finish.floorColor) : "";
   host.style.aspectRatio = `${width} / ${length}`;
   host.style.minHeight = `${Math.max(220, Math.round((length / 1000) * 42))}px`;
   const viewW = host.clientWidth || 400;
@@ -2114,11 +2188,17 @@ function addObject3DFromForm() {
   const defaults = furnitureAccessoryDefaults(type);
   const useCustomColor = document.getElementById("objUseCustomColor")?.checked;
   const customColor = useCustomColor ? normalizeColorHex(document.getElementById("objCustomColor")?.value) : "";
+  const countertopType = document.getElementById("objCountertopType")?.value || "";
+  const millingAllowed = texture === "mdf_film_matte" || texture === "mdf_film_gloss";
+  const milling = millingAllowed ? !!document.getElementById("objMilling")?.checked : false;
   const item = {
     id: makeId(),
     type,
     texture,
     customColor,
+    section: state.objectEditor?.section || "living",
+    countertopType,
+    milling,
     drawers: defaults.drawers,
     handles: defaults.handles,
     name,
@@ -2140,25 +2220,28 @@ function addObject3DFromForm() {
 function buildBomFromObjects() {
   const parts = [];
   const assembly = [];
-  const pushPart = (name, width, height, quantity) => {
-    const key = `${name}_${width}_${height}`;
+  const pushPart = (name, width, height, quantity, options = {}) => {
+    const multiplier = Number(options.costMultiplier) || 1;
+    const key = `${name}_${width}_${height}_${multiplier}`;
     const existing = parts.find((part) => part.key === key);
     if (existing) {
       existing.quantity += quantity;
     } else {
-      parts.push({ key, name, width, height, quantity });
+      parts.push({ key, name, width, height, quantity, cost_multiplier: multiplier });
     }
   };
 
   for (const item of state.objects3d) {
     const { width: w, depth: d, height: h } = getObjectManufacturingSize(item);
+    const facadeMultiplier =
+      item.milling && (item.texture === "mdf_film_matte" || item.texture === "mdf_film_gloss") ? 1.3 : 1;
 
     if (item.type === "wardrobe" || item.type === "shelf") {
       pushPart("Боковина", d, h, 2);
       pushPart("Крышка/дно", w, d, 2);
       pushPart("Полка", Math.max(w - 36, 100), d, Math.max(2, Math.round(h / 500)));
       pushPart("Задняя стенка", w, h, 1);
-      if (item.type === "wardrobe") pushPart("Фасад дверцы", Math.round(w / 2), h, 2);
+      if (item.type === "wardrobe") pushPart("Фасад дверцы", Math.round(w / 2), h, 2, { costMultiplier: facadeMultiplier });
       assembly.push(`Собрать корпус "${item.name}": стяжки 8 шт, конфирматы 16 шт, петли 4 шт`);
     } else if (item.type === "table") {
       pushPart("Столешница", w, d, 1);
@@ -2167,7 +2250,10 @@ function buildBomFromObjects() {
     } else if (item.type === "cabinet") {
       pushPart("Боковина", d, h, 2);
       pushPart("Крышка/дно", w, d, 2);
-      pushPart("Фасад", w, h, 1);
+      pushPart("Фасад", w, h, 1, { costMultiplier: facadeMultiplier });
+      if (item.countertopType) {
+        pushPart("Столешница", w, d, 1);
+      }
       assembly.push(`Собрать тумбу "${item.name}": направляющие 2 шт, ручка 1 шт`);
     } else if (item.type === "sofa") {
       pushPart("Каркас сиденья", w, d, 1);
@@ -2210,9 +2296,10 @@ function estimateProjectCost(bom) {
   let materialCost = 0;
   let edgeCost = 0;
   for (const part of bom.parts) {
+    const mult = Number(part.cost_multiplier) || 1;
     const areaM2 = (part.width * part.height * part.quantity) / 1_000_000;
-    materialCost += areaM2 * LDSP_PRICE_M2;
-    edgeCost += ((part.width + part.height) * 2 * part.quantity) / 1000 * EDGE_PRICE_M;
+    materialCost += areaM2 * LDSP_PRICE_M2 * mult;
+    edgeCost += (((part.width + part.height) * 2 * part.quantity) / 1000) * EDGE_PRICE_M * mult;
   }
   const procurementCost = Math.round(materialCost + edgeCost);
   const total = Math.round(procurementCost * RETAIL_MULTIPLIER);
@@ -2291,7 +2378,7 @@ function renderCostEstimate(bom = null) {
   const data = bom || buildBomFromObjects();
   if (!data.parts.length && !state.objects3d.length) {
     host.innerHTML = `<div class="estimate-empty"><div><span class="estimate-empty-icon">₽</span><h3>Расчёт появится здесь</h3><p class="estimate-note">Добавьте хотя бы один предмет мебели, чтобы увидеть ориентировочную стоимость.</p><button class="btn btn-secondary" type="button" data-open-furniture>Добавить мебель</button></div></div>`;
-    host.querySelector("[data-open-furniture]")?.addEventListener("click", () => document.getElementById("objType")?.focus());
+    host.querySelector("[data-open-furniture]")?.addEventListener("click", () => document.getElementById("btnOpenObjectPicker")?.click());
     return;
   }
   const cost = estimateProjectCost(data);
@@ -4094,7 +4181,7 @@ function goToPlannerStep(step) {
   state.plannerStep = step;
   updatePlannerProgress();
   if (step === 1) document.getElementById("roomWidth")?.focus();
-  if (step === 2) document.getElementById("objType")?.focus();
+  if (step === 2) document.getElementById("btnOpenObjectPicker")?.focus();
   if (step === 3) document.querySelector('[data-bs-target="#room3dPane"]')?.click();
   if (step === 4) document.getElementById("projectName")?.focus();
 }
@@ -4180,6 +4267,124 @@ function initLightbox() {
   });
 }
 
+function syncObjectEditorControls() {
+  const typeEl = document.getElementById("objType");
+  const textureEl = document.getElementById("objTexture");
+  const millingRow = document.getElementById("objMillingRow");
+  const millingEl = document.getElementById("objMilling");
+  const countertopRow = document.getElementById("objCountertopRow");
+  const countertopEl = document.getElementById("objCountertopType");
+
+  const type = typeEl?.value || "";
+  const texture = textureEl?.value || "";
+  const isAppliance = String(type).startsWith("appliance_");
+  if (isAppliance && textureEl && textureEl.value !== "metal_graphite") {
+    textureEl.value = "metal_graphite";
+  }
+
+  const millingAllowed = texture === "mdf_film_matte" || texture === "mdf_film_gloss";
+  if (millingRow) millingRow.classList.toggle("d-none", !millingAllowed);
+  if (!millingAllowed && millingEl) millingEl.checked = false;
+
+  const showCountertop = type === "cabinet" || type === "wardrobe" || type === "table";
+  if (countertopRow) countertopRow.classList.toggle("d-none", !showCountertop);
+  if (showCountertop && countertopEl && !countertopEl.value) countertopEl.value = "skif";
+
+  const useCustomColorEl = document.getElementById("objUseCustomColor");
+  const customColorEl = document.getElementById("objCustomColor");
+  if (useCustomColorEl && customColorEl) {
+    useCustomColorEl.disabled = isAppliance;
+    if (isAppliance) {
+      useCustomColorEl.checked = false;
+      customColorEl.disabled = true;
+    } else {
+      customColorEl.disabled = !useCustomColorEl.checked;
+    }
+  }
+}
+
+function initObjectPicker() {
+  const modalEl = document.getElementById("objectPickerModal");
+  if (!modalEl) return;
+  modalEl.addEventListener("click", (event) => {
+    const btn = event.target.closest?.("[data-pick-object]");
+    if (!btn) return;
+    const typeEl = document.getElementById("objType");
+    const nameEl = document.getElementById("objName");
+    const wEl = document.getElementById("objW");
+    const dEl = document.getElementById("objD");
+    const hEl = document.getElementById("objH");
+    const textureEl = document.getElementById("objTexture");
+    const countertopEl = document.getElementById("objCountertopType");
+
+    const type = btn.dataset.type || "cabinet";
+    const name = btn.dataset.name || (typePresets[type]?.title || "Новый объект");
+    const w = btn.dataset.w || "";
+    const d = btn.dataset.d || "";
+    const h = btn.dataset.h || "";
+    const texture = btn.dataset.texture || "";
+    const countertop = btn.dataset.countertop || "";
+    const section = btn.dataset.section || "living";
+
+    state.objectEditor.section = section;
+    if (typeEl) typeEl.value = type;
+    if (nameEl) nameEl.value = name;
+    if (wEl && w) wEl.value = w;
+    if (dEl && d) dEl.value = d;
+    if (hEl && h) hEl.value = h;
+    if (textureEl && texture) textureEl.value = texture;
+    if (countertopEl && countertop) countertopEl.value = countertop;
+
+    const millingEl = document.getElementById("objMilling");
+    if (millingEl) millingEl.checked = false;
+
+    syncObjectEditorControls();
+    bootstrap.Modal.getInstance(modalEl)?.hide();
+  });
+}
+
+function initRoomFinishControls() {
+  const floorTextureEl = document.getElementById("roomFloorTexture");
+  const wallTextureEl = document.getElementById("roomWallTexture");
+  const useCustomEl = document.getElementById("roomUseCustomColors");
+  const floorColorEl = document.getElementById("roomFloorColor");
+  const wallColorEl = document.getElementById("roomWallColor");
+
+  if (!floorTextureEl || !wallTextureEl || !useCustomEl || !floorColorEl || !wallColorEl) return;
+
+  const syncInputsEnabled = () => {
+    floorColorEl.disabled = !useCustomEl.checked;
+    wallColorEl.disabled = !useCustomEl.checked;
+  };
+
+  const apply = () => {
+    state.roomFinish.floorTexture = floorTextureEl.value || "wood_oak";
+    state.roomFinish.wallTexture = wallTextureEl.value || "wall_default";
+    state.roomFinish.useCustomColors = !!useCustomEl.checked;
+    state.roomFinish.floorColor = normalizeColorHex(floorColorEl.value) || "#E9DCCB";
+    state.roomFinish.wallColor = normalizeColorHex(wallColorEl.value) || "#FAF7F2";
+    if (state.three) rebuildRoomGeometry();
+    if (document.getElementById("roomPlan")) renderRoomTopView();
+    renderRoom3D();
+  };
+
+  floorTextureEl.value = state.roomFinish.floorTexture || "wood_oak";
+  wallTextureEl.value = state.roomFinish.wallTexture || "wall_default";
+  useCustomEl.checked = !!state.roomFinish.useCustomColors;
+  floorColorEl.value = state.roomFinish.floorColor || "#E9DCCB";
+  wallColorEl.value = state.roomFinish.wallColor || "#FAF7F2";
+  syncInputsEnabled();
+
+  useCustomEl.addEventListener("change", () => {
+    syncInputsEnabled();
+    apply();
+  });
+  floorTextureEl.addEventListener("change", apply);
+  wallTextureEl.addEventListener("change", apply);
+  floorColorEl.addEventListener("input", apply);
+  wallColorEl.addEventListener("input", apply);
+}
+
 async function boot() {
   applyTheme(document.documentElement.dataset.theme || "light");
   bindClick("themeToggle", toggleTheme);
@@ -4216,6 +4421,8 @@ async function boot() {
   initPlannerProgress();
   initPlannerFullscreen();
   initLightbox();
+  initObjectPicker();
+  initRoomFinishControls();
 
   bindClick("btnOptimize", () => optimizeCutting());
   bindClick("btnAddPart", addPartFromInputs);
@@ -4285,6 +4492,11 @@ async function boot() {
     useCustomColorEl.addEventListener("change", syncCustomColorInput);
     syncCustomColorInput();
   }
+
+  document.getElementById("objTexture")?.addEventListener("change", () => {
+    syncObjectEditorControls();
+  });
+  syncObjectEditorControls();
 
   try {
     await api("GET", "/health");
