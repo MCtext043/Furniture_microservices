@@ -781,18 +781,40 @@
     return finishFurnitureGroup(group, w, h, d);
   }
 
-  function bathroomMaterials() {
+  function bathroomMaterials(item) {
+    const darkCeramic = item?.texture === "ceramic_black";
+    const marble = item?.texture === "stone_marble";
+    const ceramicColor = darkCeramic ? 0x303438 : marble ? 0xe5e1d9 : 0xf7f8f8;
     return {
-      porcelain: new THREE.MeshPhysicalMaterial({ color: 0xf5f7f8, roughness: 0.2, metalness: 0, clearcoat: 0.35 }),
+      porcelain: new THREE.MeshPhysicalMaterial({ color: ceramicColor, roughness: marble ? 0.32 : 0.16, metalness: 0, clearcoat: marble ? 0.18 : 0.48, clearcoatRoughness: 0.16 }),
       chrome: new THREE.MeshStandardMaterial({ color: 0xb8c0c8, roughness: 0.18, metalness: 0.95 }),
       glass: new THREE.MeshPhysicalMaterial({ color: 0xcfe8f3, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }),
       dark: new THREE.MeshStandardMaterial({ color: 0x374151, roughness: 0.35, metalness: 0.55 }),
+      cavity: new THREE.MeshPhysicalMaterial({ color: darkCeramic ? 0x111417 : 0xd7e2e5, roughness: 0.12, metalness: 0, clearcoat: 0.4 }),
     };
+  }
+
+  function addEllipticRing(group, width, depth, tube, y, z, material) {
+    const ring = new THREE.Mesh(prepareGeometry(new THREE.TorusGeometry(1, tube / Math.max(width, 1), 12, 40)), material);
+    ring.rotation.x = Math.PI / 2;
+    ring.scale.set(width / 2, depth / 2, width / 2);
+    ring.position.set(0, y, z);
+    group.add(ring);
+    return ring;
+  }
+
+  function addMixer(group, x, y, z, size, material) {
+    addPanel(group, size * 0.16, size * 0.62, size * 0.16, material, x, y + size * 0.3, z, 4);
+    const spout = new THREE.Mesh(prepareGeometry(new THREE.TorusGeometry(size * 0.23, size * 0.055, 10, 24, Math.PI)), material);
+    spout.rotation.z = Math.PI / 2;
+    spout.position.set(x + size * 0.22, y + size * 0.55, z);
+    group.add(spout);
+    addPanel(group, size * 0.34, size * 0.09, size * 0.09, material, x + size * 0.34, y + size * 0.55, z, 3);
   }
 
   function buildBathroomGroup(item, w, h, d, materials) {
     const group = new THREE.Group();
-    const bath = bathroomMaterials();
+    const bath = bathroomMaterials(item);
     if (item.type === "bathroom_bathtub") {
       const rim = clamp(Math.min(w, d) * 0.075, 45, 85);
       const baseH = clamp(h * 0.24, 110, 180);
@@ -815,16 +837,22 @@
       head.position.set(w * 0.3, h * 0.8, -d * 0.3);
       group.add(head);
     } else if (item.type === "bathroom_toilet") {
-      addPanel(group, w * 0.84, h * 0.58, d * 0.32, bath.porcelain, 0, h * 0.7, -d * 0.32, 28);
+      const tankH = h * 0.5;
+      addPanel(group, w * 0.84, tankH, d * 0.27, bath.porcelain, 0, h - tankH / 2, -d * 0.36, 28);
+      addPanel(group, w * 0.22, 10, 55, bath.chrome, 0, h + 6, -d * 0.36, 5);
+      addPanel(group, w * 0.54, h * 0.28, d * 0.42, bath.porcelain, 0, h * 0.18, -d * 0.02, 32);
       const bowl = new THREE.Mesh(prepareGeometry(new THREE.SphereGeometry(1, 28, 18)), bath.porcelain);
-      bowl.scale.set(w * 0.48, h * 0.24, d * 0.42);
-      bowl.position.set(0, h * 0.35, d * 0.12);
+      bowl.scale.set(w * 0.49, h * 0.2, d * 0.4);
+      bowl.position.set(0, h * 0.38, d * 0.1);
       group.add(bowl);
-      const seat = new THREE.Mesh(prepareGeometry(new THREE.TorusGeometry(1, 0.18, 10, 30)), bath.porcelain);
-      seat.rotation.x = Math.PI / 2;
-      seat.scale.set(w * 0.36, d * 0.32, 16);
-      seat.position.set(0, h * 0.58, d * 0.12);
-      group.add(seat);
+      const opening = new THREE.Mesh(prepareGeometry(new THREE.CircleGeometry(1, 36)), bath.cavity);
+      opening.rotation.x = -Math.PI / 2;
+      opening.scale.set(w * 0.31, d * 0.28, 1);
+      opening.position.set(0, h * 0.585, d * 0.12);
+      group.add(opening);
+      addEllipticRing(group, w * 0.72, d * 0.62, 24, h * 0.6, d * 0.12, bath.porcelain);
+      const lid = addPanel(group, w * 0.68, 18, d * 0.55, bath.porcelain, 0, h * 0.635, d * 0.08, 28);
+      lid.rotation.x = -0.025;
     } else if (item.type === "bathroom_mirror") {
       addPanel(group, w, h, Math.max(d, 22), bath.dark, 0, h / 2, 0, 8);
       addPanel(group, w - 28, h - 28, 5, new THREE.MeshPhysicalMaterial({ color: 0xc9e2ed, roughness: 0.06, metalness: 0.72, clearcoat: 0.6 }), 0, h / 2, d / 2 + 4, 7);
@@ -834,12 +862,21 @@
         addPanel(group, w, h - basinH, d * 0.9, materials.body, 0, (h - basinH) / 2, -d * 0.04, 6);
         [0.32, 0.68].forEach((ratio) => addPanel(group, w - 24, (h - basinH) * 0.42, 18, materials.facade, 0, (h - basinH) * ratio, d * 0.45, 4));
       }
-      const basin = new THREE.Mesh(prepareGeometry(new THREE.SphereGeometry(1, 28, 16)), bath.porcelain);
-      basin.scale.set(w * 0.48, basinH * 0.5, d * 0.46);
-      basin.position.set(0, h - basinH * 0.48, 0);
+      const basinY = item.type === "bath_vanity" ? h - basinH * 0.38 : basinH * 0.52;
+      const basin = new THREE.Mesh(prepareGeometry(new THREE.SphereGeometry(1, 32, 18, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2)), bath.porcelain);
+      basin.scale.set(w * 0.48, basinH * 0.72, d * 0.46);
+      basin.position.set(0, basinY, 0);
       group.add(basin);
-      addPanel(group, 18, basinH * 1.2, 18, bath.chrome, 0, h + basinH * 0.42, -d * 0.18, 3);
-      addPanel(group, w * 0.18, 16, 18, bath.chrome, w * 0.08, h + basinH * 0.92, -d * 0.18, 3);
+      addEllipticRing(group, w * 0.94, d * 0.88, 18, basinY + 3, 0, bath.porcelain);
+      const cavity = new THREE.Mesh(prepareGeometry(new THREE.CircleGeometry(1, 40)), bath.cavity);
+      cavity.rotation.x = -Math.PI / 2;
+      cavity.scale.set(w * 0.34, d * 0.31, 1);
+      cavity.position.set(0, basinY + 7, 0);
+      group.add(cavity);
+      const drain = new THREE.Mesh(prepareGeometry(new THREE.CylinderGeometry(24, 24, 5, 24)), bath.chrome);
+      drain.position.set(0, basinY + 11, d * 0.03);
+      group.add(drain);
+      addMixer(group, -w * 0.18, basinY + 4, -d * 0.34, Math.min(w, d) * 0.26, bath.chrome);
     }
     return finishFurnitureGroup(group, w, h, d);
   }

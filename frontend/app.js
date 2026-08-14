@@ -141,7 +141,30 @@ const texturePresets = {
   countertop_kedr: { title: "Кедр", material: "wood", color: "#9B6B4A" },
   countertop_quartz: { title: "Кварцевый агломерат", material: "stone", color: "#D6CEC3" },
   countertop_compact: { title: "Компакт плита", material: "laminate", color: "#8B8F93" },
+  ceramic_white: { title: "Санитарная керамика · белая", material: "ceramic", color: "#F7F8F8" },
+  ceramic_black: { title: "Санитарная керамика · графит", material: "ceramic", color: "#303438" },
+  stone_marble: { title: "Литьевой мрамор", material: "stone", color: "#E5E1D9" },
+  glass_clear: { title: "Закалённое прозрачное стекло", material: "glass", color: "#CDE7EE" },
+  chrome_polished: { title: "Полированный хром", material: "metal", color: "#D6DCE1" },
 };
+
+const materialOptions = Object.fromEntries(Object.entries(texturePresets).map(([value, preset]) => [value, preset.title]));
+const bathroomFixtureTypes = new Set(["bathroom_sink", "bathroom_bathtub", "bathroom_toilet"]);
+const allowedMaterialsByType = {
+  bathroom_sink: ["ceramic_white", "ceramic_black", "stone_marble"],
+  bathroom_bathtub: ["ceramic_white", "stone_marble"],
+  bathroom_toilet: ["ceramic_white", "ceramic_black"],
+  bathroom_shower: ["glass_clear", "metal_graphite", "chrome_polished"],
+  bathroom_mirror: ["glass_clear"],
+  bath_vanity: ["mdf_film_matte", "mdf_film_gloss", "mdf_enamel", "mdf_plastic", "wood_oak", "wood_dark_oak", "stone_marble"],
+};
+
+function allowedObjectMaterials(type) {
+  if (allowedMaterialsByType[type]) return allowedMaterialsByType[type];
+  if (String(type).startsWith("appliance_")) return ["metal_graphite", "board_white", "board_black"];
+  if (["sofa", "armchair", "chair", "bed"].includes(type)) return ["fabric_gray", "wood_oak", "wood_dark_oak"];
+  return ["wood_dark_oak", "wood_oak", "mdf_matte", "board_white", "board_black", "laminate_grey", "countertop", "metal_graphite", "mdf_film_matte", "mdf_film_gloss", "mdf_enamel", "mdf_plastic"];
+}
 
 function sameOriginApiBase() {
   const { protocol, hostname, port } = window.location;
@@ -4430,11 +4453,16 @@ function syncObjectEditorControls() {
   const countertopEl = document.getElementById("objCountertopType");
 
   const type = typeEl?.value || "";
+  const previousTexture = textureEl?.value || "";
+  const allowedMaterials = allowedObjectMaterials(type);
+  if (textureEl) {
+    textureEl.innerHTML = allowedMaterials
+      .map((value) => `<option value="${value}">${escapeHtml(materialOptions[value] || value)}</option>`)
+      .join("");
+    textureEl.value = allowedMaterials.includes(previousTexture) ? previousTexture : allowedMaterials[0];
+  }
   const texture = textureEl?.value || "";
   const isAppliance = String(type).startsWith("appliance_");
-  if (isAppliance && textureEl && textureEl.value !== "metal_graphite") {
-    textureEl.value = "metal_graphite";
-  }
 
   const millingAllowed = texture === "mdf_film_matte" || texture === "mdf_film_gloss";
   if (millingRow) millingRow.classList.toggle("d-none", !millingAllowed);
@@ -4447,8 +4475,9 @@ function syncObjectEditorControls() {
   const useCustomColorEl = document.getElementById("objUseCustomColor");
   const customColorEl = document.getElementById("objCustomColor");
   if (useCustomColorEl && customColorEl) {
-    useCustomColorEl.disabled = isAppliance;
-    if (isAppliance) {
+    const fixedFinish = isAppliance || bathroomFixtureTypes.has(type) || type === "bathroom_shower" || type === "bathroom_mirror";
+    useCustomColorEl.disabled = fixedFinish;
+    if (fixedFinish) {
       useCustomColorEl.checked = false;
       customColorEl.disabled = true;
     } else {
@@ -4662,6 +4691,7 @@ async function boot() {
   document.getElementById("objTexture")?.addEventListener("change", () => {
     syncObjectEditorControls();
   });
+  document.getElementById("objType")?.addEventListener("change", syncObjectEditorControls);
   syncObjectEditorControls();
 
   try {
