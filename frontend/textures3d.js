@@ -509,6 +509,7 @@
         clearcoat: definition.clearcoat,
       };
       applyBundleToMaterial(material, enriched, transform, type);
+      window.__requestRoom3DRender?.();
     });
 
     return material;
@@ -752,6 +753,97 @@
     return finishFurnitureGroup(group, w, h, d);
   }
 
+  function buildBedGroup(item, w, h, d, materials) {
+    const group = new THREE.Group();
+    const frameH = clamp(h * 0.22, 180, 320);
+    const mattressH = clamp(h * 0.18, 170, 260);
+    const headboardD = clamp(d * 0.045, 70, 120);
+    const mattress = cloneMaterialTone(materials.facade, 1.12);
+    const pillow = cloneMaterialTone(materials.facade, 1.28);
+    addPanel(group, w, frameH, d, materials.body, 0, frameH / 2, 0, 8);
+    addPanel(group, w * 0.94, mattressH, d * 0.86, mattress, 0, frameH + mattressH / 2, d * 0.03, 24);
+    addPanel(group, w, h, headboardD, materials.body, 0, h / 2, -d / 2 + headboardD / 2, 12);
+    [-0.25, 0.25].forEach((x) => {
+      const cushion = addPanel(group, w * 0.4, mattressH * 0.42, d * 0.2, pillow, x * w, frameH + mattressH * 1.05, -d * 0.27, 26);
+      cushion.rotation.x = -0.08;
+    });
+    return finishFurnitureGroup(group, w, h, d);
+  }
+
+  function buildChairGroup(item, w, h, d, materials) {
+    const group = new THREE.Group();
+    const seatY = clamp(h * 0.46, 390, 520);
+    const seatH = clamp(h * 0.08, 65, 110);
+    const legSize = clamp(Math.min(w, d) * 0.07, 32, 55);
+    addPanel(group, w * 0.78, seatH, d * 0.72, materials.facade, 0, seatY, d * 0.04, 14);
+    addPanel(group, w * 0.76, h - seatY, clamp(d * 0.12, 70, 130), materials.facade, 0, seatY + (h - seatY) / 2, -d * 0.35, 18);
+    [-1, 1].forEach((sx) => [-1, 1].forEach((sz) => addPanel(group, legSize, seatY - seatH / 2, legSize, materials.handles, sx * w * 0.3, (seatY - seatH / 2) / 2, sz * d * 0.27, 2)));
+    return finishFurnitureGroup(group, w, h, d);
+  }
+
+  function bathroomMaterials() {
+    return {
+      porcelain: new THREE.MeshPhysicalMaterial({ color: 0xf5f7f8, roughness: 0.2, metalness: 0, clearcoat: 0.35 }),
+      chrome: new THREE.MeshStandardMaterial({ color: 0xb8c0c8, roughness: 0.18, metalness: 0.95 }),
+      glass: new THREE.MeshPhysicalMaterial({ color: 0xcfe8f3, roughness: 0.08, metalness: 0, transparent: true, opacity: 0.28, depthWrite: false, side: THREE.DoubleSide }),
+      dark: new THREE.MeshStandardMaterial({ color: 0x374151, roughness: 0.35, metalness: 0.55 }),
+    };
+  }
+
+  function buildBathroomGroup(item, w, h, d, materials) {
+    const group = new THREE.Group();
+    const bath = bathroomMaterials();
+    if (item.type === "bathroom_bathtub") {
+      const rim = clamp(Math.min(w, d) * 0.075, 45, 85);
+      const baseH = clamp(h * 0.24, 110, 180);
+      addPanel(group, w, baseH, d, bath.porcelain, 0, baseH / 2, 0, 28);
+      addPanel(group, w, rim, rim, bath.porcelain, 0, h - rim / 2, -d / 2 + rim / 2, 20);
+      addPanel(group, w, rim, rim, bath.porcelain, 0, h - rim / 2, d / 2 - rim / 2, 20);
+      addPanel(group, rim, h - baseH, d - rim * 2, bath.porcelain, -w / 2 + rim / 2, baseH + (h - baseH) / 2, 0, 20);
+      addPanel(group, rim, h - baseH, d - rim * 2, bath.porcelain, w / 2 - rim / 2, baseH + (h - baseH) / 2, 0, 20);
+      addPanel(group, w - rim * 2, 8, d - rim * 2, bath.glass, 0, baseH + 10, 0, 4);
+    } else if (item.type === "bathroom_shower") {
+      const frame = clamp(Math.min(w, d) * 0.025, 18, 32);
+      addPanel(group, w, 55, d, bath.porcelain, 0, 27.5, 0, 12);
+      addPanel(group, frame, h, d, bath.dark, -w / 2 + frame / 2, h / 2, 0, 2);
+      addPanel(group, frame, h, d, bath.dark, w / 2 - frame / 2, h / 2, 0, 2);
+      addPanel(group, w - frame * 2, h - 70, 12, bath.glass, 0, h / 2 + 25, d / 2 - 8, 2);
+      addPanel(group, 12, h - 70, d - frame * 2, bath.glass, -w / 2 + 8, h / 2 + 25, 0, 2);
+      addPanel(group, 14, h * 0.7, 14, bath.chrome, w * 0.3, h * 0.43, -d * 0.38, 3);
+      const head = new THREE.Mesh(prepareGeometry(new THREE.CylinderGeometry(55, 55, 18, 24)), bath.chrome);
+      head.rotation.x = Math.PI / 2;
+      head.position.set(w * 0.3, h * 0.8, -d * 0.3);
+      group.add(head);
+    } else if (item.type === "bathroom_toilet") {
+      addPanel(group, w * 0.84, h * 0.58, d * 0.32, bath.porcelain, 0, h * 0.7, -d * 0.32, 28);
+      const bowl = new THREE.Mesh(prepareGeometry(new THREE.SphereGeometry(1, 28, 18)), bath.porcelain);
+      bowl.scale.set(w * 0.48, h * 0.24, d * 0.42);
+      bowl.position.set(0, h * 0.35, d * 0.12);
+      group.add(bowl);
+      const seat = new THREE.Mesh(prepareGeometry(new THREE.TorusGeometry(1, 0.18, 10, 30)), bath.porcelain);
+      seat.rotation.x = Math.PI / 2;
+      seat.scale.set(w * 0.36, d * 0.32, 16);
+      seat.position.set(0, h * 0.58, d * 0.12);
+      group.add(seat);
+    } else if (item.type === "bathroom_mirror") {
+      addPanel(group, w, h, Math.max(d, 22), bath.dark, 0, h / 2, 0, 8);
+      addPanel(group, w - 28, h - 28, 5, new THREE.MeshPhysicalMaterial({ color: 0xc9e2ed, roughness: 0.06, metalness: 0.72, clearcoat: 0.6 }), 0, h / 2, d / 2 + 4, 7);
+    } else {
+      const basinH = item.type === "bath_vanity" ? clamp(h * 0.18, 100, 170) : h;
+      if (item.type === "bath_vanity") {
+        addPanel(group, w, h - basinH, d * 0.9, materials.body, 0, (h - basinH) / 2, -d * 0.04, 6);
+        [0.32, 0.68].forEach((ratio) => addPanel(group, w - 24, (h - basinH) * 0.42, 18, materials.facade, 0, (h - basinH) * ratio, d * 0.45, 4));
+      }
+      const basin = new THREE.Mesh(prepareGeometry(new THREE.SphereGeometry(1, 28, 16)), bath.porcelain);
+      basin.scale.set(w * 0.48, basinH * 0.5, d * 0.46);
+      basin.position.set(0, h - basinH * 0.48, 0);
+      group.add(basin);
+      addPanel(group, 18, basinH * 1.2, 18, bath.chrome, 0, h + basinH * 0.42, -d * 0.18, 3);
+      addPanel(group, w * 0.18, 16, 18, bath.chrome, w * 0.08, h + basinH * 0.92, -d * 0.18, 3);
+    }
+    return finishFurnitureGroup(group, w, h, d);
+  }
+
   function addKnob(group, x, y, z, radius, material) {
     const knob = new THREE.Mesh(prepareGeometry(new THREE.CylinderGeometry(radius, radius, 7, 16)), material);
     knob.rotation.x = Math.PI / 2;
@@ -890,6 +982,27 @@
       }
     }
 
+    if (type === "appliance_washer") {
+      addPanel(group, w - 24, h - 30, doorDepth, doorMat, 0, h / 2, frontZ, 5);
+      const outer = new THREE.Mesh(prepareGeometry(new THREE.CylinderGeometry(w * 0.27, w * 0.27, 20, 32)), trimMat);
+      outer.rotation.x = Math.PI / 2;
+      outer.position.set(0, h * 0.45, frontZ + 14);
+      group.add(outer);
+      const glass = new THREE.Mesh(prepareGeometry(new THREE.CylinderGeometry(w * 0.21, w * 0.21, 22, 32)), glassMat);
+      glass.rotation.x = Math.PI / 2;
+      glass.position.set(0, h * 0.45, frontZ + 18);
+      group.add(glass);
+      addPanel(group, w * 0.5, h * 0.12, 8, trimMat, -w * 0.16, h * 0.86, frontZ + 6, 2);
+      addKnob(group, w * 0.3, h * 0.86, frontZ + 10, clamp(w * 0.05, 18, 30), knobMat);
+    }
+
+    if (type === "appliance_dishwasher") {
+      addPanel(group, w - 22, h - 24, doorDepth, doorMat, 0, h / 2, frontZ, 4);
+      addPanel(group, w - 46, h * 0.08, 7, trimMat, 0, h * 0.88, frontZ + 8, 2);
+      addHandleBar(group, 0, h * 0.78, frontZ + doorDepth, false, handleMat);
+      addKnob(group, w * 0.32, h * 0.88, frontZ + 12, 9, knobMat);
+    }
+
     return finishFurnitureGroup(group, w, h, d);
   }
 
@@ -898,11 +1011,20 @@
     if (String(item.type || "").startsWith("appliance_")) {
       return buildApplianceGroup(item, w, h, d, materialSet);
     }
-    if (item.type === "wardrobe") {
+    if (["wardrobe", "wardrobe_sliding", "wardrobe_corner"].includes(item.type)) {
       return buildWardrobeGroup(item, w, h, d, materialSet);
     }
-    if (item.type === "sofa") {
+    if (item.type === "sofa" || item.type === "armchair") {
       return buildSofaGroup(item, w, h, d, materialSet);
+    }
+    if (item.type === "chair") {
+      return buildChairGroup(item, w, h, d, materialSet);
+    }
+    if (item.type === "bed") {
+      return buildBedGroup(item, w, h, d, materialSet);
+    }
+    if (String(item.type || "").startsWith("bathroom_") || item.type === "bath_vanity") {
+      return buildBathroomGroup(item, w, h, d, materialSet);
     }
     if (item.type === "table") {
       return buildTableGroup(item, w, h, d, materialSet);
