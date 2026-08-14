@@ -6,6 +6,7 @@ import { RenderScheduler } from "/planner-modules/core/RenderScheduler.js";
 import { ResourceManager } from "/planner-modules/core/ResourceManager.js";
 import { HistoryManager } from "/planner-modules/interaction/HistoryManager.js";
 import { findCollisions } from "/planner-modules/interaction/CollisionController.js";
+import { PlannerDiagnostics } from "/planner-modules/core/PlannerDiagnostics.js";
 
 const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
 const APP_MODE = window.APP_MODE || "user";
@@ -1568,13 +1569,14 @@ function furnitureAccessoryDefaults(type) {
 
 function disposeRoom3D() {
   if (!state.three) return;
-  const { renderer, host, dimensionManager, resizeObserver, animationFrame, renderScheduler, resourceManager, resizeHandler } = state.three;
+  const { renderer, host, dimensionManager, resizeObserver, animationFrame, renderScheduler, resourceManager, diagnostics, resizeHandler } = state.three;
   resizeObserver?.disconnect();
   if (animationFrame) cancelAnimationFrame(animationFrame);
   renderScheduler?.dispose();
   if (resizeHandler) window.removeEventListener("resize", resizeHandler);
   dimensionManager?.dispose();
   resourceManager?.dispose();
+  diagnostics?.dispose();
   window.__room3dRenderer = null;
   if (renderer) {
     renderer.dispose();
@@ -1733,11 +1735,13 @@ function initRoom3D() {
     target: new THREE.Vector3(0, 1000, 0),
   };
   const resourceManager = new ResourceManager();
-  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, dimensionManager, host, orbit, objectGroups: new Map(), resourceManager };
+  const diagnostics = new PlannerDiagnostics(renderer);
+  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, dimensionManager, host, orbit, objectGroups: new Map(), resourceManager, diagnostics };
   state.three.renderScheduler = new RenderScheduler(() => {
     if (!state.three) return;
     dimensionManager?.update(camera, renderer);
     renderer.render(scene, camera);
+    diagnostics.update({ objects: state.objects3d.length });
   });
   window.__requestRoom3DRender = requestRoom3DRender;
   if (window.ResizeObserver) {
@@ -2418,7 +2422,15 @@ function buildBomFromObjects() {
     const facadeMultiplier =
       item.milling && (item.texture === "mdf_film_matte" || item.texture === "mdf_film_gloss") ? 1.3 : 1;
 
-    if (["wardrobe", "wardrobe_sliding", "wardrobe_corner", "shelf"].includes(item.type)) {
+    const definition = furnitureRegistry.get(item.type);
+    if (definition && (definition.category === "kitchen" || definition.category === "wardrobe")) {
+      const production = definition.buildBom(migrateLegacyObject(item));
+      production.parts.forEach((part) => pushPart(part.id, part.dimensions.width, part.dimensions.height, part.quantity || 1, { costMultiplier: part.role === "facade" ? facadeMultiplier : 1 }));
+      assembly.push(...(production.assembly || []).map((step) => `${item.name}: ${step}`));
+      continue;
+    }
+
+    if (item.type === "shelf") {
       pushPart("Боковина", d, h, 2);
       pushPart("Крышка/дно", w, d, 2);
       pushPart("Полка", Math.max(w - 36, 100), d, Math.max(2, Math.round(h / 500)));

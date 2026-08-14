@@ -1,5 +1,7 @@
+import { registerKitchenDefinitions } from "./kitchen.js";
+import { registerWardrobeDefinition } from "./wardrobe.js";
+
 const TYPES = [
-  ["wardrobe", "Wardrobe", "wardrobe"], ["wardrobe_sliding", "Sliding wardrobe", "wardrobe"], ["wardrobe_corner", "Corner wardrobe", "wardrobe"],
   ["cabinet", "Cabinet", "storage"], ["shelf", "Shelf", "storage"], ["table", "Table", "table"], ["sofa", "Sofa", "seating"],
   ["armchair", "Armchair", "seating"], ["chair", "Chair", "seating"], ["bed", "Bed", "bedroom"], ["bath_vanity", "Vanity", "bathroom"],
   ["bathroom_sink", "Sink", "bathroom"], ["bathroom_bathtub", "Bathtub", "bathroom"], ["bathroom_shower", "Shower", "bathroom"],
@@ -23,5 +25,7 @@ export function registerBuiltInFurniture(registry) {
     validateConfiguration: validate, getBounds: bounds, buildBom: genericBom,
     buildGeometry(placement, context) { return context.buildLegacy(placement); },
   });
+  registerKitchenDefinitions(registry);
+  registerWardrobeDefinition(registry);
   return registry;
 }

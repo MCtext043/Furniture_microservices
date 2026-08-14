@@ -6,6 +6,8 @@ import { serializeScene } from "./persistence/SceneSerializer.js";
 import { RenderScheduler } from "./core/RenderScheduler.js";
 import { HistoryManager } from "./interaction/HistoryManager.js";
 import { intersectsOriented } from "./interaction/CollisionController.js";
+import { registerBuiltInFurniture } from "./furniture/definitions/index.js";
+import { KitchenRun } from "./furniture/definitions/kitchen.js";
 
 test("FurnitureRegistry rejects duplicates and delegates behavior", () => {
   const registry = new FurnitureRegistry();
@@ -51,4 +53,20 @@ test("oriented collision uses SAT for arbitrary rotations", () => {
   const a = { x: 0, z: 0, width: 100, depth: 40, rotationY: 45 };
   assert.equal(intersectsOriented(a, { x: 30, z: 0, width: 80, depth: 30, rotationY: -20 }), true);
   assert.equal(intersectsOriented(a, { x: 300, z: 0, width: 80, depth: 30, rotationY: -20 }), false);
+});
+
+test("kitchen modules build production parts and a continuous countertop", () => {
+  const registry=registerBuiltInFurniture(new FurnitureRegistry()); const definition=registry.require("kitchen.base_cabinet");
+  const placement={type:"kitchen.base_cabinet",configuration:{...definition.defaults}};
+  assert.ok(definition.buildBom(placement).parts.some(p=>p.id==="outer-side"||p.id==="side"));
+  const run=new KitchenRun([placement,{...placement,configuration:{...placement.configuration,width:800}}]);
+  assert.equal(run.buildProduction().parts[0].dimensions.width,1400);
+});
+
+test("wardrobe validates section widths and builds module BOM", () => {
+  const registry=registerBuiltInFurniture(new FurnitureRegistry()); const definition=registry.require("wardrobe.system");
+  const configuration={...definition.defaults,width:1600,sections:[{width:800,modules:[{type:"shelves",count:5}]},{width:800,modules:[{type:"drawers",count:3},{type:"rail",height:1100}]}]};
+  assert.equal(definition.validateConfiguration(configuration).valid,true);
+  const parts=definition.buildBom({configuration}).parts;
+  assert.ok(parts.some(p=>p.role==="rail")); assert.ok(parts.some(p=>p.id.includes("drawer")));
 });
