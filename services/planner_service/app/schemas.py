@@ -39,6 +39,9 @@ class ProjectOut(ProjectCreate):
     id: int
     status: str
     submitted_at: str | None = None
+    schema_version: int = 2
+    scene_revision: int = 0
+    room_finish_json: dict = Field(default_factory=dict)
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -56,9 +59,43 @@ class FurnitureCreate(BaseModel):
     custom_color: str = Field(default="", max_length=16)
     drawers: int = Field(default=0, ge=0, le=20)
     handles: int = Field(default=0, ge=0, le=40)
+    client_id: str | None = Field(default=None, max_length=64)
+    definition_id: str = Field(default="legacy.cabinet.v1", max_length=120)
+    definition_version: int = Field(default=1, ge=1)
+    configuration_json: dict = Field(default_factory=dict)
+    appearance_json: dict = Field(default_factory=dict)
+    renderer_mode: str = Field(default="parametric", pattern=r"^(parametric|gltf|hybrid)$")
+    model_asset_key: str | None = Field(default=None, max_length=255)
+    model_version: int | None = Field(default=None, ge=1)
 
 
 class FurnitureOut(FurnitureCreate):
     id: int
     project_id: int
     model_config = ConfigDict(from_attributes=True)
+
+
+class RoomState(BaseModel):
+    width: float = Field(gt=0)
+    length: float = Field(gt=0)
+    height: float = Field(gt=0)
+    finish: dict = Field(default_factory=dict)
+
+
+class ScenePlacement(FurnitureCreate):
+    client_id: str = Field(min_length=1, max_length=64)
+
+
+class SceneSaveIn(BaseModel):
+    schema_version: int = Field(default=2, ge=1)
+    expected_revision: int = Field(default=0, ge=0)
+    room: RoomState
+    placements: list[ScenePlacement] = Field(default_factory=list, max_length=500)
+    bom_json: str | None = None
+
+
+class SceneOut(BaseModel):
+    schema_version: int
+    revision: int
+    room: RoomState
+    placements: list[FurnitureOut]
