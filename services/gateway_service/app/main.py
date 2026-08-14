@@ -51,6 +51,15 @@ BACKENDS = {
     "assets": _env_url("GATEWAY_ASSETS_URL", "http://localhost:8005"),
 }
 
+FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend"
+FRONTEND_ASSETS_DIR = FRONTEND_DIR / "assets"
+if FRONTEND_ASSETS_DIR.is_dir():
+    app.mount(
+        "/frontend-assets",
+        StaticFiles(directory=str(FRONTEND_ASSETS_DIR)),
+        name="frontend-assets",
+    )
+
 
 async def _forward(request: Request, base_url: str, path: str) -> Response:
     target = f"{base_url.rstrip('/')}/{path}" if path else base_url.rstrip("/")
@@ -91,6 +100,5 @@ def _register_proxy(prefix: str, base_url: str) -> None:
 for segment, target in BACKENDS.items():
     _register_proxy(segment, target)
 
-FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend"
 if FRONTEND_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")

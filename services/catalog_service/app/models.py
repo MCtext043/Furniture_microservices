@@ -90,6 +90,7 @@ class CrmMaterial(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(120), unique=True, index=True)
     unit: Mapped[str] = mapped_column(String(20), default="шт")
+    purchase_price_rub: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
 
 
 class CrmWarehouseStock(Base):
@@ -129,6 +130,22 @@ class CrmOrderPhoto(Base):
     order: Mapped[CrmProductionOrder] = relationship()
 
 
+class CrmOrderReceipt(Base):
+    """Photo of a purchase receipt uploaded by one admin so another can verify the buy."""
+
+    __tablename__ = "crm_order_receipts"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("crm_production_orders.id", ondelete="CASCADE"), index=True)
+    object_key: Mapped[str] = mapped_column(String(255))
+    note: Mapped[str] = mapped_column(String(255), default="")
+    amount_rub: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    uploaded_by: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    order: Mapped[CrmProductionOrder] = relationship()
+
+
 class CrmOrderMaterial(Base):
     __tablename__ = "crm_order_materials"
 
@@ -136,6 +153,25 @@ class CrmOrderMaterial(Base):
     order_id: Mapped[int] = mapped_column(ForeignKey("crm_production_orders.id"), index=True)
     material_id: Mapped[int] = mapped_column(ForeignKey("crm_materials.id"), index=True)
     required_qty: Mapped[float] = mapped_column(Numeric(12, 2))
+
+    material: Mapped[CrmMaterial] = relationship()
+    order: Mapped[CrmProductionOrder] = relationship()
+
+
+class CrmOrderProcurement(Base):
+    __tablename__ = "crm_order_procurements"
+    __table_args__ = (
+        UniqueConstraint("order_id", "material_id", name="uq_crm_order_procurement_order_material"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("crm_production_orders.id", ondelete="CASCADE"), index=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("crm_materials.id", ondelete="CASCADE"), index=True)
+
+    to_buy_qty: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    unit_price_rub: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    purchased_qty: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    is_purchased: Mapped[bool] = mapped_column(Boolean, default=False)
 
     material: Mapped[CrmMaterial] = relationship()
     order: Mapped[CrmProductionOrder] = relationship()

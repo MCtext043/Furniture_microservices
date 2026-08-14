@@ -23,6 +23,7 @@ done
 if [[ -f "${SECRETS}" ]]; then
   echo "Applying deploy/local.env as server .env ..."
   cp "${SECRETS}" .env
+  sed -i 's/\r$//' .env
   chmod 600 .env
 elif [[ ! -f .env ]]; then
   echo "No .env on server - creating from deploy/server.env.sample"

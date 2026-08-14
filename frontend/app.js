@@ -2,6 +2,7 @@ const APP_MODE = window.APP_MODE || "user";
 const LS_API = "furniture_gateway_url";
 const LS_TOKEN = "furniture_jwt";
 const LS_CUSTOMER = "furniture_customer_name";
+const LS_THEME = "woodcraft_theme";
 
 const state = {
   categories: [],
@@ -17,17 +18,29 @@ const state = {
   three: null,
   cuttingParts: [],
   roomConfig: { width: 6000, length: 5000, height: 2800 },
+  roomFinish: {
+    floorTexture: "wood_oak",
+    wallTexture: "wall_default",
+    useCustomColors: false,
+    floorColor: "#E9DCCB",
+    wallColor: "#FAF7F2",
+  },
   objects3d: [],
-  drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0 },
-  rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0 },
-  cameraDrag: { active: false, startX: 0, startY: 0 },
+  objectEditor: { section: "living" },
+  drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0, scale: 1, wrapEl: null, chipEl: null },
+  rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0, scale: 1, wrapEl: null, chipEl: null },
+  cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0 },
   lastCutResult: null,
   selectedCutJobId: null,
   crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active" },
   userOrders: [],
   userProjects: [],
   selectedTier: "standard",
+  selected3dObjectId: null,
   productPhotoUrls: {},
+  wishlistIds: new Set(),
+  commercePending: new Set(),
+  plannerStep: 1,
 };
 
 const productEditorPhotos = { existing: [], pending: [], removed: [] };
@@ -88,18 +101,33 @@ const typePresets = {
   shelf: { title: "Стеллаж", color: "#B08968", texture: "wood" },
   table: { title: "Стол", color: "#4B5563", texture: "metal" },
   sofa: { title: "Диван", color: "#64748B", texture: "fabric" },
+  appliance_fridge: { title: "Холодильник", color: "#D1D5DB", texture: "metal" },
+  appliance_microwave: { title: "СВЧ", color: "#9CA3AF", texture: "metal" },
+  appliance_hood: { title: "Вытяжка", color: "#9CA3AF", texture: "metal" },
+  appliance_hood_builtin: { title: "Вытяжка (встраиваемая)", color: "#9CA3AF", texture: "metal" },
+  appliance_stove_gas: { title: "Плита (газовая)", color: "#6B7280", texture: "metal" },
+  appliance_stove_electric: { title: "Плита (электро)", color: "#6B7280", texture: "metal" },
+  appliance_oven: { title: "Духовой шкаф", color: "#6B7280", texture: "metal" },
 };
 
 const texturePresets = {
   wood_dark_oak: { title: "Темный дуб", material: "wood", color: "#6B4423" },
   wood_oak: { title: "Светлый дуб", material: "wood", color: "#B68655" },
   board_black: { title: "Черное ДСП", material: "board", color: "#222629" },
-  board_white: { title: "Белое ДСП", material: "board", color: "#F4F5F7" },
+  board_white: { title: "Белое ДСП", material: "board", color: "#E8E8E4" },
   fabric_gray: { title: "Серая ткань", material: "fabric", color: "#6C757D" },
   metal_graphite: { title: "Графитовый металл", material: "metal", color: "#495057" },
-  mdf_matte: { title: "МДФ матовый", material: "mdf", color: "#E8E4DE" },
-  laminate_grey: { title: "Ламинат серый", material: "laminate", color: "#9CA3AF" },
-  countertop: { title: "Столешница", material: "stone", color: "#D1C7BD" },
+  mdf_matte: { title: "МДФ матовый", material: "mdf", color: "#B8AEA2" },
+  laminate_grey: { title: "Ламинат серый", material: "laminate", color: "#85898B" },
+  countertop: { title: "Столешница", material: "stone", color: "#C4B5A3" },
+  mdf_film_matte: { title: "МДФ в плёнке (матовая)", material: "mdf", color: "#C8BBAA" },
+  mdf_film_gloss: { title: "МДФ в плёнке (глянцевая)", material: "laminate", color: "#D7CBBF" },
+  mdf_enamel: { title: "МДФ в эмали", material: "mdf", color: "#E5E7EB" },
+  mdf_plastic: { title: "МДФ пластик", material: "laminate", color: "#9CA3AF" },
+  countertop_skif: { title: "Скиф", material: "laminate", color: "#B9B3AA" },
+  countertop_kedr: { title: "Кедр", material: "wood", color: "#9B6B4A" },
+  countertop_quartz: { title: "Кварцевый агломерат", material: "stone", color: "#D6CEC3" },
+  countertop_compact: { title: "Компакт плита", material: "laminate", color: "#8B8F93" },
 };
 
 function sameOriginApiBase() {
@@ -168,12 +196,17 @@ async function refreshAuth() {
     if (me.username) setCustomerName(me.username);
   } catch {
     setToken("");
+    setCustomerName("");
     state.roles = [];
   }
 }
 
 function customerName() {
   return localStorage.getItem(LS_CUSTOMER) || "";
+}
+
+function isAuthenticated() {
+  return Boolean(token() && customerName());
 }
 
 function setCustomerName(value) {
@@ -183,9 +216,12 @@ function setCustomerName(value) {
 
 function updateAccountButton() {
   const btn = document.getElementById("accountBtn");
-  if (!btn) return;
   const name = customerName();
-  btn.textContent = name ? `Кабинет: ${name}` : "Войти";
+  if (btn) btn.textContent = name ? `Кабинет: ${name}` : "Войти";
+  document.getElementById("accountGuest")?.classList.toggle("d-none", Boolean(name));
+  document.getElementById("accountMember")?.classList.toggle("d-none", !name);
+  const memberName = document.getElementById("accountMemberName");
+  if (memberName) memberName.textContent = name;
   const ordersTab = document.getElementById("userOrdersTabNav");
   const projectsTab = document.getElementById("userProjectsTabNav");
   if (ordersTab) ordersTab.classList.toggle("d-none", !name);
@@ -194,6 +230,45 @@ function updateAccountButton() {
     loadUserOrders();
     loadUserProjects();
   }
+  updatePlannerAuthUi();
+}
+
+function logoutCustomer() {
+  setToken("");
+  setCustomerName("");
+  state.roles = [];
+  state.cart = [];
+  state.wishlistIds.clear();
+  state.userOrders = [];
+  state.userProjects = [];
+  renderCart();
+  renderProducts();
+  toast("Вы вышли из аккаунта");
+}
+
+function updatePlannerAuthUi() {
+  const hint = document.getElementById("plannerHint");
+  if (!hint) return;
+  if (!isAuthenticated()) {
+    hint.textContent = "Войдите, чтобы сохранить проект на сервере.";
+  } else if (hint.textContent.includes("Войдите")) {
+    hint.textContent = "Проект можно сохранить или отправить в работу.";
+  }
+}
+
+function applyTheme(theme) {
+  const resolved = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = resolved;
+  localStorage.setItem(LS_THEME, resolved);
+  const button = document.getElementById("themeToggle");
+  if (button) {
+    button.querySelector("span").textContent = resolved === "dark" ? "☀" : "☾";
+    button.setAttribute("aria-label", resolved === "dark" ? "Включить светлую тему" : "Включить тёмную тему");
+  }
+}
+
+function toggleTheme() {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
 }
 
 function money(value) {
@@ -202,9 +277,11 @@ function money(value) {
 
 function toast(message, ok = true) {
   const host = document.querySelector(".toast-container");
+  if (!host) return;
   const el = document.createElement("div");
   el.className = `toast align-items-center text-bg-${ok ? "success" : "danger"} border-0 show`;
-  el.innerHTML = `<div class="d-flex"><div class="toast-body">${escapeHtml(message)}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div>`;
+  el.setAttribute("role", ok ? "status" : "alert");
+  el.innerHTML = `<div class="d-flex"><div class="toast-body">${escapeHtml(message)}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Закрыть уведомление"></button></div>`;
   host.appendChild(el);
   setTimeout(() => el.remove(), 4500);
 }
@@ -218,7 +295,39 @@ function formatApiError(error) {
 }
 
 function escapeHtml(value) {
-  return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function normalizeSearch(value) {
+  return String(value || "").trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ");
+}
+
+let pdfMakeLoadPromise = null;
+function loadExternalScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) { existing.addEventListener("load", resolve, { once: true }); existing.addEventListener("error", reject, { once: true }); return; }
+    const script = document.createElement("script");
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Не удалось загрузить ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+async function ensurePdfMake() {
+  if (window.pdfMake) return true;
+  if (!pdfMakeLoadPromise) {
+    pdfMakeLoadPromise = loadExternalScript("https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js")
+      .then(() => loadExternalScript("https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"));
+  }
+  try { await pdfMakeLoadPromise; return Boolean(window.pdfMake); }
+  catch (error) { pdfMakeLoadPromise = null; toast("Не удалось загрузить модуль PDF", false); return false; }
 }
 
 function makeId() {
@@ -436,7 +545,6 @@ async function loginCustomer() {
     setToken(data.access_token);
     setCustomerName(username);
     await refreshAuth();
-    closeAccountModal();
     if (APP_MODE === "admin" && !canManageCatalog() && !canRunCutting()) {
       setToken("");
       setCustomerName("");
@@ -445,7 +553,12 @@ async function loginCustomer() {
       return;
     }
     toast(`Добро пожаловать, ${username}`);
-    if (APP_MODE === "admin") bootAdminPanel();
+    if (APP_MODE === "admin") {
+      closeAccountModal();
+      bootAdminPanel();
+    } else {
+      await Promise.all([loadCommerceState(), loadUserProjects(), loadUserOrders()]);
+    }
   } catch (error) {
     toast(`Не удалось войти: ${formatApiError(error)}`, false);
   }
@@ -563,7 +676,10 @@ async function loadCatalog() {
   if (statC) statC.textContent = state.categories.length;
   renderCategories();
   if (APP_MODE === "admin") renderAdminCatalogTable();
-  else renderProducts();
+  else {
+    renderProducts();
+    await loadCommerceState();
+  }
 }
 
 function demoMeta(product) {
@@ -591,41 +707,60 @@ function renderCategories() {
   if (!host) return;
   const counts = new Map();
   state.products.forEach((p) => counts.set(p.category_id, (counts.get(p.category_id) || 0) + 1));
-  const buttons = [`<button class="btn btn-sm category-pill ${state.activeCategory === "all" ? "active" : ""}" data-cat="all">Все (${state.products.length})</button>`];
+  const buttons = [`<button class="category-pill ${state.activeCategory === "all" ? "active" : ""}" data-cat="all" aria-pressed="${state.activeCategory === "all"}">Все <span>${state.products.length}</span></button>`];
   for (const cat of visibleCategories()) {
     const count = counts.get(cat.id) || 0;
     if (!count) continue;
-    buttons.push(`<button class="btn btn-sm category-pill ${state.activeCategory === String(cat.id) ? "active" : ""}" data-cat="${cat.id}">${escapeHtml(categoryName(cat.id))} (${count})</button>`);
+    const isActive = state.activeCategory === String(cat.id);
+    buttons.push(`<button class="category-pill ${isActive ? "active" : ""}" data-cat="${cat.id}" aria-pressed="${isActive}">${escapeHtml(categoryName(cat.id))} <span>${count}</span></button>`);
   }
   host.innerHTML = buttons.join("");
   host.querySelectorAll("[data-cat]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.activeCategory = btn.dataset.cat;
       renderCategories();
-      renderProducts();
+      if (APP_MODE === "admin") renderAdminCatalogTable();
+      else renderProducts();
     });
   });
 }
 
 function filteredProducts() {
-  const q = state.search.trim().toLowerCase();
-  return state.products.filter((p) => {
+  const q = normalizeSearch(state.search);
+  return state.products.map((p, index) => {
     const catOk = state.activeCategory === "all" || String(p.category_id) === state.activeCategory;
-    const qOk =
-      !q ||
-      `${displayProductTitle(p)} ${displayProductBrand(p)} ${displayProductDescription(p)}`
-        .toLowerCase()
-        .includes(q);
-    return catOk && qOk;
-  });
+    if (!catOk) return null;
+    if (!q) return { product: p, score: 0, index };
+    const title = normalizeSearch(displayProductTitle(p));
+    const category = normalizeSearch(categoryName(p.category_id));
+    const description = normalizeSearch(displayProductDescription(p));
+    const brand = normalizeSearch(displayProductBrand(p));
+    let score = -1;
+    if (title === q) score = 500;
+    else if (title.startsWith(q)) score = 400;
+    else if (title.includes(q)) score = 300;
+    else if (category.includes(q)) score = 200;
+    else if (description.includes(q)) score = 100;
+    else if (brand.includes(q) || normalizeSearch(p.sku).includes(q)) score = 50;
+    return score < 0 ? null : { product: p, score, index };
+  }).filter(Boolean).sort((a, b) => b.score - a.score || a.index - b.index).map((row) => row.product);
 }
 
 function renderProducts() {
   const host = document.getElementById("productGrid");
   if (!host) return;
+  host.setAttribute("aria-busy", "false");
   const products = filteredProducts();
   if (!products.length) {
-    host.innerHTML = `<div class="col-12 text-center text-muted py-5">По вашему запросу ничего не найдено.</div>`;
+    host.innerHTML = `<div class="col-12"><div class="empty-state"><strong>Подходящих товаров не нашлось</strong><p>Попробуйте изменить запрос или вернуться ко всем категориям.</p><button class="btn btn-secondary" type="button" data-reset-catalog>Показать все товары</button></div></div>`;
+    host.querySelector("[data-reset-catalog]")?.addEventListener("click", () => {
+      state.search = "";
+      state.activeCategory = "all";
+      const searchInput = document.getElementById("searchInput");
+      if (searchInput) searchInput.value = "";
+      renderCategories();
+      renderProducts();
+    });
     return;
   }
   const adminActions = APP_MODE === "admin";
@@ -634,31 +769,31 @@ function renderProducts() {
       const meta = demoMeta(p);
       const imgUrl = state.productPhotoUrls[p.id];
       const art = imgUrl
-        ? `<div class="product-art product-art-photo"><img src="${imgUrl}" alt="${escapeHtml(displayProductTitle(p))}"></div>`
-        : `<div class="product-art" style="background:${meta.gradient}">${meta.icon}</div>`;
+        ? `<div class="product-art product-art-photo"><img src="${imgUrl}" alt="${escapeHtml(displayProductTitle(p))}" width="640" height="460" loading="lazy" decoding="async"></div>`
+        : `<div class="product-art" style="background:${meta.gradient}" role="img" aria-label="${escapeHtml(displayProductTitle(p))}">${meta.icon}</div>`;
       const actionButtons = adminActions
         ? `<div class="btn-group">
             <button class="btn btn-outline-primary btn-sm" data-edit="${p.id}">Изменить</button>
             <button class="btn btn-outline-danger btn-sm" data-del="${p.id}">Скрыть</button>
           </div>`
-        : `<div class="btn-group">
-            <button class="btn btn-outline-secondary btn-sm" data-wish="${p.id}">♡</button>
-            <button class="btn btn-primary btn-sm" data-cart="${p.id}">В корзину</button>
+        : `<div class="product-actions">
+            <button class="btn btn-quiet btn-sm wishlist-button ${state.wishlistIds.has(p.id) ? "is-active" : ""}" data-wish="${p.id}" aria-pressed="${state.wishlistIds.has(p.id)}" aria-label="${state.wishlistIds.has(p.id) ? "Удалить" : "Добавить"} ${escapeHtml(displayProductTitle(p))} ${state.wishlistIds.has(p.id) ? "из" : "в"} избранное" title="Избранное">${state.wishlistIds.has(p.id) ? "♥" : "♡"}</button>
+            <button class="btn btn-primary btn-sm" data-cart="${p.id}" ${Number(p.stock) <= 0 ? "disabled" : ""}>${state.cart.some((item) => item.id === p.id) ? "✓ Добавлено" : Number(p.stock) <= 0 ? "Нет в наличии" : "В корзину"}</button>
           </div>`;
       return `
         <div class="col-md-6 col-xl-4">
           <article class="card product-card h-100">
             ${art}
             <div class="card-body d-flex flex-column">
-              <div class="d-flex justify-content-between gap-2 mb-2">
+              <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
                 <span class="badge text-bg-light">${escapeHtml(categoryName(p.category_id))}</span>
-                <span class="small text-muted">на складе: ${p.stock}</span>
+                <span class="stock-status ${Number(p.stock) <= 0 ? "is-empty" : ""}">${Number(p.stock) <= 0 ? "Нет в наличии" : `В наличии: ${p.stock}`}</span>
               </div>
-              <h5>${escapeHtml(displayProductTitle(p))}</h5>
-              <div class="text-muted small mb-2">${escapeHtml(displayProductBrand(p))}</div>
-              <p class="text-muted small flex-grow-1">${escapeHtml(displayProductDescription(p) || "Современное мебельное решение для дома.")}</p>
+              <h3 class="card-title">${escapeHtml(displayProductTitle(p))}</h3>
+              <div class="product-brand">${escapeHtml(displayProductBrand(p))}</div>
+              <p class="card-text flex-grow-1">${escapeHtml(displayProductDescription(p) || "Практичное мебельное решение для дома.")}</p>
               <div class="d-flex justify-content-between align-items-center">
-                <span class="price fs-5">${money(Number(p.price))}</span>
+                <span class="price">${money(Number(p.price))}</span>
                 ${actionButtons}
               </div>
             </div>
@@ -671,43 +806,99 @@ function renderProducts() {
     host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openProductEditor(Number(btn.dataset.edit))));
     host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", () => deactivateProduct(Number(btn.dataset.del))));
   } else {
-    host.querySelectorAll("[data-cart]").forEach((btn) => btn.addEventListener("click", () => addToCart(Number(btn.dataset.cart))));
-    host.querySelectorAll("[data-wish]").forEach((btn) => btn.addEventListener("click", () => addToWishlist(Number(btn.dataset.wish))));
+    host.querySelectorAll("[data-cart]").forEach((btn) => btn.addEventListener("click", () => addToCart(Number(btn.dataset.cart), btn)));
+    host.querySelectorAll("[data-wish]").forEach((btn) => btn.addEventListener("click", () => toggleWishlist(Number(btn.dataset.wish), btn)));
   }
 }
 
-async function addToCart(id) {
+async function addToCart(id, button = null) {
   if (!customerName()) {
     toast("Войдите, чтобы добавить товар в корзину", false);
     bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
     return;
   }
+  const pendingKey = `cart:${id}`;
+  if (state.commercePending.has(pendingKey)) return;
   const product = state.products.find((p) => p.id === id);
   if (!product) return;
-  const existing = state.cart.find((item) => item.id === id);
-  existing ? existing.qty++ : state.cart.push({ ...product, qty: 1 });
-  state.deliveryQuote = null;
-  renderCart();
+  state.commercePending.add(pendingKey);
+  if (button) { button.disabled = true; button.textContent = "Добавляем..."; }
   try {
-    await api("POST", `/catalog/users/${cartUserId()}/cart/items`, { product_id: id, quantity: 1 }, true);
+    const serverItem = await api("POST", `/catalog/users/${cartUserId()}/cart/items`, { product_id: id, quantity: 1 }, true);
+    const existing = state.cart.find((item) => item.id === id);
+    if (existing) {
+      existing.qty = serverItem.quantity;
+      existing.cartItemId = serverItem.id;
+    } else {
+      state.cart.push({ ...product, qty: serverItem.quantity, cartItemId: serverItem.id });
+    }
+    state.deliveryQuote = null;
+    renderCart();
+    renderProducts();
     toast(`${displayProductTitle(product)} добавлен в корзину`);
   } catch (error) {
-    toast(`Витрина обновлена, но backend вернул: ${error.message}`, false);
+    if (button) { button.disabled = false; button.textContent = "В корзину"; }
+    toast(`Не удалось добавить в корзину: ${formatApiError(error)}`, false);
+  } finally {
+    state.commercePending.delete(pendingKey);
   }
 }
 
-async function addToWishlist(id) {
+async function toggleWishlist(id, button = null) {
   if (!customerName()) {
     toast("Войдите, чтобы сохранить в избранное", false);
     bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
     return;
   }
+  const pendingKey = `wish:${id}`;
+  if (state.commercePending.has(pendingKey)) return;
   const product = state.products.find((p) => p.id === id);
+  const removing = state.wishlistIds.has(id);
+  state.commercePending.add(pendingKey);
+  if (button) button.disabled = true;
   try {
-    await requestNoBody("POST", `/catalog/users/${cartUserId()}/wishlist/products/${id}`, true);
-    toast(`${product ? displayProductTitle(product) : "Товар"} добавлен в избранное`);
+    await requestNoBody(removing ? "DELETE" : "POST", `/catalog/users/${cartUserId()}/wishlist/products/${id}`, true);
+    removing ? state.wishlistIds.delete(id) : state.wishlistIds.add(id);
+    renderProducts();
+    toast(`${product ? displayProductTitle(product) : "Товар"} ${removing ? "удалён из" : "добавлен в"} избранное`);
   } catch (error) {
-    toast(`Не удалось добавить в избранное: ${error.message}`, false);
+    if (button) button.disabled = false;
+    toast(`Не удалось обновить избранное: ${formatApiError(error)}`, false);
+  } finally {
+    state.commercePending.delete(pendingKey);
+  }
+}
+
+async function loadCommerceState() {
+  if (APP_MODE !== "user" || !isAuthenticated() || !state.products.length) return;
+  try {
+    const [cartItems, wishlistItems] = await Promise.all([
+      api("GET", `/catalog/users/${cartUserId()}/cart/items`, undefined, true),
+      api("GET", `/catalog/users/${cartUserId()}/wishlist`, undefined, true),
+    ]);
+    state.cart = cartItems.map((item) => {
+      const product = state.products.find((row) => row.id === item.product_id);
+      return product ? { ...product, qty: item.quantity, cartItemId: item.id } : null;
+    }).filter(Boolean);
+    state.wishlistIds = new Set(wishlistItems.map((item) => item.product_id));
+    renderCart();
+    renderProducts();
+  } catch (error) {
+    console.warn("Commerce state unavailable:", formatApiError(error));
+  }
+}
+
+async function removeCartItem(productId) {
+  const item = state.cart.find((row) => row.id === productId);
+  if (!item) return;
+  try {
+    if (item.cartItemId) await requestNoBody("DELETE", `/catalog/users/${cartUserId()}/cart/items/${item.cartItemId}`, true);
+    state.cart = state.cart.filter((row) => row.id !== productId);
+    state.deliveryQuote = null;
+    renderCart();
+    renderProducts();
+  } catch (error) {
+    toast(`Не удалось удалить товар: ${formatApiError(error)}`, false);
   }
 }
 
@@ -791,7 +982,7 @@ function renderCart() {
   const host = document.getElementById("cartItems");
   if (!host) return;
   if (!state.cart.length) {
-    host.innerHTML = `<div class="text-muted">Корзина пуста. Добавьте мебель из каталога.</div>`;
+    host.innerHTML = `<div class="empty-state cart-empty"><strong>Корзина пока пуста</strong><p>Добавьте мебель из каталога, чтобы рассчитать покупку и доставку.</p><button class="btn btn-secondary" type="button" data-bs-dismiss="offcanvas" onclick="location.hash='catalog'">Перейти в каталог</button></div>`;
     state.deliveryQuote = null;
   } else {
     host.innerHTML = state.cart
@@ -801,16 +992,12 @@ function renderCart() {
             <strong>${escapeHtml(displayProductTitle(item))}</strong>
             <div class="small text-muted">${item.qty} × ${money(Number(item.price))}</div>
           </div>
-          <button class="btn btn-sm btn-outline-danger" data-remove="${item.id}">×</button>
+          <button class="btn btn-sm btn-outline-danger" data-remove="${item.id}" aria-label="Удалить ${escapeHtml(displayProductTitle(item))} из корзины">×</button>
         </div>`)
       .join("");
   }
   host.querySelectorAll("[data-remove]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.cart = state.cart.filter((item) => item.id !== Number(btn.dataset.remove));
-      state.deliveryQuote = null;
-      renderCart();
-    });
+    btn.addEventListener("click", () => removeCartItem(Number(btn.dataset.remove)));
   });
 
   const subtotal = cartSubtotal();
@@ -927,6 +1114,50 @@ function clampObjectPosition(item, roomWidth, roomLength) {
   const { planW, planD } = getObjectPlanSize(item);
   item.x = Math.min(Math.max(item.x, planW / 2), roomWidth - planW / 2);
   item.z = Math.min(Math.max(item.z, planD / 2), roomLength - planD / 2);
+}
+
+const SNAP_DISTANCE_MM = 70;
+
+// Edges (in room mm coordinates) that a dragged object's own edges can "stick" to: the room
+// walls plus the near/far edges of every other placed object along that axis.
+function collectSnapEdges(axis, excludeId, roomSize) {
+  const edges = [0, roomSize];
+  state.objects3d.forEach((obj) => {
+    if (obj.id === excludeId) return;
+    const { planW, planD } = getObjectPlanSize(obj);
+    if (axis === "x") edges.push(obj.x - planW / 2, obj.x + planW / 2);
+    else edges.push(obj.z - planD / 2, obj.z + planD / 2);
+  });
+  return edges;
+}
+
+// Finds the smallest shift (within SNAP_DISTANCE_MM) that would bring one of the dragged
+// object's edges flush against a wall or a neighboring object's edge along one axis.
+function findSnapShift(edges, itemMin, itemMax) {
+  let bestShift = 0;
+  let bestDist = SNAP_DISTANCE_MM;
+  edges.forEach((edge) => {
+    const shiftMin = edge - itemMin;
+    const shiftMax = edge - itemMax;
+    if (Math.abs(shiftMin) < bestDist) {
+      bestDist = Math.abs(shiftMin);
+      bestShift = shiftMin;
+    }
+    if (Math.abs(shiftMax) < bestDist) {
+      bestDist = Math.abs(shiftMax);
+      bestShift = shiftMax;
+    }
+  });
+  return bestShift;
+}
+
+// "Приклеивает" объект к стене/соседней мебели, если его подтащили достаточно близко.
+function snapObjectPosition(item, roomWidth, roomLength) {
+  const { planW, planD } = getObjectPlanSize(item);
+  const edgesX = collectSnapEdges("x", item.id, roomWidth);
+  const edgesZ = collectSnapEdges("z", item.id, roomLength);
+  item.x += findSnapShift(edgesX, item.x - planW / 2, item.x + planW / 2);
+  item.z += findSnapShift(edgesZ, item.z - planD / 2, item.z + planD / 2);
 }
 
 function normalizePartsForCutting(parts) {
@@ -1130,6 +1361,7 @@ function createDemoObjects() {
     { id: makeId(), type: "sofa", texture: "fabric_gray", name: "Диван Soft Cloud", width: 2200, depth: 1000, height: 900, x: 1500, z: 3500, rotationY: 90 },
     { id: makeId(), type: "cabinet", texture: "board_black", name: "Остров Chef", width: 1800, depth: 800, height: 900, x: 3000, z: 2200, rotationY: 0 },
   ];
+  state.selected3dObjectId = state.objects3d[0]?.id || null;
 }
 
 function addFurnitureSet() {
@@ -1153,6 +1385,18 @@ function createSurfaceMaterial(type, variant, colorHex) {
   return new THREE.MeshStandardMaterial({ color: colorHex });
 }
 
+function createSurfaceMaterialForPanel(type, variant, colorHex, widthMm, heightMm, orientation = "horizontal") {
+  if (!window.THREE) return null;
+  if (window.Texture3D?.createSurfaceMaterial) {
+    return window.Texture3D.createSurfaceMaterial(type, variant, colorHex, { widthMm, heightMm, orientation });
+  }
+  return new THREE.MeshStandardMaterial({ color: colorHex });
+}
+
+function prepareGeometry(geometry) {
+  return window.Texture3D?.prepareGeometry ? window.Texture3D.prepareGeometry(geometry) : geometry;
+}
+
 function normalizeColorHex(value) {
   if (!value) return "";
   const raw = String(value).trim();
@@ -1166,7 +1410,67 @@ function createFurnitureMaterial(item, texturePreset) {
   if (customColor) {
     return new THREE.MeshStandardMaterial({ color: customColor, roughness: 0.72, metalness: 0.04 });
   }
-  return createSurfaceMaterial(texturePreset.material, item.texture || "default", texturePreset.color);
+  return createSurfaceMaterialForPanel(
+    texturePreset.material,
+    item.texture || "default",
+    texturePreset.color,
+    Number(item.width) || 900,
+    Number(item.height) || 1800,
+    "vertical"
+  );
+}
+
+function countertopTextureKey(countertopType) {
+  const t = String(countertopType || "").toLowerCase();
+  if (t === "skif") return "countertop_skif";
+  if (t === "kedr") return "countertop_kedr";
+  if (t === "quartz") return "countertop_quartz";
+  if (t === "compact") return "countertop_compact";
+  return "";
+}
+
+function createFurnitureMaterialSet(item, texturePreset) {
+  const customColor = normalizeColorHex(item.customColor);
+  if (customColor) {
+    const selected = new THREE.MeshStandardMaterial({ color: customColor, roughness: 0.7, metalness: 0.03 });
+    const caseFurniture = item.type === "wardrobe" || item.type === "cabinet";
+    const body = caseFurniture
+      ? new THREE.MeshStandardMaterial({ color: 0xe8e8e4, roughness: 0.76, metalness: 0 })
+      : selected;
+    return {
+      body,
+      facade: selected.clone(),
+      edge: body.clone(),
+      back: new THREE.MeshStandardMaterial({ color: 0xf3f4f6, roughness: 0.82, metalness: 0 }),
+      countertop: selected.clone(),
+      handles: new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.28, metalness: 0.94 }),
+      interior: body.clone(),
+    };
+  }
+
+  const width = Math.max(Number(item.width) || 350, 350);
+  const depth = Math.max(Number(item.depth) || 350, 350);
+  const height = Math.max(Number(item.height) || 350, 350);
+  const selectedVertical = createSurfaceMaterialForPanel(texturePreset.material, item.texture || "default", texturePreset.color, width, height, "vertical");
+  const selectedHorizontal = createSurfaceMaterialForPanel(texturePreset.material, item.texture || "default", texturePreset.color, width, depth, "horizontal");
+  const caseFurniture = item.type === "wardrobe" || item.type === "cabinet";
+  const neutralVariant = item.texture === "board_white" ? "mdf_matte" : "board_white";
+  const neutralType = neutralVariant === "mdf_matte" ? "mdf" : "board";
+  const neutralColor = neutralVariant === "mdf_matte" ? 0xb8aea2 : 0xe8e8e4;
+  const neutralVertical = createSurfaceMaterialForPanel(neutralType, neutralVariant, neutralColor, width, height, "vertical");
+  const neutralHorizontal = createSurfaceMaterialForPanel(neutralType, neutralVariant, neutralColor, width, depth, "horizontal");
+  const body = caseFurniture ? neutralVertical : selectedVertical;
+  const facade = selectedVertical;
+  const interior = caseFurniture ? neutralHorizontal : selectedHorizontal;
+  const edge = caseFurniture ? neutralVertical.clone() : selectedVertical.clone();
+  const back = createSurfaceMaterialForPanel("board", "board_white", 0xffffff, width, height, "vertical");
+  const countertopKey = countertopTextureKey(item.countertopType);
+  const countertopPreset = countertopKey ? texturePresets[countertopKey] : null;
+  const countertop = countertopPreset
+    ? createSurfaceMaterialForPanel(countertopPreset.material, countertopKey, countertopPreset.color, width, depth, "horizontal")
+    : selectedHorizontal;
+  const handles = new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.26, metalness: 0.96 });
+  return { body, facade, edge, back, countertop, handles, interior };
 }
 
 function roomUnitToWorldX(x) {
@@ -1191,12 +1495,18 @@ function furnitureAccessoryDefaults(type) {
   if (type === "cabinet") return { drawers: 2, handles: 2 };
   if (type === "wardrobe") return { drawers: 0, handles: 2 };
   if (type === "shelf") return { drawers: 0, handles: 0 };
+  if (String(type || "").startsWith("appliance_")) return { drawers: 0, handles: 0 };
   return { drawers: 0, handles: 1 };
 }
 
 function disposeRoom3D() {
   if (!state.three) return;
-  const { renderer, host } = state.three;
+  const { renderer, host, dimensionManager, resizeObserver, animationFrame, resizeHandler } = state.three;
+  resizeObserver?.disconnect();
+  if (animationFrame) cancelAnimationFrame(animationFrame);
+  if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+  dimensionManager?.dispose();
+  window.__room3dRenderer = null;
   if (renderer) {
     renderer.dispose();
     if (typeof renderer.forceContextLoss === "function") {
@@ -1217,17 +1527,27 @@ function canUseWebGL() {
 }
 
 function createRoom3DRenderer(width, height) {
+  // logarithmicDepthBuffer greatly improves depth-buffer precision for scenes with a large
+  // near/far ratio (our camera spans 1mm..50000mm). Without it, panels that sit only a few mm
+  // apart (e.g. edge banding flush on a shelf top) can lose the depth test unpredictably as the
+  // camera rotates, which looks like flickering/"shimmering" noise on those surfaces.
   const attempts = [
-    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default" },
-    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default" },
+    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "high-performance", logarithmicDepthBuffer: true },
+    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default", logarithmicDepthBuffer: true },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "high-performance", logarithmicDepthBuffer: true },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default", logarithmicDepthBuffer: true },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "low-power", logarithmicDepthBuffer: true },
+    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "high-performance" },
     { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "low-power" },
   ];
   let lastError = null;
   for (const options of attempts) {
     try {
       const renderer = new THREE.WebGLRenderer(options);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, options.antialias ? 2 : 1));
-      renderer.setSize(width, height);
+      // On mobile some GPUs fall back to antialias:false; keep DPR high anyway to avoid "pixelated" look.
+      const dpr = Math.min(Number(window.devicePixelRatio) || 1, 2);
+      renderer.setPixelRatio(dpr);
+      renderer.setSize(width, height, false);
       return renderer;
     } catch (error) {
       lastError = error;
@@ -1256,42 +1576,78 @@ function initRoom3D() {
   disposeRoom3D();
 
   const width = host.clientWidth || 640;
-  const height = 360;
+  const height = Math.max(320, Math.round(host.getBoundingClientRect().height) || 540);
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1f2937);
+  scene.background = new THREE.Color(0xf3efe8);
 
-  const camera = new THREE.PerspectiveCamera(45, width / height, 1, 50000);
+  // near=20mm keeps close-up zoom usable while avoiding an extreme near/far ratio; far=30000mm
+  // comfortably covers even oversized rooms. Combined with logarithmicDepthBuffer above, this
+  // fixes depth-buffer precision loss that caused nearby coplanar panels to z-fight/flicker.
+  const camera = new THREE.PerspectiveCamera(45, width / height, 20, 30000);
   camera.position.set(7000, 5500, 7500);
   camera.lookAt(0, 1000, 0);
 
   const renderer = createRoom3DRenderer(width, height);
+  window.__room3dRenderer = renderer;
+  if (THREE.SRGBColorSpace) {
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+  } else if (THREE.sRGBEncoding) {
+    renderer.outputEncoding = THREE.sRGBEncoding;
+  }
   if (THREE.ACESFilmicToneMapping) {
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.08;
+    renderer.toneMappingExposure = 1.12;
   }
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Shadows are expensive on mobile; update only when scene changes to keep rotation smooth.
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   host.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
   host.appendChild(renderer.domElement);
 
-  const ambient = new THREE.AmbientLight(0xffffff, 0.48);
+  const ambient = new THREE.AmbientLight(0xffffff, 0.3);
   scene.add(ambient);
-  const light = new THREE.DirectionalLight(0xfff4e6, 1.15);
-  light.position.set(4000, 9000, 5000);
+  const hemi = new THREE.HemisphereLight(0xfff7ed, 0xd7dee8, 0.55);
+  scene.add(hemi);
+  const light = new THREE.DirectionalLight(0xfff6eb, 1.5);
+  light.position.set(4200, 9000, 4600);
   light.castShadow = true;
-  light.shadow.mapSize.set(1024, 1024);
+  light.shadow.mapSize.set(2048, 2048);
+  light.shadow.bias = -0.00012;
+  light.shadow.normalBias = 0.015;
+  light.shadow.radius = 2.6;
   scene.add(light);
-  const fill = new THREE.DirectionalLight(0xc7d2fe, 0.42);
-  fill.position.set(-5000, 3000, -2000);
+  const fill = new THREE.DirectionalLight(0xe6edf7, 0.52);
+  fill.position.set(-5400, 3200, -2600);
   scene.add(fill);
-  const rim = new THREE.DirectionalLight(0xffffff, 0.25);
-  rim.position.set(0, 4000, -6000);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.26);
+  rim.position.set(0, 4200, -6200);
   scene.add(rim);
+
+  if (THREE.PMREMGenerator) {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color(0xf3efe8);
+    envScene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const envKey = new THREE.DirectionalLight(0xffffff, 1.2);
+    envKey.position.set(6, 10, 8);
+    envScene.add(envKey);
+    const envFill = new THREE.DirectionalLight(0xdde7f5, 0.45);
+    envFill.position.set(-7, 4, -5);
+    envScene.add(envFill);
+    const envMap = pmrem.fromScene(envScene, 0.04).texture;
+    scene.environment = envMap;
+    pmrem.dispose();
+  }
 
   const roomGroup = new THREE.Group();
   const furnitureGroup = new THREE.Group();
   scene.add(roomGroup);
   scene.add(furnitureGroup);
+  const dimensionManager = window.Dimension3D?.DimensionManager
+    ? new window.Dimension3D.DimensionManager(camera, renderer)
+    : null;
 
   const orbit = {
     theta: 0.78,
@@ -1299,7 +1655,20 @@ function initRoom3D() {
     radius: 11000,
     target: new THREE.Vector3(0, 1000, 0),
   };
-  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, host, orbit };
+  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, dimensionManager, host, orbit };
+  if (window.ResizeObserver) {
+    const resizeObserver = new ResizeObserver(() => {
+      if (!state.three) return;
+      // Mobile browsers may change viewport height while dragging (address bar). Avoid "jerky" resizes mid-rotation.
+      if (state.cameraDrag?.active) {
+        state.three.pendingLayoutRefresh = true;
+        return;
+      }
+      refreshRoom3DLayout();
+    });
+    resizeObserver.observe(host);
+    state.three.resizeObserver = resizeObserver;
+  }
   init3DPointerControls(renderer.domElement);
   updateOrbitCamera();
   rebuildRoomGeometry();
@@ -1307,24 +1676,30 @@ function initRoom3D() {
 
   const animate = () => {
     if (!state.three) return;
-    renderer.render(scene, camera);
-    requestAnimationFrame(animate);
+    if (!document.hidden) {
+      dimensionManager?.update(camera, renderer);
+      renderer.render(scene, camera);
+    }
+    state.three.animationFrame = requestAnimationFrame(animate);
   };
   animate();
 
-  window.addEventListener("resize", () => {
-    refreshRoom3DLayout();
-  });
+  state.three.resizeHandler = () => refreshRoom3DLayout();
+  window.addEventListener("resize", state.three.resizeHandler, { passive: true });
 }
 
 function refreshRoom3DLayout() {
   if (!state.three) return;
   const { host, camera, renderer } = state.three;
-  const height = 360;
+  const workspace = host.closest(".planner-workspace");
+  const fullscreen = document.fullscreenElement === workspace || workspace?.classList.contains("is-fullscreen-fallback");
+  const cssHeight = Math.round(host.getBoundingClientRect().height);
+  const height = Math.max(320, fullscreen ? window.innerHeight - 180 : cssHeight || 540);
   const width = host.clientWidth || 640;
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  renderer.setSize(width, height);
+  renderer.setPixelRatio(Math.min(Number(window.devicePixelRatio) || 1, 2));
+  renderer.setSize(width, height, false);
   updateOrbitCamera();
 }
 
@@ -1350,30 +1725,91 @@ function updateOrbitCamera() {
   const z = orbit.target.z + orbit.radius * sinPhi * Math.cos(orbit.theta);
   camera.position.set(x, y, z);
   camera.lookAt(orbit.target);
+  updateDynamicWallVisibility();
+}
+
+function wallSideWithHysteresis(value, currentSide) {
+  const enterThreshold = 0.2;
+  const exitThreshold = 0.1;
+  if (currentSide === 1) {
+    if (value < -enterThreshold) return -1;
+    return value < exitThreshold ? 0 : 1;
+  }
+  if (currentSide === -1) {
+    if (value > enterThreshold) return 1;
+    return value > -exitThreshold ? 0 : -1;
+  }
+  if (value > enterThreshold) return 1;
+  if (value < -enterThreshold) return -1;
+  return 0;
+}
+
+function updateDynamicWallVisibility() {
+  if (!state.three?.walls) return;
+  const { camera, orbit, walls } = state.three;
+  const directionX = (camera.position.x - orbit.target.x) / Math.max(orbit.radius, 1);
+  const directionZ = (camera.position.z - orbit.target.z) / Math.max(orbit.radius, 1);
+  const sideState = state.three.wallSideState || { x: 0, z: 0 };
+  sideState.x = wallSideWithHysteresis(directionX, sideState.x);
+  sideState.z = wallSideWithHysteresis(directionZ, sideState.z);
+  state.three.wallSideState = sideState;
+
+  walls.left.visible = sideState.x !== -1;
+  walls.right.visible = sideState.x !== 1;
+  walls.back.visible = sideState.z !== -1;
+  walls.front.visible = sideState.z !== 1;
 }
 
 function init3DPointerControls(canvas) {
   canvas.style.cursor = "grab";
+  canvas.style.touchAction = "none";
+  canvas.style.userSelect = "none";
   canvas.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "touch" && event.isPrimary === false) return;
     state.cameraDrag.active = true;
     state.cameraDrag.startX = event.clientX;
     state.cameraDrag.startY = event.clientY;
+    state.cameraDrag.moved = false;
+    state.cameraDrag.pendingTheta = 0;
+    state.cameraDrag.pendingPhi = 0;
     canvas.style.cursor = "grabbing";
     canvas.setPointerCapture(event.pointerId);
+    event.preventDefault();
   });
   canvas.addEventListener("pointermove", (event) => {
     if (!state.cameraDrag.active || !state.three) return;
     const dx = event.clientX - state.cameraDrag.startX;
     const dy = event.clientY - state.cameraDrag.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) state.cameraDrag.moved = true;
     state.cameraDrag.startX = event.clientX;
     state.cameraDrag.startY = event.clientY;
-    state.three.orbit.theta -= dx * 0.01;
-    state.three.orbit.phi = Math.min(Math.max(state.three.orbit.phi + dy * 0.01, 0.22), Math.PI / 2 - 0.04);
-    updateOrbitCamera();
+    const sens = event.pointerType === "touch" ? 0.006 : 0.01;
+    state.cameraDrag.pendingTheta -= dx * sens;
+    state.cameraDrag.pendingPhi += dy * sens;
+    if (!state.cameraDrag.raf) {
+      state.cameraDrag.raf = requestAnimationFrame(() => {
+        if (!state.three) return;
+        const { orbit } = state.three;
+        orbit.theta += state.cameraDrag.pendingTheta;
+        orbit.phi = Math.min(Math.max(orbit.phi + state.cameraDrag.pendingPhi, 0.22), Math.PI / 2 - 0.04);
+        state.cameraDrag.pendingTheta = 0;
+        state.cameraDrag.pendingPhi = 0;
+        state.cameraDrag.raf = 0;
+        updateOrbitCamera();
+      });
+    }
+    event.preventDefault();
   });
-  const stopDrag = () => {
+  const stopDrag = (event) => {
+    if (event?.type === "pointerup" && !state.cameraDrag.moved) {
+      selectFurnitureAtPointer(event, canvas);
+    }
     state.cameraDrag.active = false;
     canvas.style.cursor = "grab";
+    if (state.three?.pendingLayoutRefresh) {
+      state.three.pendingLayoutRefresh = false;
+      refreshRoom3DLayout();
+    }
   };
   canvas.addEventListener("pointerup", stopDrag);
   canvas.addEventListener("pointerleave", stopDrag);
@@ -1390,47 +1826,119 @@ function init3DPointerControls(canvas) {
   );
 }
 
+function selectFurnitureAtPointer(event, canvas) {
+  if (!state.three) return;
+  const { camera, furnitureGroup, dimensionManager } = state.three;
+  const rect = canvas.getBoundingClientRect();
+  const pointer = new THREE.Vector2(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -((event.clientY - rect.top) / rect.height) * 2 + 1
+  );
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointer, camera);
+  const hit = raycaster.intersectObjects(furnitureGroup.children, true)[0];
+  let object = hit?.object || null;
+  while (object && object.parent !== furnitureGroup) object = object.parent;
+  if (!object?.userData?.objectId) {
+    state.selected3dObjectId = null;
+    dimensionManager?.setSelected(null);
+    return;
+  }
+  state.selected3dObjectId = object.userData.objectId;
+  dimensionManager?.setSelected(object);
+}
+
+function resolveRoomSurfaceMaterial(textureKey, fallbackType, fallbackVariant, fallbackColor, widthMm, heightMm, orientation) {
+  if (textureKey === "wall_default") {
+    return createSurfaceMaterialForPanel("wall", "default", fallbackColor, widthMm, heightMm, orientation);
+  }
+  const preset = texturePresets[textureKey];
+  if (!preset) {
+    return createSurfaceMaterialForPanel(fallbackType, fallbackVariant, fallbackColor, widthMm, heightMm, orientation);
+  }
+  return createSurfaceMaterialForPanel(preset.material, textureKey, preset.color, widthMm, heightMm, orientation);
+}
+
 function rebuildRoomGeometry() {
   if (!state.three) return;
   const { roomGroup } = state.three;
   roomGroup.clear();
 
   const { width, length, height } = state.roomConfig;
+  const finish = state.roomFinish || {};
+  const floorMat = resolveRoomSurfaceMaterial(
+    finish.floorTexture || "wood_oak",
+    "floor",
+    "default",
+    0xffffff,
+    width,
+    length,
+    "horizontal"
+  );
+  if (finish.useCustomColors && floorMat?.color && finish.floorColor) {
+    floorMat.color.set(normalizeColorHex(finish.floorColor));
+  }
   const floor = new THREE.Mesh(
-    new THREE.BoxGeometry(width, 60, length),
-    createSurfaceMaterial("floor", "default", 0xffffff)
+    prepareGeometry(new THREE.BoxGeometry(width, 60, length)),
+    floorMat
   );
   floor.position.y = -30;
   floor.receiveShadow = true;
   roomGroup.add(floor);
 
-  const wallMat = createSurfaceMaterial("wall", "default", 0xfaf7f2);
-  const wallBack = new THREE.Mesh(new THREE.BoxGeometry(width, height, 50), wallMat);
-  wallBack.position.set(0, height / 2, -length / 2);
-  wallBack.receiveShadow = true;
-  roomGroup.add(wallBack);
+  const wallMat = resolveRoomSurfaceMaterial(
+    finish.wallTexture || "wall_default",
+    "wall",
+    "default",
+    0xfaf7f2,
+    width,
+    height,
+    "vertical"
+  );
+  if (finish.useCustomColors && wallMat?.color && finish.wallColor) {
+    wallMat.color.set(normalizeColorHex(finish.wallColor));
+  }
+  const createWall = (name, geometry, position) => {
+    const wall = new THREE.Group();
+    wall.name = name;
+    wall.userData.isRoomWall = true;
+    const surface = new THREE.Mesh(prepareGeometry(geometry), wallMat.clone());
+    surface.position.copy(position);
+    surface.receiveShadow = true;
+    wall.add(surface);
+    roomGroup.add(wall);
+    return wall;
+  };
 
-  const wallLeft = new THREE.Mesh(new THREE.BoxGeometry(50, height, length), wallMat.clone());
-  wallLeft.position.set(-width / 2, height / 2, 0);
-  wallLeft.receiveShadow = true;
-  roomGroup.add(wallLeft);
+  state.three.walls = {
+    back: createWall("wall-back", new THREE.BoxGeometry(width, height, 50), new THREE.Vector3(0, height / 2, -length / 2)),
+    front: createWall("wall-front", new THREE.BoxGeometry(width, height, 50), new THREE.Vector3(0, height / 2, length / 2)),
+    left: createWall("wall-left", new THREE.BoxGeometry(50, height, length), new THREE.Vector3(-width / 2, height / 2, 0)),
+    right: createWall("wall-right", new THREE.BoxGeometry(50, height, length), new THREE.Vector3(width / 2, height / 2, 0)),
+  };
+  state.three.wallSideState = { x: 0, z: 0 };
+  updateDynamicWallVisibility();
 }
 
 function renderRoom3D() {
   if (!state.three) return;
-  const { furnitureGroup } = state.three;
+  const { furnitureGroup, dimensionManager } = state.three;
+  dimensionManager?.clear();
   furnitureGroup.clear();
+
+  if (!state.objects3d.some((item) => item.id === state.selected3dObjectId)) state.selected3dObjectId = null;
+  let selectedGroup = null;
 
   state.objects3d.forEach((item) => {
     const texturePreset = resolveTexturePreset(item);
     const w = Math.max(Number(item.width) || 350, 350);
     const d = Math.max(Number(item.depth) || 350, 350);
     const h = Math.max(Number(item.height) || 350, 350);
-    const bodyMat = createFurnitureMaterial(item, texturePreset);
+    const materialSet = createFurnitureMaterialSet(item, texturePreset);
     const group = window.Texture3D?.buildFurnitureGroup
-      ? window.Texture3D.buildFurnitureGroup(item, w, h, d, bodyMat)
+      ? window.Texture3D.buildFurnitureGroup(item, w, h, d, materialSet)
       : (() => {
-          const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), bodyMat);
+          const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), materialSet.body);
           mesh.position.y = h / 2;
           return mesh;
         })();
@@ -1445,12 +1953,27 @@ function renderRoom3D() {
     group.userData.kind = "furniture";
     group.userData.objectId = item.id;
     furnitureGroup.add(group);
+    dimensionManager?.attach(group, { width: w, height: h, depth: d });
+    if (item.id === state.selected3dObjectId) selectedGroup = group;
   });
+  dimensionManager?.setSelected(selectedGroup);
+}
+
+function updateFurnitureTransform(item) {
+  if (!state.three || !item) return;
+  const group = state.three.furnitureGroup.children.find((child) => child.userData.objectId === item.id);
+  if (!group) return;
+  group.position.set(roomUnitToWorldX(item.x), 0, roomUnitToWorldZ(item.z));
+  group.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
+  group.updateMatrixWorld(true);
+  if (state.three.renderer?.shadowMap) state.three.renderer.shadowMap.needsUpdate = true;
 }
 
 function renderRoomTopView() {
   const host = document.getElementById("roomPlan");
   const { width, length } = state.roomConfig;
+  const finish = state.roomFinish || {};
+  host.style.background = finish.useCustomColors && finish.floorColor ? normalizeColorHex(finish.floorColor) : "";
   host.style.aspectRatio = `${width} / ${length}`;
   host.style.minHeight = `${Math.max(220, Math.round((length / 1000) * 42))}px`;
   const viewW = host.clientWidth || 400;
@@ -1498,17 +2021,49 @@ function renderRoomTopView() {
   });
 }
 
+function getRoomPlanScale(host) {
+  const { width, length } = state.roomConfig;
+  const viewW = host.clientWidth || 400;
+  const viewH = host.clientHeight || 260;
+  return Math.min(viewW / width, viewH / length);
+}
+
+function updateRoomPlanChipDom(item, scale, wrapEl, chipEl) {
+  if (!item || !wrapEl || !chipEl) return;
+  const { planW, planD } = getObjectPlanSize(item);
+  const left = (item.x - planW / 2) * scale;
+  const top = (item.z - planD / 2) * scale;
+  wrapEl.style.left = `${left}px`;
+  wrapEl.style.top = `${top}px`;
+  wrapEl.style.width = `${Math.max(planW * scale, 24)}px`;
+  wrapEl.style.height = `${Math.max(planD * scale, 18)}px`;
+  chipEl.style.width = `${Math.max(item.width * scale, 24)}px`;
+  chipEl.style.height = `${Math.max(item.depth * scale, 18)}px`;
+  chipEl.style.transform = `translate(-50%, -50%) rotate(${normalizeAngle(item.rotationY)}deg)`;
+}
+
 function beginDrag(ev, id) {
   if (APP_MODE === "admin") return;
   if (state.rotate.active) return;
   const item = state.objects3d.find((obj) => obj.id === id);
   if (!item) return;
+  state.selected3dObjectId = id;
+  state.three?.dimensionManager?.setSelected(
+    state.three.furnitureGroup.children.find((child) => child.userData.objectId === id) || null
+  );
   state.drag.active = true;
   state.drag.id = id;
   state.drag.startX = ev.clientX;
   state.drag.startY = ev.clientY;
   state.drag.baseX = item.x;
   state.drag.baseZ = item.z;
+  const host = document.getElementById("roomPlan");
+  const scale = host ? getRoomPlanScale(host) : 1;
+  state.drag.scale = scale || 1;
+  state.drag.chipEl = ev.currentTarget;
+  state.drag.wrapEl = ev.currentTarget.closest(".furniture-chip-wrap");
+  if (state.drag.wrapEl) state.drag.wrapEl.style.willChange = "left, top, width, height";
+  if (state.drag.chipEl) state.drag.chipEl.style.willChange = "transform, width, height";
   ev.currentTarget.setPointerCapture(ev.pointerId);
   ev.preventDefault();
 }
@@ -1519,6 +2074,10 @@ function beginRotate(ev, id) {
   ev.preventDefault();
   const item = state.objects3d.find((obj) => obj.id === id);
   if (!item) return;
+  state.selected3dObjectId = id;
+  state.three?.dimensionManager?.setSelected(
+    state.three.furnitureGroup.children.find((child) => child.userData.objectId === id) || null
+  );
   const host = document.getElementById("roomPlan");
   const hostRect = host.getBoundingClientRect();
   const { width, length } = state.roomConfig;
@@ -1533,6 +2092,11 @@ function beginRotate(ev, id) {
   state.rotate.centerY = centerY;
   state.rotate.startAngle = Math.atan2(ev.clientY - centerY, ev.clientX - centerX);
   state.rotate.baseRotation = normalizeAngle(item.rotationY);
+  state.rotate.scale = scale || 1;
+  state.rotate.chipEl = host.querySelector(`[data-drag-id="${CSS.escape(id)}"]`);
+  state.rotate.wrapEl = state.rotate.chipEl?.closest(".furniture-chip-wrap") || null;
+  if (state.rotate.wrapEl) state.rotate.wrapEl.style.willChange = "left, top, width, height";
+  if (state.rotate.chipEl) state.rotate.chipEl.style.willChange = "transform, width, height";
   ev.currentTarget.setPointerCapture(ev.pointerId);
 }
 
@@ -1542,11 +2106,8 @@ function handleDragMove(ev) {
     return;
   }
   if (!state.drag.active) return;
-  const host = document.getElementById("roomPlan");
   const { width, length } = state.roomConfig;
-  const viewW = host.clientWidth || 400;
-  const viewH = host.clientHeight || 260;
-  const scale = Math.min(viewW / width, viewH / length);
+  const scale = state.drag.scale || 1;
 
   const dx = (ev.clientX - state.drag.startX) / scale;
   const dz = (ev.clientY - state.drag.startY) / scale;
@@ -1555,9 +2116,11 @@ function handleDragMove(ev) {
 
   item.x = state.drag.baseX + dx;
   item.z = state.drag.baseZ + dz;
+  snapObjectPosition(item, width, length);
   clampObjectPosition(item, width, length);
-  renderRoomTopView();
-  renderRoom3D();
+  updateRoomPlanChipDom(item, scale, state.drag.wrapEl, state.drag.chipEl);
+  updateFurnitureTransform(item);
+  ev.preventDefault();
 }
 
 function handleRotateMove(ev) {
@@ -1567,21 +2130,25 @@ function handleRotateMove(ev) {
   const delta = ((angle - state.rotate.startAngle) * 180) / Math.PI;
   item.rotationY = Math.round(normalizeAngle(state.rotate.baseRotation + delta) * 10) / 10;
   clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
-  renderRoomTopView();
-  renderRoom3D();
+  updateRoomPlanChipDom(item, state.rotate.scale || 1, state.rotate.wrapEl, state.rotate.chipEl);
+  updateFurnitureTransform(item);
+  ev.preventDefault();
 }
 
 function endDrag() {
   if (state.rotate.active) {
     state.rotate.active = false;
     state.rotate.id = null;
+    state.rotate.wrapEl = null;
+    state.rotate.chipEl = null;
     renderRoomTopView();
-    renderRoom3D();
     renderBom();
     return;
   }
   state.drag.active = false;
   state.drag.id = null;
+  state.drag.wrapEl = null;
+  state.drag.chipEl = null;
 }
 
 function applyRoomSize() {
@@ -1621,11 +2188,17 @@ function addObject3DFromForm() {
   const defaults = furnitureAccessoryDefaults(type);
   const useCustomColor = document.getElementById("objUseCustomColor")?.checked;
   const customColor = useCustomColor ? normalizeColorHex(document.getElementById("objCustomColor")?.value) : "";
+  const countertopType = document.getElementById("objCountertopType")?.value || "";
+  const millingAllowed = texture === "mdf_film_matte" || texture === "mdf_film_gloss";
+  const milling = millingAllowed ? !!document.getElementById("objMilling")?.checked : false;
   const item = {
     id: makeId(),
     type,
     texture,
     customColor,
+    section: state.objectEditor?.section || "living",
+    countertopType,
+    milling,
     drawers: defaults.drawers,
     handles: defaults.handles,
     name,
@@ -1637,6 +2210,7 @@ function addObject3DFromForm() {
     rotationY: 0,
   };
   state.objects3d.push(item);
+  state.selected3dObjectId = item.id;
   renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
@@ -1646,25 +2220,28 @@ function addObject3DFromForm() {
 function buildBomFromObjects() {
   const parts = [];
   const assembly = [];
-  const pushPart = (name, width, height, quantity) => {
-    const key = `${name}_${width}_${height}`;
+  const pushPart = (name, width, height, quantity, options = {}) => {
+    const multiplier = Number(options.costMultiplier) || 1;
+    const key = `${name}_${width}_${height}_${multiplier}`;
     const existing = parts.find((part) => part.key === key);
     if (existing) {
       existing.quantity += quantity;
     } else {
-      parts.push({ key, name, width, height, quantity });
+      parts.push({ key, name, width, height, quantity, cost_multiplier: multiplier });
     }
   };
 
   for (const item of state.objects3d) {
     const { width: w, depth: d, height: h } = getObjectManufacturingSize(item);
+    const facadeMultiplier =
+      item.milling && (item.texture === "mdf_film_matte" || item.texture === "mdf_film_gloss") ? 1.3 : 1;
 
     if (item.type === "wardrobe" || item.type === "shelf") {
       pushPart("Боковина", d, h, 2);
       pushPart("Крышка/дно", w, d, 2);
       pushPart("Полка", Math.max(w - 36, 100), d, Math.max(2, Math.round(h / 500)));
       pushPart("Задняя стенка", w, h, 1);
-      if (item.type === "wardrobe") pushPart("Фасад дверцы", Math.round(w / 2), h, 2);
+      if (item.type === "wardrobe") pushPart("Фасад дверцы", Math.round(w / 2), h, 2, { costMultiplier: facadeMultiplier });
       assembly.push(`Собрать корпус "${item.name}": стяжки 8 шт, конфирматы 16 шт, петли 4 шт`);
     } else if (item.type === "table") {
       pushPart("Столешница", w, d, 1);
@@ -1673,7 +2250,10 @@ function buildBomFromObjects() {
     } else if (item.type === "cabinet") {
       pushPart("Боковина", d, h, 2);
       pushPart("Крышка/дно", w, d, 2);
-      pushPart("Фасад", w, h, 1);
+      pushPart("Фасад", w, h, 1, { costMultiplier: facadeMultiplier });
+      if (item.countertopType) {
+        pushPart("Столешница", w, d, 1);
+      }
       assembly.push(`Собрать тумбу "${item.name}": направляющие 2 шт, ручка 1 шт`);
     } else if (item.type === "sofa") {
       pushPart("Каркас сиденья", w, d, 1);
@@ -1686,6 +2266,7 @@ function buildBomFromObjects() {
     parts: parts.map(({ key, ...rest }) => rest),
     assembly,
   };
+  if (state.three.renderer?.shadowMap) state.three.renderer.shadowMap.needsUpdate = true;
 }
 
 function renderBom() {
@@ -1709,40 +2290,25 @@ function renderBom() {
 
 const LDSP_PRICE_M2 = 3200;
 const EDGE_PRICE_M = 180;
-const LABOR_RATE = 0.38;
-const OBJECT_BASE_PRICES = { wardrobe: 45000, cabinet: 18000, shelf: 12000, table: 22000, sofa: 35000 };
-
-function estimateObjectRetailCost(item) {
-  const base = OBJECT_BASE_PRICES[item.type] || 15000;
-  const volumeFactor = (item.width * item.depth * item.height) / (1200 * 600 * 2100);
-  return Math.round(base * Math.max(volumeFactor, 0.6));
-}
+const RETAIL_MULTIPLIER = 2.2;
 
 function estimateProjectCost(bom) {
   let materialCost = 0;
   let edgeCost = 0;
   for (const part of bom.parts) {
+    const mult = Number(part.cost_multiplier) || 1;
     const areaM2 = (part.width * part.height * part.quantity) / 1_000_000;
-    materialCost += areaM2 * LDSP_PRICE_M2;
-    edgeCost += ((part.width + part.height) * 2 * part.quantity) / 1000 * EDGE_PRICE_M;
+    materialCost += areaM2 * LDSP_PRICE_M2 * mult;
+    edgeCost += (((part.width + part.height) * 2 * part.quantity) / 1000) * EDGE_PRICE_M * mult;
   }
-  const laborCost = Math.round((materialCost + edgeCost) * LABOR_RATE);
-  const furnitureCost = state.objects3d.reduce((sum, item) => sum + estimateObjectRetailCost(item), 0);
-  const subtotal = Math.round(materialCost + edgeCost + laborCost + furnitureCost);
-  return { materialCost: Math.round(materialCost), edgeCost: Math.round(edgeCost), laborCost, furnitureCost, total: subtotal };
+  const procurementCost = Math.round(materialCost + edgeCost);
+  const total = Math.round(procurementCost * RETAIL_MULTIPLIER);
+  return { materialCost: Math.round(materialCost), edgeCost: Math.round(edgeCost), procurementCost, total };
 }
 
 function estimateTierPrices(cost) {
-  const hardwareCost = cost.edgeCost;
   const result = {};
-  for (const tier of PRICING_TIERS) {
-    result[tier.key] = Math.round(
-      cost.materialCost * tier.material
-        + hardwareCost * tier.hardware
-        + cost.laborCost * tier.labor
-        + cost.furnitureCost
-    );
-  }
+  for (const tier of PRICING_TIERS) result[tier.key] = Math.round(cost.procurementCost * RETAIL_MULTIPLIER);
   return result;
 }
 
@@ -1811,25 +2377,37 @@ function renderCostEstimate(bom = null) {
   if (!host) return;
   const data = bom || buildBomFromObjects();
   if (!data.parts.length && !state.objects3d.length) {
-    host.innerHTML = `<div class="text-muted">Добавьте мебель в комнату — здесь появится ориентировочная стоимость проекта.</div>`;
+    host.innerHTML = `<div class="estimate-empty"><div><span class="estimate-empty-icon">₽</span><h3>Расчёт появится здесь</h3><p class="estimate-note">Добавьте хотя бы один предмет мебели, чтобы увидеть ориентировочную стоимость.</p><button class="btn btn-secondary" type="button" data-open-furniture>Добавить мебель</button></div></div>`;
+    host.querySelector("[data-open-furniture]")?.addEventListener("click", () => document.getElementById("btnOpenObjectPicker")?.click());
     return;
   }
   const cost = estimateProjectCost(data);
   const tiers = estimateTierPrices(cost);
   if (APP_MODE !== "admin") {
+    const selectedTotal = tiers[state.selectedTier] || tiers.standard;
     host.innerHTML = `
-      <div class="mb-2 small text-muted">Выберите комплектацию — админ получит расчёт материалов и цену по вашему выбору:</div>
+      <div class="estimate-card">
+        <div class="estimate-kicker">Ориентировочная стоимость</div>
+        <div class="estimate-total">от ${money(selectedTotal)}</div>
+        <p class="estimate-note">Итоговая цена считается по формуле: закупочная сумма × 2.2. Закупочная сумма — это себестоимость материалов проекта.</p>
+        <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
+      </div>
+      <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
       ${renderTierCards(tiers)}
-      <div class="small text-muted mt-3">Точный раскрой и закупка выполняются производством после отправки проекта в работу.</div>`;
+      <div class="small text-muted mt-3">Закупочная сумма: <strong>${money(cost.procurementCost)}</strong>. Итог: <strong>${money(selectedTotal)}</strong>.</div>`;
     bindTierCardSelection(host);
+    host.querySelector("[data-exact-quote]")?.addEventListener("click", () => {
+      if (!isAuthenticated()) bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
+      else submitProjectToWork();
+    });
     return;
   }
   host.innerHTML = `
     <div class="row g-3">
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Материалы (ЛДСП)</div><div class="fw-semibold">${money(cost.materialCost)}</div></div></div>
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Кромка</div><div class="fw-semibold">${money(cost.edgeCost)}</div></div></div>
-      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Работа</div><div class="fw-semibold">${money(cost.laborCost)}</div></div></div>
-      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Мебель в проекте</div><div class="fw-semibold">${money(cost.furnitureCost)}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Закупочная сумма</div><div class="fw-semibold">${money(cost.procurementCost)}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Итог (×2.2)</div><div class="fw-semibold">${money(tiers.standard)}</div></div></div>
     </div>
     <div class="mt-3">${renderTierCards(tiers)}</div>
     <div class="mt-3 p-3 border rounded bg-white">
@@ -2085,23 +2663,25 @@ function renderAdminCatalogTable() {
   const host = document.getElementById("adminCatalogTable");
   if (!host) return;
   host.innerHTML = `
-    <table class="table table-sm admin-table">
-      <thead><tr><th>ID</th><th>Название</th><th>SKU</th><th>Цена</th><th>Склад</th><th></th></tr></thead>
-      <tbody>
-        ${state.products.map((p) => `
-          <tr>
-            <td>${p.id}</td>
-            <td>${escapeHtml(displayProductTitle(p))}</td>
-            <td class="small text-muted">${escapeHtml(p.sku)}</td>
-            <td>${money(Number(p.price))}</td>
-            <td>${p.stock}</td>
-            <td class="text-end">
-              <button class="btn btn-sm btn-outline-primary" data-edit="${p.id}">Изменить</button>
-              <button class="btn btn-sm btn-outline-danger" data-del="${p.id}">Скрыть</button>
-            </td>
-          </tr>`).join("")}
-      </tbody>
-    </table>`;
+    <div class="table-responsive">
+      <table class="table table-sm admin-table mb-0">
+        <thead><tr><th>ID</th><th>Название</th><th>SKU</th><th>Цена</th><th>Склад</th><th></th></tr></thead>
+        <tbody>
+          ${filteredProducts().map((p) => `
+            <tr>
+              <td>${p.id}</td>
+              <td>${escapeHtml(displayProductTitle(p))}</td>
+              <td class="small text-muted">${escapeHtml(p.sku)}</td>
+              <td>${money(Number(p.price))}</td>
+              <td>${p.stock}</td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-primary" data-edit="${p.id}">Изменить</button>
+                <button class="btn btn-sm btn-outline-danger" data-del="${p.id}">Скрыть</button>
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
   host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openProductEditor(Number(btn.dataset.edit))));
   host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", () => deactivateProduct(Number(btn.dataset.del))));
 }
@@ -2116,6 +2696,7 @@ async function renderCuttingJobs() {
       return;
     }
     host.innerHTML = `
+      <div class="table-responsive">
       <table class="table table-sm admin-table mb-0">
         <thead><tr><th>#</th><th>Дата</th><th>Лист</th><th>Деталей</th><th>Загрузка</th><th></th></tr></thead>
         <tbody>${jobs
@@ -2135,7 +2716,8 @@ async function renderCuttingJobs() {
             </tr>`;
           })
           .join("")}</tbody>
-      </table>`;
+      </table>
+      </div>`;
     host.querySelectorAll("[data-view-cut]").forEach((button) => {
       button.addEventListener("click", () => viewCuttingJob(Number(button.dataset.viewCut)));
     });
@@ -2189,6 +2771,7 @@ function removeObject3D(id) {
   const index = state.objects3d.findIndex((obj) => obj.id === id);
   if (index < 0) return;
   const [removed] = state.objects3d.splice(index, 1);
+  if (state.selected3dObjectId === removed.id) state.selected3dObjectId = null;
   renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
@@ -2199,6 +2782,7 @@ function removeObject3D(id) {
 function renderObjects3dList() {
   const host = document.getElementById("objects3dList");
   if (!host || APP_MODE === "admin") return;
+  updatePlannerProgress();
   if (!state.objects3d.length) {
     host.innerHTML = `<div class="text-muted">Объектов в комнате пока нет.</div>`;
     return;
@@ -2257,27 +2841,206 @@ async function renderCrmOrderProcurement(orderId) {
   try {
     const data = await api("GET", `/catalog/crm/orders/${orderId}/procurement`, undefined, true);
     state.crm.procurementByOrder[orderId] = data;
-    host.innerHTML = `
-      <table class="table table-sm table-bordered mb-0 mt-2">
-        <thead class="table-light">
-          <tr><th>Материал</th><th>Нужно</th><th>На складе</th><th class="text-danger">Купить</th></tr>
-        </thead>
-        <tbody>${data.lines
-          .map(
-            (line) => `<tr>
-              <td>${escapeHtml(line.material_name)}</td>
-              <td>${line.required_qty} ${escapeHtml(line.unit)}</td>
-              <td>${line.in_stock_qty} ${escapeHtml(line.unit)}</td>
-              <td class="${line.to_buy_qty > 0 ? "text-danger fw-semibold" : "text-success"}">${line.to_buy_qty > 0 ? line.to_buy_qty : "—"} ${line.to_buy_qty > 0 ? escapeHtml(line.unit) : ""}</td>
-            </tr>`
-          )
-          .join("")}</tbody>
-      </table>
-      <button type="button" class="btn btn-sm btn-outline-dark mt-2" data-crm-pdf="${orderId}">PDF закупки</button>`;
-    host.querySelector(`[data-crm-pdf="${orderId}"]`)?.addEventListener("click", () => exportCrmProcurementPdf(orderId));
+    host.innerHTML = renderCrmProcurementTable(orderId, data);
+    bindCrmProcurementTable(host, orderId);
   } catch (error) {
     host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
   }
+}
+
+function numOrZero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function renderCrmProcurementTable(orderId, data) {
+  const hasPrices = (data.lines || []).some((l) => numOrZero(l.unit_price_rub) > 0);
+  const progressText = `${money(numOrZero(data.purchased_sum_rub))} / ${money(numOrZero(data.procurement_sum_rub))} · ${Math.round(
+    numOrZero(data.progress_percent)
+  )}%`;
+
+  return `
+    <div data-crm-proc-wrapper="${orderId}">
+      <div class="table-responsive mt-2">
+        <table class="table table-sm table-bordered mb-0 align-middle crm-proc-table" data-crm-proc-table="${orderId}">
+          <thead class="table-light">
+            <tr>
+              <th style="min-width:220px">Материал</th>
+              <th style="min-width:130px">Нужно</th>
+              <th style="min-width:120px">Склад</th>
+              <th style="min-width:130px" class="text-danger">Купить</th>
+              <th style="min-width:120px">Цена, ₽</th>
+              <th style="min-width:120px">Итого, ₽</th>
+              <th style="min-width:170px">Закуплено</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(data.lines || [])
+              .map((line) => {
+                const toBuy = numOrZero(line.to_buy_qty);
+                const unitPrice = numOrZero(line.unit_price_rub);
+                const lineTotal = numOrZero(line.line_total_rub) || toBuy * unitPrice;
+                const purchasedQty = numOrZero(line.purchased_qty);
+                const isPurchased = !!line.is_purchased;
+                const baseToBuy = Number.isFinite(Number(line.to_buy_qty_base)) ? numOrZero(line.to_buy_qty_base) : toBuy;
+                const baseHint = baseToBuy !== toBuy ? ` (по складу: ${baseToBuy})` : "";
+                return `<tr data-crm-proc-row="${line.material_id}">
+                  <td>
+                    <div class="fw-semibold">${escapeHtml(line.material_name)}</div>
+                    <div class="small text-muted">ед.: ${escapeHtml(line.unit)}${baseHint}</div>
+                  </td>
+                  <td>${line.required_qty} ${escapeHtml(line.unit)}</td>
+                  <td>${line.in_stock_qty} ${escapeHtml(line.unit)}</td>
+                  <td>
+                    <input class="form-control form-control-sm" type="number" min="0" step="0.01"
+                      value="${toBuy}" data-crm-proc-to-buy />
+                  </td>
+                  <td>
+                    <input class="form-control form-control-sm" type="number" min="0" step="1"
+                      value="${unitPrice}" data-crm-proc-unit-price />
+                  </td>
+                  <td class="fw-semibold"><span data-crm-proc-line-total>${money(lineTotal)}</span></td>
+                  <td>
+                    <div class="d-flex align-items-center gap-2">
+                      <input class="form-check-input mt-0" type="checkbox" ${isPurchased ? "checked" : ""} data-crm-proc-done />
+                      <input class="form-control form-control-sm" style="max-width:110px" type="number" min="0" step="0.01"
+                        value="${purchasedQty}" ${isPurchased ? "disabled" : ""} data-crm-proc-purchased-qty />
+                      <span class="small text-muted">${escapeHtml(line.unit)}</span>
+                    </div>
+                    <div class="small text-muted mt-1"><span data-crm-proc-purchased-total>${money(
+                      numOrZero(line.purchased_total_rub)
+                    )}</span></div>
+                  </td>
+                </tr>`;
+              })
+              .join("")}
+          </tbody>
+          <tfoot class="table-light">
+            <tr>
+              <th colspan="5" class="text-end">Закупочная сумма</th>
+              <th colspan="2"><span class="fw-bold" data-crm-proc-sum>${money(numOrZero(data.procurement_sum_rub))}</span></th>
+            </tr>
+            <tr>
+              <th colspan="5" class="text-end">Уже закупили</th>
+              <th colspan="2"><span class="fw-semibold" data-crm-proc-progress>${progressText}</span></th>
+            </tr>
+            <tr class="table-success">
+              <th colspan="5" class="text-end">Итоговая сумма (закупка × ${RETAIL_MULTIPLIER})</th>
+              <th colspan="2"><span class="fw-bold" data-crm-proc-final-sum>${money(numOrZero(data.procurement_sum_rub) * RETAIL_MULTIPLIER)}</span></th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="d-flex flex-wrap gap-2 mt-2 align-items-center">
+        <button type="button" class="btn btn-sm btn-outline-primary" data-crm-proc-save="${orderId}">Сохранить закупку</button>
+        <button type="button" class="btn btn-sm btn-outline-dark" data-crm-pdf="${orderId}">PDF закупки</button>
+        <span class="small text-muted ms-auto">Прогресс: <strong data-crm-proc-progress-inline>${progressText}</strong></span>
+      </div>
+      ${
+        hasPrices
+          ? ""
+          : `<div class="small text-muted mt-2">Укажите цены закупки — тогда появится «Закупочная сумма» и прогресс закупки.</div>`
+      }
+    </div>
+  `;
+}
+
+function collectCrmProcurementEdits(table) {
+  return Array.from(table.querySelectorAll("[data-crm-proc-row]")).map((row) => {
+    const materialId = Number(row.dataset.crmProcRow);
+    const toBuyQty = numOrZero(row.querySelector("[data-crm-proc-to-buy]")?.value);
+    const unitPrice = numOrZero(row.querySelector("[data-crm-proc-unit-price]")?.value);
+    const purchasedQty = numOrZero(row.querySelector("[data-crm-proc-purchased-qty]")?.value);
+    const isPurchased = !!row.querySelector("[data-crm-proc-done]")?.checked;
+    return {
+      material_id: materialId,
+      to_buy_qty: toBuyQty,
+      unit_price_rub: unitPrice,
+      purchased_qty: purchasedQty,
+      is_purchased: isPurchased,
+    };
+  });
+}
+
+function recalcCrmProcurementTable(wrapper) {
+  const table = wrapper.querySelector("[data-crm-proc-table]");
+  if (!table) return;
+
+  let sum = 0;
+  let purchasedSum = 0;
+
+  table.querySelectorAll("[data-crm-proc-row]").forEach((row) => {
+    const toBuyQty = numOrZero(row.querySelector("[data-crm-proc-to-buy]")?.value);
+    const unitPrice = numOrZero(row.querySelector("[data-crm-proc-unit-price]")?.value);
+    const purchasedQtyRaw = numOrZero(row.querySelector("[data-crm-proc-purchased-qty]")?.value);
+    const done = !!row.querySelector("[data-crm-proc-done]")?.checked;
+    const purchasedQty = done ? toBuyQty : Math.min(Math.max(0, purchasedQtyRaw), toBuyQty);
+
+    const lineTotal = toBuyQty * unitPrice;
+    const purchasedTotal = purchasedQty * unitPrice;
+    sum += lineTotal;
+    purchasedSum += purchasedTotal;
+
+    row.querySelector("[data-crm-proc-line-total]").textContent = money(lineTotal);
+    row.querySelector("[data-crm-proc-purchased-total]").textContent = money(purchasedTotal);
+  });
+
+  const percent = sum > 0 ? Math.round((purchasedSum / sum) * 100) : 0;
+  const progressText = `${money(purchasedSum)} / ${money(sum)} · ${percent}%`;
+
+  wrapper.querySelector("[data-crm-proc-sum]").textContent = money(sum);
+  wrapper.querySelector("[data-crm-proc-progress]").textContent = progressText;
+  wrapper.querySelector("[data-crm-proc-progress-inline]").textContent = progressText;
+  const finalSumEl = wrapper.querySelector("[data-crm-proc-final-sum]");
+  if (finalSumEl) finalSumEl.textContent = money(sum * RETAIL_MULTIPLIER);
+}
+
+function bindCrmProcurementTable(host, orderId) {
+  const wrapper = host.querySelector(`[data-crm-proc-wrapper="${orderId}"]`);
+  const table = host.querySelector(`[data-crm-proc-table="${orderId}"]`);
+  if (!wrapper || !table) return;
+
+  const recalc = () => recalcCrmProcurementTable(wrapper);
+
+  table.querySelectorAll("[data-crm-proc-to-buy],[data-crm-proc-unit-price],[data-crm-proc-purchased-qty]").forEach((input) => {
+    input.addEventListener("input", recalc);
+    input.addEventListener("change", recalc);
+  });
+
+  table.querySelectorAll("[data-crm-proc-done]").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      const row = checkbox.closest("[data-crm-proc-row]");
+      if (!row) return;
+      const purchasedInput = row.querySelector("[data-crm-proc-purchased-qty]");
+      const toBuyInput = row.querySelector("[data-crm-proc-to-buy]");
+      if (purchasedInput && toBuyInput) {
+        if (checkbox.checked) {
+          purchasedInput.value = String(numOrZero(toBuyInput.value));
+          purchasedInput.disabled = true;
+        } else {
+          purchasedInput.disabled = false;
+        }
+      }
+      recalc();
+    });
+  });
+
+  wrapper.querySelector(`[data-crm-proc-save="${orderId}"]`)?.addEventListener("click", async () => {
+    try {
+      const payload = collectCrmProcurementEdits(table);
+      const updated = await api("PUT", `/catalog/crm/orders/${orderId}/procurement`, payload, true);
+      state.crm.procurementByOrder[orderId] = updated;
+      host.innerHTML = renderCrmProcurementTable(orderId, updated);
+      bindCrmProcurementTable(host, orderId);
+      toast("Закупка сохранена");
+    } catch (error) {
+      toast(`Не удалось сохранить закупку: ${formatApiError(error)}`, false);
+    }
+  });
+
+  wrapper.querySelector(`[data-crm-pdf="${orderId}"]`)?.addEventListener("click", () => exportCrmProcurementPdf(orderId));
+
+  recalc();
 }
 
 function crmStatusBadge(status) {
@@ -2318,9 +3081,12 @@ function renderCrmOrderCard(order) {
           </select>
           <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>
           <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
+          <button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>
           <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>
         </div>
         <div id="crm-proc-${order.id}"></div>
+        <div id="crm-receipts-${order.id}" class="mt-2"></div>
         <div id="crm-photos-${order.id}" class="mt-2"></div>
       </div>`;
 }
@@ -2338,6 +3104,12 @@ function bindCrmOrderPanel(host) {
   });
   host.querySelectorAll("[data-crm-photo]").forEach((btn) => {
     btn.addEventListener("click", () => uploadCrmOrderPhoto(Number(btn.dataset.crmPhoto)));
+  });
+  host.querySelectorAll("[data-crm-receipt-upload]").forEach((btn) => {
+    btn.addEventListener("click", () => uploadCrmOrderReceipt(Number(btn.dataset.crmReceiptUpload)));
+  });
+  host.querySelectorAll("[data-crm-receipt-view]").forEach((btn) => {
+    btn.addEventListener("click", () => toggleCrmOrderReceipts(Number(btn.dataset.crmReceiptView), btn));
   });
 }
 
@@ -2422,16 +3194,101 @@ async function getPhotoViewUrl(objectKey) {
   return assetObjectUrl(objectKey);
 }
 
-function exportCrmProcurementPdf(orderId) {
+// Позволяет одному админу сфотографировать чек закупки, а другому — посмотреть,
+// что и на какую сумму уже куплено по заказу.
+async function uploadCrmOrderReceipt(orderId) {
+  const note = window.prompt("Что купили (необязательно)?", "") || "";
+  const amountRaw = window.prompt("Сумма по чеку, ₽ (необязательно)", "") || "";
+  const amount = numOrZero(amountRaw);
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.capture = "environment";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const objectKey = `receipts/${orderId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
+    try {
+      await uploadAssetFile(file, objectKey);
+      await api(
+        "POST",
+        `/catalog/crm/orders/${orderId}/receipts`,
+        {
+          object_key: objectKey,
+          note,
+          amount_rub: amount > 0 ? amount : null,
+          uploaded_by: customerName(),
+        },
+        true
+      );
+      toast("Чек загружен");
+      const host = document.getElementById(`crm-receipts-${orderId}`);
+      if (host?.dataset.open === "1") await renderCrmOrderReceipts(orderId);
+    } catch (error) {
+      toast(`Чек: ${formatApiError(error)}`, false);
+    }
+  };
+  input.click();
+}
+
+async function toggleCrmOrderReceipts(orderId, btn) {
+  const host = document.getElementById(`crm-receipts-${orderId}`);
+  if (!host) return;
+  if (host.dataset.open === "1") {
+    host.dataset.open = "0";
+    host.innerHTML = "";
+    if (btn) btn.textContent = "Посмотреть чеки";
+    return;
+  }
+  host.dataset.open = "1";
+  if (btn) btn.textContent = "Скрыть чеки";
+  await renderCrmOrderReceipts(orderId);
+}
+
+async function renderCrmOrderReceipts(orderId) {
+  const host = document.getElementById(`crm-receipts-${orderId}`);
+  if (!host) return;
+  host.innerHTML = `<span class="text-muted small">Загружаем чеки...</span>`;
+  try {
+    const receipts = await api("GET", `/catalog/crm/orders/${orderId}/receipts`, undefined, true);
+    if (!receipts.length) {
+      host.innerHTML = `<div class="small text-muted border rounded p-2">Чеков пока нет — нажмите «Загрузить чек», когда что-то купите.</div>`;
+      return;
+    }
+    const totalAmount = receipts.reduce((sum, r) => sum + numOrZero(r.amount_rub), 0);
+    const items = receipts
+      .map((receipt) => {
+        const url = assetObjectUrl(receipt.object_key);
+        const when = receipt.created_at ? new Date(receipt.created_at).toLocaleString("ru-RU") : "";
+        return `<div class="d-inline-block me-2 mb-2 text-center align-top" style="max-width:150px">
+          <a href="${url}" target="_blank" rel="noopener">
+            <img src="${url}" alt="Чек" class="img-fluid rounded border" style="max-height:120px">
+          </a>
+          ${numOrZero(receipt.amount_rub) > 0 ? `<div class="small fw-semibold mt-1">${money(numOrZero(receipt.amount_rub))}</div>` : ""}
+          ${receipt.note ? `<div class="small text-muted">${escapeHtml(receipt.note)}</div>` : ""}
+          <div class="small text-muted">${escapeHtml(receipt.uploaded_by || "—")}${when ? ` · ${when}` : ""}</div>
+        </div>`;
+      })
+      .join("");
+    host.innerHTML = `<div class="border rounded p-2 bg-light">
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <span class="small fw-semibold">Чеки закупки (${receipts.length})</span>
+        ${totalAmount > 0 ? `<span class="small fw-semibold">Сумма по чекам: ${money(totalAmount)}</span>` : ""}
+      </div>
+      ${items}
+    </div>`;
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function exportCrmProcurementPdf(orderId) {
   const cached = state.crm.procurementByOrder[orderId];
   if (!cached?.lines?.length) {
     toast("Сначала нажмите «Рассчитать закупку»", false);
     return;
   }
-  if (!window.pdfMake) {
-    toast("Модуль PDF не загружен", false);
-    return;
-  }
+  if (!(await ensurePdfMake())) return;
   const order = state.crm.orders.find((o) => o.id === orderId);
   window.pdfMake
     .createPdf({
@@ -2440,22 +3297,32 @@ function exportCrmProcurementPdf(orderId) {
       content: [
         { text: "Закупка материалов", style: "title" },
         { text: order ? `${order.title} · ${order.customer}` : `Заказ #${orderId}`, style: "meta" },
-        { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta", margin: [0, 0, 0, 12] },
+        { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta" },
+        { text: `Закупочная сумма: ${money(Number(cached.procurement_sum_rub || 0))}`, style: "meta" },
+        {
+          text: `Закуплено: ${money(Number(cached.purchased_sum_rub || 0))} (${Math.round(Number(cached.progress_percent || 0))}%)`,
+          style: "meta",
+          margin: [0, 0, 0, 12],
+        },
         {
           table: {
-            widths: ["*", 70, 70, 70],
+            widths: ["*", 60, 55, 55, 55, 60],
             body: [
               [
                 { text: "Материал", style: "thead" },
                 { text: "Нужно", style: "thead" },
                 { text: "Склад", style: "thead" },
                 { text: "Купить", style: "thead" },
+                { text: "Цена", style: "thead" },
+                { text: "Итого", style: "thead" },
               ],
               ...cached.lines.map((line) => [
                 line.material_name,
                 `${line.required_qty} ${line.unit}`,
                 `${line.in_stock_qty}`,
                 line.to_buy_qty > 0 ? `${line.to_buy_qty} ${line.unit}` : "—",
+                money(Number(line.unit_price_rub || 0)),
+                money(Number(line.line_total_rub || 0)),
               ]),
             ],
           },
@@ -2560,6 +3427,8 @@ async function submitProjectToWork() {
     const tiers = estimateTierPrices(cost);
     const project = await savePlannerProject();
     state.projectId = project.id;
+    state.plannerStep = 4;
+    updatePlannerProgress();
     await syncPlannerObjectsToBackend();
     await api("POST", `/planner/projects/${state.projectId}/submit`, { selected_tier: selectedTier }, true);
     const materials = await buildCrmMaterialsFromBom(bom, selectedTier);
@@ -2601,7 +3470,7 @@ async function clearCrmOrders() {
 }
 
 async function loadUserProjects() {
-  const host = document.getElementById("userProjectsPanel");
+  const host = document.getElementById("memberProjectsPanel") || document.getElementById("userProjectsPanel");
   if (!host || !customerName()) return;
   try {
     state.userProjects = await api(
@@ -2617,7 +3486,7 @@ async function loadUserProjects() {
 }
 
 function renderUserProjects() {
-  const host = document.getElementById("userProjectsPanel");
+  const host = document.getElementById("memberProjectsPanel") || document.getElementById("userProjectsPanel");
   if (!host) return;
   if (!state.userProjects.length) {
     host.innerHTML = `<div class="text-muted">У вас пока нет сохранённых проектов. Спланируйте комнату и нажмите «Сохранить проект».</div>`;
@@ -2628,13 +3497,15 @@ function renderUserProjects() {
       const tier = project.selected_tier ? ` · ${tierTitle(project.selected_tier)}` : "";
       const price = project[`price_${project.selected_tier || "standard"}`];
       const priceText = price ? ` · ${money(price)}` : "";
-      return `<div class="border rounded p-3 mb-2">
+      const updated = project.updated_at || project.created_at;
+      return `<div class="account-record">
         <div class="d-flex justify-content-between align-items-start gap-2">
           <div>
             <strong>${escapeHtml(project.name)}</strong>
             <div class="small text-muted">${plannerStatusLabel(project.status)}${tier}${priceText}</div>
             <div class="small">${Math.round(project.room_width)}×${Math.round(project.room_length)}×${Math.round(project.room_height)} мм</div>
             ${project.location ? `<div class="small text-muted">${escapeHtml(project.location)}</div>` : ""}
+            ${updated ? `<div class="account-record-meta">Обновлён ${new Date(updated).toLocaleDateString("ru-RU")}</div>` : ""}
           </div>
           <button type="button" class="btn btn-sm btn-primary" data-open-user-project="${project.id}">Открыть</button>
         </div>
@@ -2661,7 +3532,7 @@ async function openUserProject(projectId) {
 }
 
 async function loadUserOrders() {
-  const host = document.getElementById("userOrdersPanel");
+  const host = document.getElementById("memberOrdersPanel") || document.getElementById("userOrdersPanel");
   if (!host || !customerName()) return;
   try {
     state.userOrders = await api("GET", `/catalog/crm/orders/user/${encodeURIComponent(customerName())}`, undefined, true);
@@ -2672,7 +3543,7 @@ async function loadUserOrders() {
 }
 
 async function renderUserOrders() {
-  const host = document.getElementById("userOrdersPanel");
+  const host = document.getElementById("memberOrdersPanel") || document.getElementById("userOrdersPanel");
   if (!host) return;
   if (!state.userOrders.length) {
     host.innerHTML = `<div class="text-muted">У вас пока нет заказов в производстве. Спланируйте кухню и нажмите «Отправить в работу».</div>`;
@@ -2688,7 +3559,7 @@ async function renderUserOrders() {
             photos.map(async (photo) => {
               const url = await getPhotoViewUrl(photo.object_key);
               return url
-                ? `<div class="me-2 mb-2 d-inline-block"><img src="${url}" class="rounded border" style="height:72px" alt=""><div class="small text-muted">${escapeHtml(photo.caption || "")}</div></div>`
+                ? `<div class="me-2 mb-2 d-inline-block"><img src="${url}" class="rounded border" style="height:72px" loading="lazy" data-lightbox-image alt="${escapeHtml(photo.caption || order.title)}"><div class="small text-muted">${escapeHtml(photo.caption || "")}</div></div>`
                 : "";
             })
           );
@@ -2702,13 +3573,15 @@ async function renderUserOrders() {
       const prices = price
         ? `<div class="small mt-1">Комплектация <strong>${escapeHtml(tierTitle(tier))}</strong> — ${money(price)}</div>`
         : "";
-      return `<div class="border rounded p-3 mb-2">
+      const created = order.created_at ? new Date(order.created_at).toLocaleDateString("ru-RU") : "";
+      return `<div class="account-record">
         <div class="d-flex justify-content-between gap-2">
           <strong>${escapeHtml(order.title)}</strong>
           <span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(order.status)}</span>
         </div>
         ${prices}
         <div class="small text-muted">Заказ #${order.id}${order.planner_project_id ? ` · проект #${order.planner_project_id}` : ""}</div>
+        ${created ? `<div class="account-record-meta">Создан ${created}</div>` : ""}
         ${photosHtml}
       </div>`;
     })
@@ -2772,6 +3645,7 @@ async function loadPlannerProject(projectId) {
     drawers: row.drawers ?? 0,
     handles: row.handles ?? 0,
   }));
+  state.selected3dObjectId = state.objects3d[0]?.id || null;
 
   if (project.bom_json) {
     try {
@@ -2924,16 +3798,13 @@ function sheetCanvasForPdfmake(sheet, sheetWidthMm, sheetHeightMm) {
   return { canvas, width };
 }
 
-function exportCutPdf() {
+async function exportCutPdf() {
   const result = state.lastCutResult;
   if (!result) {
     toast("Сначала выполните раскрой", false);
     return;
   }
-  if (!window.pdfMake) {
-    toast("Модуль PDF не загружен", false);
-    return;
-  }
+  if (!(await ensurePdfMake())) return;
   const sheetW = Number(document.getElementById("sheetW").value);
   const sheetH = Number(document.getElementById("sheetH").value);
   const content = [
@@ -3066,31 +3937,39 @@ function buildBasisCabinetScript(item, offsetX, offsetZ) {
   return lines.join("\n");
 }
 
-function exportBasisScript() {
+function exportBasisB3d() {
   if (!state.objects3d.length) {
     toast("Добавьте объекты в планировщик для экспорта в Базис", false);
     return;
   }
-
   const blocks = state.objects3d.map((item, index) => {
     const offsetX = Math.round(item.x - getObjectManufacturingSize(item).width / 2);
     const offsetZ = Math.round(item.z - getObjectManufacturingSize(item).depth / 2) + index * 120;
     return buildBasisCabinetScript(item, offsetX, offsetZ);
   });
-
   const cutComment = state.lastCutResult
     ? `\n// Раскрой: ${state.lastCutResult.placed_count}/${state.lastCutResult.requested_count} деталей, ${state.lastCutResult.total_sheets} лист(ов)\n`
     : "\n// Раскрой ещё не рассчитан — запустите расчёт перед экспортом\n";
 
   const script = [
-    "// WoodCraft Market → БАЗИС-Мебельщик",
-    "// Как открыть: Скрипты → Выбрать этот файл → Запустить",
+    "// WoodCraft Market → БАЗИС-Мебельщик: экспорт в .b3d",
+    "// Как использовать:",
+    "// 1) Откройте БАЗИС-Мебельщик",
+    "// 2) Скрипты → Выбрать этот файл → Запустить",
+    "// 3) После выполнения рядом появится файл .b3d (путь можно поменять в OUT_FILE ниже)",
     "// Все размеры в миллиметрах",
     cutComment,
+    "var OUT_FILE = 'woodcraft-export.b3d';",
     "Undo.changing();",
     "try {",
     ...blocks,
-    "  alert('Импорт завершён: корпуса построены.');",
+    "  if (typeof historyOperations !== 'undefined' && historyOperations.CommitCurrentChanges) {",
+    "    historyOperations.CommitCurrentChanges('WoodCraft export');",
+    "  }",
+    "  if (typeof modelIOOperations !== 'undefined' && modelIOOperations.SaveModelToFile) {",
+    "    modelIOOperations.SaveModelToFile(OUT_FILE);",
+    "  }",
+    "  alert('Экспорт завершён. Файл: ' + OUT_FILE);",
     "} finally {",
     "  Undo.commit();",
     "}",
@@ -3099,10 +3978,10 @@ function exportBasisScript() {
   const blob = new Blob([script], { type: "text/javascript;charset=utf-8" });
   const link = document.createElement("a");
   link.href = URL.createObjectURL(blob);
-  link.download = "woodcraft-basis-import.js";
+  link.download = "woodcraft-basis-export-b3d.js";
   link.click();
   URL.revokeObjectURL(link.href);
-  toast("Скрипт для Базис сохранён — запустите его через меню «Скрипты»");
+  toast("Скрипт сохранён — запустите в Базис, он сохранит .b3d");
 }
 
 function buildDbsDocument() {
@@ -3180,16 +4059,13 @@ function exportDbsFile() {
   toast("Файл DBS сохранён (спецификация для производства)");
 }
 
-function exportAssemblyPdf() {
+async function exportAssemblyPdf() {
   const bom = buildBomFromObjects();
   if (!bom.parts.length) {
     toast("Добавьте объекты, чтобы собрать инструкцию", false);
     return;
   }
-  if (!window.pdfMake) {
-    toast("Модуль PDF не загружен", false);
-    return;
-  }
+  if (!(await ensurePdfMake())) return;
   const objectsTableBody = [
     [{ text: "№", style: "thead" }, { text: "Объект", style: "thead" }, { text: "Тип", style: "thead" }, { text: "Габариты, мм", style: "thead" }, { text: "Текстура", style: "thead" }],
     ...state.objects3d.map((item, idx) => {
@@ -3267,10 +4143,252 @@ function setBackendStatus(ok, message) {
 
 function bindClick(id, handler) {
   const el = document.getElementById(id);
-  if (el) el.addEventListener("click", handler);
+  if (!el) return;
+  el.addEventListener("click", async (event) => {
+    const result = handler(event);
+    if (!result || typeof result.then !== "function") return;
+    el.disabled = true;
+    el.setAttribute("aria-busy", "true");
+    try {
+      await result;
+    } finally {
+      el.disabled = false;
+      el.removeAttribute("aria-busy");
+    }
+  });
+}
+
+function updatePlannerProgress() {
+  const host = document.getElementById("plannerProgress");
+  if (!host) return;
+  const validRoom = state.roomConfig.width >= 2000 && state.roomConfig.length >= 2000;
+  const hasObjects = state.objects3d.length > 0;
+  const maxStep = state.projectId ? 4 : hasObjects ? 4 : validRoom ? 2 : 1;
+  if (state.projectId) state.plannerStep = 4;
+  else if (hasObjects && state.plannerStep < 3) state.plannerStep = 3;
+  else if (validRoom && state.plannerStep < 2) state.plannerStep = 2;
+  if (state.plannerStep > maxStep) state.plannerStep = maxStep;
+  host.querySelectorAll("[data-planner-step]").forEach((button) => {
+    const step = Number(button.dataset.plannerStep);
+    button.disabled = step > maxStep;
+    button.classList.toggle("active", step === state.plannerStep);
+    button.classList.toggle("completed", step < state.plannerStep || (step === 4 && Boolean(state.projectId)));
+    button.setAttribute("aria-current", step === state.plannerStep ? "step" : "false");
+  });
+}
+
+function goToPlannerStep(step) {
+  state.plannerStep = step;
+  updatePlannerProgress();
+  if (step === 1) document.getElementById("roomWidth")?.focus();
+  if (step === 2) document.getElementById("btnOpenObjectPicker")?.focus();
+  if (step === 3) document.querySelector('[data-bs-target="#room3dPane"]')?.click();
+  if (step === 4) document.getElementById("projectName")?.focus();
+}
+
+function initPlannerProgress() {
+  document.getElementById("plannerProgress")?.querySelectorAll("[data-planner-step]").forEach((button) => {
+    button.addEventListener("click", () => goToPlannerStep(Number(button.dataset.plannerStep)));
+  });
+  updatePlannerProgress();
+}
+
+function initProcessAnimation() {
+  const grid = document.querySelector(".process-grid");
+  if (!grid) return;
+  if (!window.IntersectionObserver) { grid.classList.add("is-visible"); return; }
+  const observer = new IntersectionObserver((entries) => {
+    if (!entries[0].isIntersecting) return;
+    grid.classList.add("is-visible");
+    observer.disconnect();
+  }, { threshold: 0.2 });
+  observer.observe(grid);
+}
+
+function initPlannerFullscreen() {
+  const button = document.getElementById("btnPlannerFullscreen");
+  const workspace = document.querySelector(".planner-workspace");
+  if (!button || !workspace) return;
+  const sync = () => {
+    const active = document.fullscreenElement === workspace || workspace.classList.contains("is-fullscreen-fallback");
+    button.textContent = active ? "× Выйти из полного экрана" : "⛶ На весь экран";
+    button.setAttribute("aria-pressed", String(active));
+    requestAnimationFrame(refreshRoom3DLayout);
+  };
+  button.addEventListener("click", async () => {
+    if (document.fullscreenElement === workspace) await document.exitFullscreen();
+    else if (workspace.requestFullscreen) await workspace.requestFullscreen();
+    else workspace.classList.toggle("is-fullscreen-fallback");
+    sync();
+  });
+  document.addEventListener("fullscreenchange", sync);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && workspace.classList.contains("is-fullscreen-fallback")) {
+      workspace.classList.remove("is-fullscreen-fallback");
+      sync();
+    }
+  });
+}
+
+function initLightbox() {
+  const root = document.getElementById("imageLightbox");
+  const image = document.getElementById("lightboxImage");
+  const caption = document.getElementById("lightboxCaption");
+  if (!root || !image || !caption) return;
+  let images = [];
+  let index = 0;
+  let returnFocus = null;
+  const eligible = ".product-art-photo img, .product-photo-thumb img, [data-lightbox-image]";
+  const show = (next) => {
+    if (!images.length) return;
+    index = (next + images.length) % images.length;
+    image.src = images[index].currentSrc || images[index].src;
+    image.alt = images[index].alt || "";
+    caption.textContent = images[index].alt || "Изображение";
+    root.querySelectorAll(".lightbox-nav").forEach((button) => button.classList.toggle("d-none", images.length < 2));
+  };
+  const close = () => {
+    root.hidden = true; root.setAttribute("aria-hidden", "true"); document.body.style.overflow = ""; image.src = ""; returnFocus?.focus();
+  };
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest?.(eligible);
+    if (!target) return;
+    images = [...document.querySelectorAll(eligible)].filter((item) => item.src);
+    index = images.indexOf(target); returnFocus = target; root.hidden = false; root.setAttribute("aria-hidden", "false"); document.body.style.overflow = "hidden"; show(index); root.querySelector("[data-lightbox-close]").focus();
+  });
+  root.addEventListener("click", (event) => { if (event.target === root || event.target.closest("[data-lightbox-close]")) close(); });
+  root.querySelector("[data-lightbox-prev]").addEventListener("click", () => show(index - 1));
+  root.querySelector("[data-lightbox-next]").addEventListener("click", () => show(index + 1));
+  document.addEventListener("keydown", (event) => {
+    if (root.hidden) return;
+    if (event.key === "Escape") close();
+    if (event.key === "ArrowLeft") show(index - 1);
+    if (event.key === "ArrowRight") show(index + 1);
+  });
+}
+
+function syncObjectEditorControls() {
+  const typeEl = document.getElementById("objType");
+  const textureEl = document.getElementById("objTexture");
+  const millingRow = document.getElementById("objMillingRow");
+  const millingEl = document.getElementById("objMilling");
+  const countertopRow = document.getElementById("objCountertopRow");
+  const countertopEl = document.getElementById("objCountertopType");
+
+  const type = typeEl?.value || "";
+  const texture = textureEl?.value || "";
+  const isAppliance = String(type).startsWith("appliance_");
+  if (isAppliance && textureEl && textureEl.value !== "metal_graphite") {
+    textureEl.value = "metal_graphite";
+  }
+
+  const millingAllowed = texture === "mdf_film_matte" || texture === "mdf_film_gloss";
+  if (millingRow) millingRow.classList.toggle("d-none", !millingAllowed);
+  if (!millingAllowed && millingEl) millingEl.checked = false;
+
+  const showCountertop = type === "cabinet" || type === "wardrobe" || type === "table";
+  if (countertopRow) countertopRow.classList.toggle("d-none", !showCountertop);
+  if (showCountertop && countertopEl && !countertopEl.value) countertopEl.value = "skif";
+
+  const useCustomColorEl = document.getElementById("objUseCustomColor");
+  const customColorEl = document.getElementById("objCustomColor");
+  if (useCustomColorEl && customColorEl) {
+    useCustomColorEl.disabled = isAppliance;
+    if (isAppliance) {
+      useCustomColorEl.checked = false;
+      customColorEl.disabled = true;
+    } else {
+      customColorEl.disabled = !useCustomColorEl.checked;
+    }
+  }
+}
+
+function initObjectPicker() {
+  const modalEl = document.getElementById("objectPickerModal");
+  if (!modalEl) return;
+  modalEl.addEventListener("click", (event) => {
+    const btn = event.target.closest?.("[data-pick-object]");
+    if (!btn) return;
+    const typeEl = document.getElementById("objType");
+    const nameEl = document.getElementById("objName");
+    const wEl = document.getElementById("objW");
+    const dEl = document.getElementById("objD");
+    const hEl = document.getElementById("objH");
+    const textureEl = document.getElementById("objTexture");
+    const countertopEl = document.getElementById("objCountertopType");
+
+    const type = btn.dataset.type || "cabinet";
+    const name = btn.dataset.name || (typePresets[type]?.title || "Новый объект");
+    const w = btn.dataset.w || "";
+    const d = btn.dataset.d || "";
+    const h = btn.dataset.h || "";
+    const texture = btn.dataset.texture || "";
+    const countertop = btn.dataset.countertop || "";
+    const section = btn.dataset.section || "living";
+
+    state.objectEditor.section = section;
+    if (typeEl) typeEl.value = type;
+    if (nameEl) nameEl.value = name;
+    if (wEl && w) wEl.value = w;
+    if (dEl && d) dEl.value = d;
+    if (hEl && h) hEl.value = h;
+    if (textureEl && texture) textureEl.value = texture;
+    if (countertopEl && countertop) countertopEl.value = countertop;
+
+    const millingEl = document.getElementById("objMilling");
+    if (millingEl) millingEl.checked = false;
+
+    syncObjectEditorControls();
+    bootstrap.Modal.getInstance(modalEl)?.hide();
+  });
+}
+
+function initRoomFinishControls() {
+  const floorTextureEl = document.getElementById("roomFloorTexture");
+  const wallTextureEl = document.getElementById("roomWallTexture");
+  const useCustomEl = document.getElementById("roomUseCustomColors");
+  const floorColorEl = document.getElementById("roomFloorColor");
+  const wallColorEl = document.getElementById("roomWallColor");
+
+  if (!floorTextureEl || !wallTextureEl || !useCustomEl || !floorColorEl || !wallColorEl) return;
+
+  const syncInputsEnabled = () => {
+    floorColorEl.disabled = !useCustomEl.checked;
+    wallColorEl.disabled = !useCustomEl.checked;
+  };
+
+  const apply = () => {
+    state.roomFinish.floorTexture = floorTextureEl.value || "wood_oak";
+    state.roomFinish.wallTexture = wallTextureEl.value || "wall_default";
+    state.roomFinish.useCustomColors = !!useCustomEl.checked;
+    state.roomFinish.floorColor = normalizeColorHex(floorColorEl.value) || "#E9DCCB";
+    state.roomFinish.wallColor = normalizeColorHex(wallColorEl.value) || "#FAF7F2";
+    if (state.three) rebuildRoomGeometry();
+    if (document.getElementById("roomPlan")) renderRoomTopView();
+    renderRoom3D();
+  };
+
+  floorTextureEl.value = state.roomFinish.floorTexture || "wood_oak";
+  wallTextureEl.value = state.roomFinish.wallTexture || "wall_default";
+  useCustomEl.checked = !!state.roomFinish.useCustomColors;
+  floorColorEl.value = state.roomFinish.floorColor || "#E9DCCB";
+  wallColorEl.value = state.roomFinish.wallColor || "#FAF7F2";
+  syncInputsEnabled();
+
+  useCustomEl.addEventListener("change", () => {
+    syncInputsEnabled();
+    apply();
+  });
+  floorTextureEl.addEventListener("change", apply);
+  wallTextureEl.addEventListener("change", apply);
+  floorColorEl.addEventListener("input", apply);
+  wallColorEl.addEventListener("input", apply);
 }
 
 async function boot() {
+  applyTheme(document.documentElement.dataset.theme || "light");
+  bindClick("themeToggle", toggleTheme);
+  bindClick("btnLogout", logoutCustomer);
   const apiBaseInput = document.getElementById("apiBase");
   if (apiBaseInput) apiBaseInput.value = localStorage.getItem(LS_API) || defaultApiBase();
   bindClick("saveApiBase", () => {
@@ -3279,11 +4397,32 @@ async function boot() {
   });
   const searchInput = document.getElementById("searchInput");
   if (searchInput) {
+    let searchTimer = 0;
     searchInput.addEventListener("input", (event) => {
-      state.search = event.target.value;
-      renderProducts();
+      clearTimeout(searchTimer);
+      const value = event.target.value;
+      document.getElementById("searchClear")?.classList.toggle("d-none", !value);
+      searchTimer = setTimeout(() => {
+        state.search = value;
+        if (APP_MODE === "admin") renderAdminCatalogTable();
+        else renderProducts();
+      }, 250);
     });
   }
+  bindClick("searchClear", () => {
+    if (searchInput) searchInput.value = "";
+    state.search = "";
+    document.getElementById("searchClear")?.classList.add("d-none");
+    if (APP_MODE === "admin") renderAdminCatalogTable();
+    else renderProducts();
+    searchInput?.focus();
+  });
+  initProcessAnimation();
+  initPlannerProgress();
+  initPlannerFullscreen();
+  initLightbox();
+  initObjectPicker();
+  initRoomFinishControls();
 
   bindClick("btnOptimize", () => optimizeCutting());
   bindClick("btnAddPart", addPartFromInputs);
@@ -3302,7 +4441,7 @@ async function boot() {
   });
   bindClick("btnSubmitToWork", submitProjectToWork);
   bindClick("btnCutFrom3d", cutFrom3D);
-  bindClick("btnExportBasis", exportBasisScript);
+  bindClick("btnExportBasisB3d", exportBasisB3d);
   bindClick("btnExportDbs", exportDbsFile);
   bindClick("btnExportCutPdf", exportCutPdf);
   bindClick("btnExportAssemblyPdf", exportAssemblyPdf);
@@ -3353,6 +4492,11 @@ async function boot() {
     useCustomColorEl.addEventListener("change", syncCustomColorInput);
     syncCustomColorInput();
   }
+
+  document.getElementById("objTexture")?.addEventListener("change", () => {
+    syncObjectEditorControls();
+  });
+  syncObjectEditorControls();
 
   try {
     await api("GET", "/health");
