@@ -1,5 +1,8 @@
 """Atomic, idempotent planner scene persistence."""
 
+from common.jwt_auth import AuthContext, TokenClaims, get_auth_context
+from services.planner_service.app.main import app as planner_app
+
 
 def _placement(client_id: str, width: float = 600) -> dict:
     return {
@@ -57,3 +60,20 @@ def test_scene_rejects_duplicate_client_ids(planner_client):
     project_id = planner_client.post("/projects", json={"name": "No duplicates"}).json()["id"]
     response = planner_client.put(f"/projects/{project_id}/scene", json=_scene(0, [_placement("same"), _placement("same")]))
     assert response.status_code == 422
+
+
+def test_authenticated_identity_owns_project_and_other_user_is_forbidden(planner_client):
+    current = {"sub": "owner-1"}
+    def auth_context():
+        return AuthContext(enforced=True, claims=TokenClaims(sub=current["sub"], username=current["sub"], roles=["user"]))
+    planner_app.dependency_overrides[get_auth_context] = auth_context
+    try:
+        created = planner_client.post("/projects", json={"name": "Private", "user_id": "spoofed"})
+        assert created.status_code == 201
+        assert created.json()["user_id"] == "owner-1"
+        project_id = created.json()["id"]
+        current["sub"] = "owner-2"
+        assert planner_client.get(f"/projects/{project_id}/scene").status_code == 403
+        assert planner_client.patch(f"/projects/{project_id}", json={"name": "Stolen"}).status_code == 403
+    finally:
+        planner_app.dependency_overrides.pop(get_auth_context, None)
