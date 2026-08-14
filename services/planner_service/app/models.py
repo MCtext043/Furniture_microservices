@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -25,10 +25,15 @@ class RoomProject(Base):
     bom_json: Mapped[str] = mapped_column(Text, default="")
     selected_tier: Mapped[str] = mapped_column(String(16), default="standard")
     submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    schema_version: Mapped[int] = mapped_column(Integer, default=2)
+    scene_revision: Mapped[int] = mapped_column(Integer, default=0)
+    room_finish_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class FurniturePlacement(Base):
     __tablename__ = "planner_furniture"
+    __table_args__ = (UniqueConstraint("project_id", "client_id", name="uq_planner_furniture_project_client"),)
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("planner_projects.id"), index=True)
@@ -45,5 +50,14 @@ class FurniturePlacement(Base):
     custom_color: Mapped[str] = mapped_column(String(16), default="")
     drawers: Mapped[int] = mapped_column(Integer, default=0)
     handles: Mapped[int] = mapped_column(Integer, default=0)
+    client_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    definition_id: Mapped[str] = mapped_column(String(120), default="legacy.cabinet.v1")
+    definition_version: Mapped[int] = mapped_column(Integer, default=1)
+    configuration_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    appearance_json: Mapped[dict] = mapped_column(JSON, default=dict)
+    renderer_mode: Mapped[str] = mapped_column(String(24), default="parametric")
+    model_asset_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    model_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped[RoomProject] = relationship()

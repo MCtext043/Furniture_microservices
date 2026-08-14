@@ -1,3 +1,15 @@
+import { FurnitureRegistry } from "/planner-modules/furniture/FurnitureRegistry.js";
+import { registerBuiltInFurniture } from "/planner-modules/furniture/definitions/index.js";
+import { migrateLegacyObject, migrateScene, toLegacyObject } from "/planner-modules/persistence/migrations.js";
+import { serializeScene } from "/planner-modules/persistence/SceneSerializer.js";
+import { RenderScheduler } from "/planner-modules/core/RenderScheduler.js";
+import { ResourceManager } from "/planner-modules/core/ResourceManager.js";
+import { HistoryManager } from "/planner-modules/interaction/HistoryManager.js";
+import { findCollisions } from "/planner-modules/interaction/CollisionController.js";
+import { PlannerDiagnostics } from "/planner-modules/core/PlannerDiagnostics.js";
+import { ModelAssetLoader } from "/planner-modules/furniture/ModelAssetLoader.js";
+
+const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
 const APP_MODE = window.APP_MODE || "user";
 const LS_API = "furniture_gateway_url";
 const LS_TOKEN = "furniture_jwt";
@@ -15,6 +27,7 @@ const state = {
   deliveryQuote: null,
   deliveryAddress: "",
   projectId: null,
+  sceneRevision: 0,
   three: null,
   cuttingParts: [],
   roomConfig: { width: 6000, length: 5000, height: 2800 },
@@ -26,7 +39,7 @@ const state = {
     wallColor: "#FAF7F2",
   },
   objects3d: [],
-  objectEditor: { section: "living" },
+  objectEditor: { section: "living", elevation: 0, drawers: null, handles: null },
   drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0, scale: 1, wrapEl: null, chipEl: null },
   rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0, scale: 1, wrapEl: null, chipEl: null },
   cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0 },
@@ -97,11 +110,24 @@ const CRM_STATUS_DONE = "готова";
 
 const typePresets = {
   wardrobe: { title: "Шкаф", color: "#8B5E3C", texture: "wood" },
+  wardrobe_sliding: { title: "Шкаф-купе", color: "#8B5E3C", texture: "wood" },
+  wardrobe_corner: { title: "Угловой шкаф", color: "#8B5E3C", texture: "wood" },
   cabinet: { title: "Тумба", color: "#A67C52", texture: "wood" },
   shelf: { title: "Стеллаж", color: "#B08968", texture: "wood" },
   table: { title: "Стол", color: "#4B5563", texture: "metal" },
   sofa: { title: "Диван", color: "#64748B", texture: "fabric" },
+  armchair: { title: "Кресло", color: "#64748B", texture: "fabric" },
+  chair: { title: "Стул", color: "#64748B", texture: "fabric" },
+  bed: { title: "Кровать", color: "#8B5E3C", texture: "fabric" },
+  bath_vanity: { title: "Тумба с раковиной", color: "#D6CEC3", texture: "mdf" },
+  bathroom_sink: { title: "Раковина", color: "#F3F4F6", texture: "stone" },
+  bathroom_bathtub: { title: "Ванна", color: "#F3F4F6", texture: "stone" },
+  bathroom_shower: { title: "Душевая кабина", color: "#CBD5E1", texture: "glass" },
+  bathroom_toilet: { title: "Унитаз", color: "#F3F4F6", texture: "stone" },
+  bathroom_mirror: { title: "Зеркало", color: "#CBD5E1", texture: "glass" },
   appliance_fridge: { title: "Холодильник", color: "#D1D5DB", texture: "metal" },
+  appliance_washer: { title: "Стиральная машина", color: "#D1D5DB", texture: "metal" },
+  appliance_dishwasher: { title: "Посудомоечная машина", color: "#D1D5DB", texture: "metal" },
   appliance_microwave: { title: "СВЧ", color: "#9CA3AF", texture: "metal" },
   appliance_hood: { title: "Вытяжка", color: "#9CA3AF", texture: "metal" },
   appliance_hood_builtin: { title: "Вытяжка (встраиваемая)", color: "#9CA3AF", texture: "metal" },
@@ -128,7 +154,60 @@ const texturePresets = {
   countertop_kedr: { title: "Кедр", material: "wood", color: "#9B6B4A" },
   countertop_quartz: { title: "Кварцевый агломерат", material: "stone", color: "#D6CEC3" },
   countertop_compact: { title: "Компакт плита", material: "laminate", color: "#8B8F93" },
+  ceramic_white: { title: "Санитарная керамика · белая", material: "ceramic", color: "#F7F8F8" },
+  ceramic_black: { title: "Санитарная керамика · графит", material: "ceramic", color: "#303438" },
+  stone_marble: { title: "Литьевой мрамор", material: "stone", color: "#E5E1D9" },
+  glass_clear: { title: "Закалённое прозрачное стекло", material: "glass", color: "#CDE7EE" },
+  chrome_polished: { title: "Полированный хром", material: "metal", color: "#D6DCE1" },
 };
+
+function plannerSnapshot() {
+  return { roomConfig: structuredClone(state.roomConfig), roomFinish: structuredClone(state.roomFinish), objects3d: structuredClone(state.objects3d), selected3dObjectId: state.selected3dObjectId };
+}
+
+function applyPlannerSnapshot(snapshot) {
+  state.roomConfig = structuredClone(snapshot.roomConfig);
+  state.roomFinish = structuredClone(snapshot.roomFinish);
+  state.objects3d = structuredClone(snapshot.objects3d);
+  state.selected3dObjectId = snapshot.selected3dObjectId;
+  if (state.three) rebuildRoomGeometry();
+  renderObjects3dList(); renderRoomTopView(); renderRoom3D(); renderBom();
+}
+
+const plannerHistory = new HistoryManager(applyPlannerSnapshot);
+const modelAssetLoader = new ModelAssetLoader({
+  async parse(buffer) {
+    const { GLTFLoader } = await import("https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js");
+    return new Promise((resolve, reject) => new GLTFLoader().parse(buffer, "", (gltf) => resolve(gltf.scene), reject));
+  },
+  clone(scene) {
+    const copy = scene.clone(true);
+    copy.traverse((node) => {
+      if (node.geometry) node.geometry = node.geometry.clone();
+      if (Array.isArray(node.material)) node.material = node.material.map((material) => material.clone());
+      else if (node.material) node.material = node.material.clone();
+    });
+    return copy;
+  },
+});
+
+const materialOptions = Object.fromEntries(Object.entries(texturePresets).map(([value, preset]) => [value, preset.title]));
+const bathroomFixtureTypes = new Set(["bathroom_sink", "bathroom_bathtub", "bathroom_toilet"]);
+const allowedMaterialsByType = {
+  bathroom_sink: ["ceramic_white", "ceramic_black", "stone_marble"],
+  bathroom_bathtub: ["ceramic_white", "stone_marble"],
+  bathroom_toilet: ["ceramic_white", "ceramic_black"],
+  bathroom_shower: ["glass_clear", "metal_graphite", "chrome_polished"],
+  bathroom_mirror: ["glass_clear"],
+  bath_vanity: ["mdf_film_matte", "mdf_film_gloss", "mdf_enamel", "mdf_plastic", "wood_oak", "wood_dark_oak", "stone_marble"],
+};
+
+function allowedObjectMaterials(type) {
+  if (allowedMaterialsByType[type]) return allowedMaterialsByType[type];
+  if (String(type).startsWith("appliance_")) return ["metal_graphite", "board_white", "board_black"];
+  if (["sofa", "armchair", "chair", "bed"].includes(type)) return ["fabric_gray", "wood_oak", "wood_dark_oak"];
+  return ["wood_dark_oak", "wood_oak", "mdf_matte", "board_white", "board_black", "laminate_grey", "countertop", "metal_graphite", "mdf_film_matte", "mdf_film_gloss", "mdf_enamel", "mdf_plastic"];
+}
 
 function sameOriginApiBase() {
   const { protocol, hostname, port } = window.location;
@@ -1290,6 +1369,7 @@ async function createRoom() {
   try {
     const project = await savePlannerProject();
     state.projectId = project.id;
+    if (!state.sceneRevision) state.sceneRevision = Number(project.scene_revision) || 0;
     document.getElementById("plannerHint").textContent = `Проект №${project.id} сохранён: ${project.name}`;
     await syncPlannerObjectsToBackend();
     await loadUserProjects();
@@ -1326,33 +1406,20 @@ async function savePlannerProject() {
 
 async function syncPlannerObjectsToBackend() {
   if (!state.projectId) return;
-  for (const obj of state.objects3d) {
-    const defaults = furnitureAccessoryDefaults(obj.type);
-    try {
-      await api(
-        "POST",
-        `/planner/projects/${state.projectId}/furniture`,
-        {
-          name: obj.name,
-          width: obj.width,
-          depth: obj.depth,
-          height: obj.height,
-          x: obj.x,
-          y: 0,
-          z: obj.z,
-          rotation_y: obj.rotationY || 0,
-          furniture_type: obj.type,
-          texture: obj.texture || "wood_oak",
-          custom_color: obj.customColor || "",
-          drawers: obj.drawers ?? defaults.drawers,
-          handles: obj.handles ?? defaults.handles,
-        },
-        true
-      );
-    } catch {
-      // best effort sync
-    }
-  }
+  const response = await api(
+    "PUT",
+    `/planner/projects/${state.projectId}/scene`,
+    serializeScene({
+      revision: state.sceneRevision,
+      roomConfig: state.roomConfig,
+      roomFinish: state.roomFinish,
+      objects: state.objects3d,
+      bomJson: JSON.stringify(buildBomFromObjects()),
+    }),
+    true
+  );
+  state.sceneRevision = response.revision;
+  return response;
 }
 
 function createDemoObjects() {
@@ -1429,7 +1496,9 @@ function countertopTextureKey(countertopType) {
   return "";
 }
 
-function createFurnitureMaterialSet(item, texturePreset) {
+const furnitureMaterialSetCache = new Map();
+
+function buildFurnitureMaterialSet(item, texturePreset) {
   const customColor = normalizeColorHex(item.customColor);
   if (customColor) {
     const selected = new THREE.MeshStandardMaterial({ color: customColor, roughness: 0.7, metalness: 0.03 });
@@ -1473,6 +1542,21 @@ function createFurnitureMaterialSet(item, texturePreset) {
   return { body, facade, edge, back, countertop, handles, interior };
 }
 
+function createFurnitureMaterialSet(item, texturePreset) {
+  const key = JSON.stringify([
+    item.type, item.texture, item.customColor, item.width, item.depth, item.height,
+    item.countertopType, texturePreset.material, texturePreset.color,
+  ]);
+  const cached = furnitureMaterialSetCache.get(key);
+  if (cached) return cached;
+  const materialSet = buildFurnitureMaterialSet(item, texturePreset);
+  new Set(Object.values(materialSet).filter(Boolean)).forEach((material) => {
+    material.userData = { ...(material.userData || {}), sharedFurnitureMaterial: true };
+  });
+  furnitureMaterialSetCache.set(key, materialSet);
+  return materialSet;
+}
+
 function roomUnitToWorldX(x) {
   return x - state.roomConfig.width / 2;
 }
@@ -1492,8 +1576,8 @@ function resolveTexturePreset(item) {
 }
 
 function furnitureAccessoryDefaults(type) {
-  if (type === "cabinet") return { drawers: 2, handles: 2 };
-  if (type === "wardrobe") return { drawers: 0, handles: 2 };
+  if (type === "cabinet" || type === "bath_vanity") return { drawers: 2, handles: 2 };
+  if (type === "wardrobe" || type === "wardrobe_sliding" || type === "wardrobe_corner") return { drawers: 0, handles: 2 };
   if (type === "shelf") return { drawers: 0, handles: 0 };
   if (String(type || "").startsWith("appliance_")) return { drawers: 0, handles: 0 };
   return { drawers: 0, handles: 1 };
@@ -1501,11 +1585,14 @@ function furnitureAccessoryDefaults(type) {
 
 function disposeRoom3D() {
   if (!state.three) return;
-  const { renderer, host, dimensionManager, resizeObserver, animationFrame, resizeHandler } = state.three;
+  const { renderer, host, dimensionManager, resizeObserver, animationFrame, renderScheduler, resourceManager, diagnostics, resizeHandler } = state.three;
   resizeObserver?.disconnect();
   if (animationFrame) cancelAnimationFrame(animationFrame);
+  renderScheduler?.dispose();
   if (resizeHandler) window.removeEventListener("resize", resizeHandler);
   dimensionManager?.dispose();
+  resourceManager?.dispose();
+  diagnostics?.dispose();
   window.__room3dRenderer = null;
   if (renderer) {
     renderer.dispose();
@@ -1515,6 +1602,15 @@ function disposeRoom3D() {
   }
   host?.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
   state.three = null;
+  window.__requestRoom3DRender = null;
+  modelAssetLoader.clear();
+}
+
+function requestRoom3DRender({ shadows = false } = {}) {
+  if (!state.three || document.hidden) return;
+  const three = state.three;
+  if (shadows && three.renderer?.shadowMap) three.renderer.shadowMap.needsUpdate = true;
+  three.renderScheduler?.request(shadows ? "shadows" : "scene");
 }
 
 function canUseWebGL() {
@@ -1545,7 +1641,7 @@ function createRoom3DRenderer(width, height) {
     try {
       const renderer = new THREE.WebGLRenderer(options);
       // On mobile some GPUs fall back to antialias:false; keep DPR high anyway to avoid "pixelated" look.
-      const dpr = Math.min(Number(window.devicePixelRatio) || 1, 2);
+      const dpr = Math.min(Number(window.devicePixelRatio) || 1, state.objects3d.length > 24 ? 1.25 : 1.6);
       renderer.setPixelRatio(dpr);
       renderer.setSize(width, height, false);
       return renderer;
@@ -1613,7 +1709,7 @@ function initRoom3D() {
   const light = new THREE.DirectionalLight(0xfff6eb, 1.5);
   light.position.set(4200, 9000, 4600);
   light.castShadow = true;
-  light.shadow.mapSize.set(2048, 2048);
+  light.shadow.mapSize.set(1024, 1024);
   light.shadow.bias = -0.00012;
   light.shadow.normalBias = 0.015;
   light.shadow.radius = 2.6;
@@ -1655,7 +1751,16 @@ function initRoom3D() {
     radius: 11000,
     target: new THREE.Vector3(0, 1000, 0),
   };
-  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, dimensionManager, host, orbit };
+  const resourceManager = new ResourceManager();
+  const diagnostics = new PlannerDiagnostics(renderer);
+  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, dimensionManager, host, orbit, objectGroups: new Map(), resourceManager, diagnostics };
+  state.three.renderScheduler = new RenderScheduler(() => {
+    if (!state.three) return;
+    dimensionManager?.update(camera, renderer);
+    renderer.render(scene, camera);
+    diagnostics.update({ objects: state.objects3d.length });
+  });
+  window.__requestRoom3DRender = requestRoom3DRender;
   if (window.ResizeObserver) {
     const resizeObserver = new ResizeObserver(() => {
       if (!state.three) return;
@@ -1674,16 +1779,6 @@ function initRoom3D() {
   rebuildRoomGeometry();
   renderRoom3D();
 
-  const animate = () => {
-    if (!state.three) return;
-    if (!document.hidden) {
-      dimensionManager?.update(camera, renderer);
-      renderer.render(scene, camera);
-    }
-    state.three.animationFrame = requestAnimationFrame(animate);
-  };
-  animate();
-
   state.three.resizeHandler = () => refreshRoom3DLayout();
   window.addEventListener("resize", state.three.resizeHandler, { passive: true });
 }
@@ -1698,9 +1793,10 @@ function refreshRoom3DLayout() {
   const width = host.clientWidth || 640;
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  renderer.setPixelRatio(Math.min(Number(window.devicePixelRatio) || 1, 2));
+  renderer.setPixelRatio(Math.min(Number(window.devicePixelRatio) || 1, state.objects3d.length > 24 ? 1.25 : 1.6));
   renderer.setSize(width, height, false);
   updateOrbitCamera();
+  requestRoom3DRender();
 }
 
 function ensureRoom3D() {
@@ -1796,6 +1892,7 @@ function init3DPointerControls(canvas) {
         state.cameraDrag.pendingPhi = 0;
         state.cameraDrag.raf = 0;
         updateOrbitCamera();
+        requestRoom3DRender();
       });
     }
     event.preventDefault();
@@ -1821,6 +1918,7 @@ function init3DPointerControls(canvas) {
       event.preventDefault();
       state.three.orbit.radius = Math.min(Math.max(state.three.orbit.radius + event.deltaY * 10, 3000), 18000);
       updateOrbitCamera();
+      requestRoom3DRender();
     },
     { passive: false }
   );
@@ -1841,11 +1939,17 @@ function selectFurnitureAtPointer(event, canvas) {
   while (object && object.parent !== furnitureGroup) object = object.parent;
   if (!object?.userData?.objectId) {
     state.selected3dObjectId = null;
-    dimensionManager?.setSelected(null);
+    dimensionManager?.clear();
+    requestRoom3DRender();
     return;
   }
   state.selected3dObjectId = object.userData.objectId;
+  dimensionManager?.clear();
+  if (object.userData.dimensions) dimensionManager?.attach(object, object.userData.dimensions);
   dimensionManager?.setSelected(object);
+  renderRoomTopView();
+  renderObjects3dList();
+  requestRoom3DRender();
 }
 
 function resolveRoomSurfaceMaterial(textureKey, fallbackType, fallbackVariant, fallbackColor, widthMm, heightMm, orientation) {
@@ -1918,75 +2022,144 @@ function rebuildRoomGeometry() {
   };
   state.three.wallSideState = { x: 0, z: 0 };
   updateDynamicWallVisibility();
+  requestRoom3DRender({ shadows: true });
+}
+
+function furnitureRenderSignature(item) {
+  return JSON.stringify([
+    item.type, item.texture, item.customColor, item.width, item.depth, item.height,
+    item.drawers, item.handles, item.countertopType, item.milling, item.rendererMode, item.modelAssetKey, item.modelVersion,
+  ]);
+}
+
+function disposeFurnitureGroup(group) {
+  if (!group) return;
+  if (state.three?.resourceManager) {
+    state.three.resourceManager.disposeValue(group);
+    return;
+  }
+  const materials = new Set();
+  group.traverse((child) => {
+    if (!child.isMesh) return;
+    const list = Array.isArray(child.material) ? child.material : [child.material];
+    list.filter(Boolean).forEach((material) => materials.add(material));
+  });
+  materials.forEach((material) => {
+    if (material.userData?.sharedFurnitureMaterial) return;
+    ["map", "normalMap", "roughnessMap", "aoMap", "metalnessMap"].forEach((key) => material[key]?.dispose?.());
+    material.dispose?.();
+  });
 }
 
 function renderRoom3D() {
   if (!state.three) return;
   const { furnitureGroup, dimensionManager } = state.three;
-  dimensionManager?.clear();
-  furnitureGroup.clear();
+  const objectGroups = state.three.objectGroups || (state.three.objectGroups = new Map());
+  const liveIds = new Set(state.objects3d.map((item) => item.id));
+  objectGroups.forEach((group, id) => {
+    if (liveIds.has(id)) return;
+    dimensionManager?.detach(group);
+    furnitureGroup.remove(group);
+    disposeFurnitureGroup(group);
+    objectGroups.delete(id);
+  });
 
   if (!state.objects3d.some((item) => item.id === state.selected3dObjectId)) state.selected3dObjectId = null;
   let selectedGroup = null;
 
   state.objects3d.forEach((item) => {
-    const texturePreset = resolveTexturePreset(item);
-    const w = Math.max(Number(item.width) || 350, 350);
-    const d = Math.max(Number(item.depth) || 350, 350);
-    const h = Math.max(Number(item.height) || 350, 350);
-    const materialSet = createFurnitureMaterialSet(item, texturePreset);
-    const group = window.Texture3D?.buildFurnitureGroup
-      ? window.Texture3D.buildFurnitureGroup(item, w, h, d, materialSet)
-      : (() => {
-          const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), materialSet.body);
-          mesh.position.y = h / 2;
-          return mesh;
-        })();
-    group.position.set(roomUnitToWorldX(item.x), 0, roomUnitToWorldZ(item.z));
-    group.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
-    group.traverse((child) => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
+    const w = Math.max(Number(item.width) || 350, 80);
+    const d = Math.max(Number(item.depth) || 350, 20);
+    const h = Math.max(Number(item.height) || 350, 80);
+    const signature = furnitureRenderSignature(item);
+    let group = objectGroups.get(item.id);
+    if (!group || group.userData.renderSignature !== signature) {
+      if (group) {
+        dimensionManager?.detach(group);
+        furnitureGroup.remove(group);
+        disposeFurnitureGroup(group);
       }
-    });
-    group.userData.kind = "furniture";
-    group.userData.objectId = item.id;
-    furnitureGroup.add(group);
-    dimensionManager?.attach(group, { width: w, height: h, depth: d });
+      const texturePreset = resolveTexturePreset(item);
+      const materialSet = createFurnitureMaterialSet(item, texturePreset);
+      const placement = migrateLegacyObject(item);
+      if ((placement.rendererMode === "gltf" || placement.rendererMode === "hybrid") && placement.modelAssetKey) {
+        group = new THREE.Group();
+        const placeholder = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: 0xb8c0c8, wireframe: true, transparent: true, opacity: 0.45 }));
+        placeholder.position.y = h / 2; group.add(placeholder);
+        const targetGroup = group;
+        modelAssetLoader.load(placement.modelAssetKey, placement.modelVersion).then((model) => {
+          if (state.three?.objectGroups.get(item.id) !== targetGroup) return;
+          targetGroup.remove(placeholder); placeholder.geometry.dispose(); placeholder.material.dispose();
+          const box = new THREE.Box3().setFromObject(model); const size = box.getSize(new THREE.Vector3());
+          const native = placement.configuration.nativeDimensions || [size.x, size.y, size.z];
+          const scale = Math.min(w / Math.max(native[0],1), h / Math.max(native[1],1), d / Math.max(native[2],1));
+          model.scale.setScalar(scale); model.position.y -= box.min.y * scale; targetGroup.add(model); requestRoom3DRender({ shadows: true });
+        }).catch((error) => { targetGroup.userData.assetError = error.message; console.error("GLB model load failed", error); requestRoom3DRender(); });
+      } else group = window.Texture3D?.buildFurnitureGroup
+        ? furnitureRegistry.buildGeometry(placement, {
+            buildLegacy: (normalized) => window.Texture3D.buildFurnitureGroup(toLegacyObject(normalized), w, h, d, materialSet),
+          })
+        : (() => {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), materialSet.body);
+            mesh.position.y = h / 2;
+            return mesh;
+          })();
+      group.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      group.userData.kind = "furniture";
+      group.userData.objectId = item.id;
+      group.userData.renderSignature = signature;
+      group.userData.dimensions = { width: w, height: h, depth: d };
+      furnitureGroup.add(group);
+      objectGroups.set(item.id, group);
+    }
+    group.position.set(roomUnitToWorldX(item.x), Number(item.y) || 0, roomUnitToWorldZ(item.z));
+    group.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
     if (item.id === state.selected3dObjectId) selectedGroup = group;
   });
+  // Shadow-map rendering repeats every mesh. Keep detailed shadows for normal scenes and
+  // automatically drop furniture casters in large plans, where the extra pass is most costly.
+  const castFurnitureShadows = state.objects3d.length <= 12;
+  furnitureGroup.traverse((child) => {
+    if (child.isMesh) child.castShadow = castFurnitureShadows;
+  });
+  dimensionManager?.clear();
+  if (selectedGroup?.userData?.dimensions) dimensionManager?.attach(selectedGroup, selectedGroup.userData.dimensions);
   dimensionManager?.setSelected(selectedGroup);
+  requestRoom3DRender();
 }
 
 function updateFurnitureTransform(item) {
   if (!state.three || !item) return;
   const group = state.three.furnitureGroup.children.find((child) => child.userData.objectId === item.id);
   if (!group) return;
-  group.position.set(roomUnitToWorldX(item.x), 0, roomUnitToWorldZ(item.z));
+  group.position.set(roomUnitToWorldX(item.x), Number(item.y) || 0, roomUnitToWorldZ(item.z));
   group.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
   group.updateMatrixWorld(true);
-  if (state.three.renderer?.shadowMap) state.three.renderer.shadowMap.needsUpdate = true;
+  requestRoom3DRender();
 }
 
 function renderRoomTopView() {
   const host = document.getElementById("roomPlan");
+  if (!host) return;
   const { width, length } = state.roomConfig;
   const finish = state.roomFinish || {};
   host.style.background = finish.useCustomColors && finish.floorColor ? normalizeColorHex(finish.floorColor) : "";
-  host.style.aspectRatio = `${width} / ${length}`;
-  host.style.minHeight = `${Math.max(220, Math.round((length / 1000) * 42))}px`;
-  const viewW = host.clientWidth || 400;
-  const viewH = host.clientHeight || 260;
-  const scale = Math.min(viewW / width, viewH / length);
+  const metrics = layoutRoomPlan(host, width, length);
+  if (!metrics) return;
+  const { scale } = metrics;
 
   host.innerHTML = state.objects3d
     .map((item) => {
       const { planW, planD } = getObjectPlanSize(item);
       const left = (item.x - planW / 2) * scale;
       const top = (item.z - planD / 2) * scale;
-      const chipW = Math.max(item.width * scale, 24);
-      const chipH = Math.max(item.depth * scale, 18);
+      const chipW = Math.max(item.width * scale, 1);
+      const chipH = Math.max(item.depth * scale, 1);
       const rotation = normalizeAngle(item.rotationY);
       const texturePreset = resolveTexturePreset(item);
       const deleteBtn =
@@ -1994,10 +2167,10 @@ function renderRoomTopView() {
           ? ""
           : `<button type="button" class="furniture-delete-handle" data-delete-id="${item.id}" title="Удалить">×</button>`;
       return `
-        <div class="furniture-chip-wrap" style="left:${left}px; top:${top}px; width:${Math.max(planW * scale, 24)}px; height:${Math.max(planD * scale, 18)}px;">
-          <div class="furniture-chip" data-drag-id="${item.id}" style="cursor:grab; left:50%; top:50%; width:${chipW}px; height:${chipH}px; background:${texturePreset.color}; transform: translate(-50%, -50%) rotate(${rotation}deg);">
+        <div class="furniture-chip-wrap" style="left:${left}px; top:${top}px; width:${Math.max(planW * scale, 1)}px; height:${Math.max(planD * scale, 1)}px;">
+          <div class="furniture-chip ${item.id === state.selected3dObjectId ? "is-selected" : ""}" data-drag-id="${item.id}" title="${escapeHtml(item.name)} · ${Math.round(item.width)}×${Math.round(item.depth)} мм" style="cursor:grab; left:50%; top:50%; width:${chipW}px; height:${chipH}px; background:${texturePreset.color}; transform: translate(-50%, -50%) rotate(${rotation}deg);">
             ${deleteBtn}
-            <span class="furniture-chip-label">${escapeHtml(item.name)}</span>
+            ${chipW >= 60 && chipH >= 22 ? `<span class="furniture-chip-label">${escapeHtml(item.name)}</span>` : ""}
             <button type="button" class="furniture-rotate-handle" data-rotate-id="${item.id}" title="Удерживайте и вращайте">↻</button>
           </div>
         </div>`;
@@ -2021,11 +2194,37 @@ function renderRoomTopView() {
   });
 }
 
+function layoutRoomPlan(host, roomWidth = state.roomConfig.width, roomLength = state.roomConfig.length) {
+  if (!host || !roomWidth || !roomLength || host.getClientRects().length === 0) return null;
+  const parentWidth = host.parentElement?.clientWidth || 0;
+  if (parentWidth <= 0) return null;
+  const style = getComputedStyle(host);
+  const borderLeft = parseFloat(style.borderLeftWidth) || 0;
+  const borderRight = parseFloat(style.borderRightWidth) || 0;
+  const borderTop = parseFloat(style.borderTopWidth) || 0;
+  const borderBottom = parseFloat(style.borderBottomWidth) || 0;
+  const borderX = borderLeft + borderRight;
+  const borderY = borderTop + borderBottom;
+  const maxContentWidth = Math.max(160, parentWidth - borderX);
+  const maxContentHeight = Math.max(280, Math.min(620, window.innerHeight * 0.64) - borderY);
+  const requestedScale = Math.min(maxContentWidth / roomWidth, maxContentHeight / roomLength);
+  host.style.aspectRatio = "auto";
+  host.style.minHeight = "0";
+  host.style.width = `${Math.round(roomWidth * requestedScale + borderX)}px`;
+  host.style.height = `${Math.round(roomLength * requestedScale + borderY)}px`;
+  const scale = Math.min(host.clientWidth / roomWidth, host.clientHeight / roomLength);
+  const rect = host.getBoundingClientRect();
+  return { scale, originX: rect.left + borderLeft, originY: rect.top + borderTop, borderLeft, borderTop };
+}
+
 function getRoomPlanScale(host) {
-  const { width, length } = state.roomConfig;
-  const viewW = host.clientWidth || 400;
-  const viewH = host.clientHeight || 260;
-  return Math.min(viewW / width, viewH / length);
+  return layoutRoomPlan(host)?.scale || 1;
+}
+
+function setRoomPlanSelection(id) {
+  const host = document.getElementById("roomPlan");
+  if (!host) return;
+  host.querySelectorAll("[data-drag-id]").forEach((chip) => chip.classList.toggle("is-selected", chip.dataset.dragId === id));
 }
 
 function updateRoomPlanChipDom(item, scale, wrapEl, chipEl) {
@@ -2035,10 +2234,10 @@ function updateRoomPlanChipDom(item, scale, wrapEl, chipEl) {
   const top = (item.z - planD / 2) * scale;
   wrapEl.style.left = `${left}px`;
   wrapEl.style.top = `${top}px`;
-  wrapEl.style.width = `${Math.max(planW * scale, 24)}px`;
-  wrapEl.style.height = `${Math.max(planD * scale, 18)}px`;
-  chipEl.style.width = `${Math.max(item.width * scale, 24)}px`;
-  chipEl.style.height = `${Math.max(item.depth * scale, 18)}px`;
+  wrapEl.style.width = `${Math.max(planW * scale, 1)}px`;
+  wrapEl.style.height = `${Math.max(planD * scale, 1)}px`;
+  chipEl.style.width = `${Math.max(item.width * scale, 1)}px`;
+  chipEl.style.height = `${Math.max(item.depth * scale, 1)}px`;
   chipEl.style.transform = `translate(-50%, -50%) rotate(${normalizeAngle(item.rotationY)}deg)`;
 }
 
@@ -2048,10 +2247,12 @@ function beginDrag(ev, id) {
   const item = state.objects3d.find((obj) => obj.id === id);
   if (!item) return;
   state.selected3dObjectId = id;
+  setRoomPlanSelection(id);
   state.three?.dimensionManager?.setSelected(
     state.three.furnitureGroup.children.find((child) => child.userData.objectId === id) || null
   );
   state.drag.active = true;
+  state.drag.historyBefore = plannerSnapshot();
   state.drag.id = id;
   state.drag.startX = ev.clientX;
   state.drag.startY = ev.clientY;
@@ -2075,18 +2276,17 @@ function beginRotate(ev, id) {
   const item = state.objects3d.find((obj) => obj.id === id);
   if (!item) return;
   state.selected3dObjectId = id;
+  setRoomPlanSelection(id);
   state.three?.dimensionManager?.setSelected(
     state.three.furnitureGroup.children.find((child) => child.userData.objectId === id) || null
   );
   const host = document.getElementById("roomPlan");
-  const hostRect = host.getBoundingClientRect();
-  const { width, length } = state.roomConfig;
-  const viewW = host.clientWidth || 400;
-  const viewH = host.clientHeight || 260;
-  const scale = Math.min(viewW / width, viewH / length);
-  const centerX = hostRect.left + item.x * scale;
-  const centerY = hostRect.top + item.z * scale;
+  const metrics = layoutRoomPlan(host);
+  const scale = metrics?.scale || 1;
+  const centerX = (metrics?.originX || host.getBoundingClientRect().left) + item.x * scale;
+  const centerY = (metrics?.originY || host.getBoundingClientRect().top) + item.z * scale;
   state.rotate.active = true;
+  state.rotate.historyBefore = plannerSnapshot();
   state.rotate.id = id;
   state.rotate.centerX = centerX;
   state.rotate.centerY = centerY;
@@ -2118,6 +2318,9 @@ function handleDragMove(ev) {
   item.z = state.drag.baseZ + dz;
   snapObjectPosition(item, width, length);
   clampObjectPosition(item, width, length);
+  const collisions = findCollisions(item, state.objects3d, ev.altKey ? 0 : 2);
+  state.drag.chipEl?.classList.toggle("has-collision", collisions.length > 0);
+  state.drag.chipEl?.setAttribute("aria-invalid", String(collisions.length > 0));
   updateRoomPlanChipDom(item, scale, state.drag.wrapEl, state.drag.chipEl);
   updateFurnitureTransform(item);
   ev.preventDefault();
@@ -2137,18 +2340,26 @@ function handleRotateMove(ev) {
 
 function endDrag() {
   if (state.rotate.active) {
+    const before = state.rotate.historyBefore;
     state.rotate.active = false;
     state.rotate.id = null;
     state.rotate.wrapEl = null;
     state.rotate.chipEl = null;
+    state.rotate.historyBefore = null;
+    if (before) plannerHistory.record(before, plannerSnapshot(), "rotate");
     renderRoomTopView();
     renderBom();
+    requestRoom3DRender({ shadows: true });
     return;
   }
+  const before = state.drag.historyBefore;
   state.drag.active = false;
   state.drag.id = null;
   state.drag.wrapEl = null;
   state.drag.chipEl = null;
+  state.drag.historyBefore = null;
+  if (before) plannerHistory.record(before, plannerSnapshot(), "move");
+  requestRoom3DRender({ shadows: true });
 }
 
 function applyRoomSize() {
@@ -2163,6 +2374,7 @@ function applyRoomSize() {
     toast("Размеры комнаты должны быть не менее 2000 мм", false);
     return;
   }
+  const before = plannerSnapshot();
   state.roomConfig = { width, length, height };
   for (const item of state.objects3d) {
     clampObjectPosition(item, width, length);
@@ -2170,10 +2382,12 @@ function applyRoomSize() {
   rebuildRoomGeometry();
   renderRoomTopView();
   renderRoom3D();
+  plannerHistory.record(before, plannerSnapshot(), "room-size");
   toast("Размеры комнаты применены");
 }
 
 function addObject3DFromForm() {
+  const before = plannerSnapshot();
   const type = document.getElementById("objType").value;
   const texture = document.getElementById("objTexture").value;
   const name = document.getElementById("objName").value.trim() || "Новый объект";
@@ -2197,10 +2411,11 @@ function addObject3DFromForm() {
     texture,
     customColor,
     section: state.objectEditor?.section || "living",
+    y: Number(state.objectEditor?.elevation) || 0,
     countertopType,
     milling,
-    drawers: defaults.drawers,
-    handles: defaults.handles,
+    drawers: state.objectEditor?.drawers ?? defaults.drawers,
+    handles: state.objectEditor?.handles ?? defaults.handles,
     name,
     width,
     depth,
@@ -2211,6 +2426,7 @@ function addObject3DFromForm() {
   };
   state.objects3d.push(item);
   state.selected3dObjectId = item.id;
+  plannerHistory.record(before, plannerSnapshot(), "add");
   renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
@@ -2236,18 +2452,26 @@ function buildBomFromObjects() {
     const facadeMultiplier =
       item.milling && (item.texture === "mdf_film_matte" || item.texture === "mdf_film_gloss") ? 1.3 : 1;
 
-    if (item.type === "wardrobe" || item.type === "shelf") {
+    const definition = furnitureRegistry.get(item.type);
+    if (definition && (definition.category === "kitchen" || definition.category === "wardrobe")) {
+      const production = definition.buildBom(migrateLegacyObject(item));
+      production.parts.forEach((part) => pushPart(part.id, part.dimensions.width, part.dimensions.height, part.quantity || 1, { costMultiplier: part.role === "facade" ? facadeMultiplier : 1 }));
+      assembly.push(...(production.assembly || []).map((step) => `${item.name}: ${step}`));
+      continue;
+    }
+
+    if (item.type === "shelf") {
       pushPart("Боковина", d, h, 2);
       pushPart("Крышка/дно", w, d, 2);
       pushPart("Полка", Math.max(w - 36, 100), d, Math.max(2, Math.round(h / 500)));
       pushPart("Задняя стенка", w, h, 1);
-      if (item.type === "wardrobe") pushPart("Фасад дверцы", Math.round(w / 2), h, 2, { costMultiplier: facadeMultiplier });
+      if (["wardrobe", "wardrobe_sliding", "wardrobe_corner"].includes(item.type)) pushPart("Фасад дверцы", Math.round(w / 2), h, 2, { costMultiplier: facadeMultiplier });
       assembly.push(`Собрать корпус "${item.name}": стяжки 8 шт, конфирматы 16 шт, петли 4 шт`);
     } else if (item.type === "table") {
       pushPart("Столешница", w, d, 1);
       pushPart("Опора", 80, h - 40, 4);
       assembly.push(`Собрать стол "${item.name}": болты 8 шт, шайбы 8 шт`);
-    } else if (item.type === "cabinet") {
+    } else if (item.type === "cabinet" || item.type === "bath_vanity") {
       pushPart("Боковина", d, h, 2);
       pushPart("Крышка/дно", w, d, 2);
       pushPart("Фасад", w, h, 1, { costMultiplier: facadeMultiplier });
@@ -2255,9 +2479,14 @@ function buildBomFromObjects() {
         pushPart("Столешница", w, d, 1);
       }
       assembly.push(`Собрать тумбу "${item.name}": направляющие 2 шт, ручка 1 шт`);
-    } else if (item.type === "sofa") {
+    } else if (item.type === "sofa" || item.type === "armchair" || item.type === "chair") {
       pushPart("Каркас сиденья", w, d, 1);
       pushPart("Спинка", w, Math.round(h * 0.6), 1);
+    } else if (item.type === "bed") {
+      pushPart("Боковина кровати", d, Math.max(180, Math.round(h * 0.3)), 2);
+      pushPart("Изголовье", w, h, 1);
+      pushPart("Основание", w, d, 1);
+      assembly.push(`Собрать кровать "${item.name}": основание, царги и изголовье`);
       assembly.push(`Собрать диван "${item.name}": уголки 6 шт, болты 12 шт`);
     }
   }
@@ -2768,10 +2997,12 @@ async function clearCuttingJobs() {
 }
 
 function removeObject3D(id) {
+  const before = plannerSnapshot();
   const index = state.objects3d.findIndex((obj) => obj.id === id);
   if (index < 0) return;
   const [removed] = state.objects3d.splice(index, 1);
   if (state.selected3dObjectId === removed.id) state.selected3dObjectId = null;
+  plannerHistory.record(before, plannerSnapshot(), "delete");
   renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
@@ -2789,15 +3020,18 @@ function renderObjects3dList() {
   }
   host.innerHTML = state.objects3d
     .map(
-      (item) => `<div class="d-flex justify-content-between align-items-center gap-2 border rounded px-2 py-1 mb-1">
+      (item) => `<div class="d-flex justify-content-between align-items-center gap-2 border rounded px-2 py-1 mb-1 ${item.id === state.selected3dObjectId ? "border-primary bg-light" : ""}" data-select-object="${item.id}" role="button" tabindex="0">
         <span>${escapeHtml(item.name)} <span class="text-muted">(${Math.round(item.width)}×${Math.round(item.depth)}×${Math.round(item.height)})</span></span>
         <button type="button" class="btn btn-sm btn-outline-danger py-0" data-delete-object="${item.id}">Удалить</button>
       </div>`
     )
     .join("");
   host.querySelectorAll("[data-delete-object]").forEach((button) => {
-    button.addEventListener("click", () => removeObject3D(button.dataset.deleteObject));
+    button.addEventListener("click", (event) => { event.stopPropagation(); removeObject3D(button.dataset.deleteObject); });
   });
+  host.querySelectorAll("[data-select-object]").forEach((row) => row.addEventListener("click", () => {
+    state.selected3dObjectId = row.dataset.selectObject; renderObjects3dList(); renderRoomTopView(); renderRoom3D();
+  }));
 }
 
 async function loadCrm() {
@@ -3622,6 +3856,7 @@ async function loadPlannerProject(projectId) {
   if (!project) throw new Error("Проект не найден");
 
   state.projectId = project.id;
+  state.sceneRevision = Number(project.scene_revision) || 0;
   state.selectedTier = project.selected_tier || "standard";
   state.roomConfig = {
     width: Number(project.room_width) || 6000,
@@ -3629,22 +3864,19 @@ async function loadPlannerProject(projectId) {
     height: Number(project.room_height) || 2800,
   };
 
-  const furniture = await api("GET", `/planner/projects/${projectId}/furniture`);
-  state.objects3d = furniture.map((row) => ({
-    id: makeId(),
-    type: row.furniture_type || "cabinet",
-    texture: row.texture || "wood_oak",
-    customColor: row.custom_color || "",
-    name: row.name,
-    width: row.width,
-    depth: row.depth,
-    height: row.height,
-    x: row.x,
-    z: row.z,
-    rotationY: row.rotation_y || 0,
-    drawers: row.drawers ?? 0,
-    handles: row.handles ?? 0,
-  }));
+  let scene;
+  try {
+    scene = migrateScene(await api("GET", `/planner/projects/${projectId}/scene`, undefined, true));
+  } catch (error) {
+    console.warn("Versioned scene unavailable; loading legacy placements", error);
+    scene = migrateScene({ placements: await api("GET", `/planner/projects/${projectId}/furniture`, undefined, true) });
+  }
+  state.sceneRevision = scene.revision;
+  if (scene.room) {
+    state.roomConfig = { width: Number(scene.room.width), length: Number(scene.room.length), height: Number(scene.room.height) };
+    state.roomFinish = { ...state.roomFinish, ...(scene.room.finish || {}) };
+  }
+  state.objects3d = scene.placements.map(toLegacyObject);
   state.selected3dObjectId = state.objects3d[0]?.id || null;
 
   if (project.bom_json) {
@@ -3894,9 +4126,11 @@ function buildBasisCabinetScript(item, offsetX, offsetZ) {
     `    var TH = ActiveMaterial.Thickness;`,
   ];
 
-  if (item.type === "wardrobe" || item.type === "shelf" || item.type === "cabinet") {
-    const shelfCount = item.type === "cabinet" ? 0 : Math.max(2, Math.round(h / 500));
-    const doorCount = item.type === "wardrobe" ? 2 : item.type === "cabinet" ? 1 : 0;
+  if (["wardrobe", "wardrobe_sliding", "wardrobe_corner", "shelf", "cabinet", "bath_vanity"].includes(item.type)) {
+    const cabinetLike = item.type === "cabinet" || item.type === "bath_vanity";
+    const wardrobeLike = ["wardrobe", "wardrobe_sliding", "wardrobe_corner"].includes(item.type);
+    const shelfCount = cabinetLike ? 0 : Math.max(2, Math.round(h / 500));
+    const doorCount = wardrobeLike ? 2 : cabinetLike ? 1 : 0;
     lines.push(
       `    AddHorizPanel(ox, oz, ox + W, oz + D, 0).Name = ${jsString(name + " — дно")};`,
       `    AddHorizPanel(ox, oz, ox + W, oz + D, H - TH).Name = ${jsString(name + " — крышка")};`,
@@ -4193,6 +4427,57 @@ function initPlannerProgress() {
   updatePlannerProgress();
 }
 
+function initPlannerShortcuts() {
+  document.addEventListener("keydown", (event) => {
+    if (APP_MODE === "admin" || /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName || "")) return;
+    const modifier = event.ctrlKey || event.metaKey;
+    if (modifier && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? plannerHistory.redo() : plannerHistory.undo(); return; }
+    if (modifier && event.key.toLowerCase() === "y") { event.preventDefault(); plannerHistory.redo(); return; }
+    const selected = state.objects3d.find((item) => item.id === state.selected3dObjectId);
+    if (modifier && event.key.toLowerCase() === "d" && selected) {
+      event.preventDefault(); const before = plannerSnapshot(); const copy = structuredClone(selected);
+      copy.id = makeId(); copy.name = `${selected.name} (копия)`; copy.x += 100; copy.z += 100;
+      clampObjectPosition(copy, state.roomConfig.width, state.roomConfig.length); state.objects3d.push(copy); state.selected3dObjectId = copy.id;
+      plannerHistory.record(before, plannerSnapshot(), "duplicate"); applyPlannerSnapshot(plannerSnapshot()); return;
+    }
+    if (event.key === "Escape") { state.selected3dObjectId = null; state.three?.dimensionManager?.clear(); renderRoomTopView(); renderObjects3dList(); requestRoom3DRender(); return; }
+    if (event.key === "Delete" && selected) { event.preventDefault(); if (window.confirm(`Удалить «${selected.name}»?`)) removeObject3D(selected.id); return; }
+    if (selected && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+      event.preventDefault(); const before = plannerSnapshot(); const step = event.shiftKey ? 100 : 10;
+      if (event.key === "ArrowLeft") selected.x -= step; if (event.key === "ArrowRight") selected.x += step;
+      if (event.key === "ArrowUp") selected.z -= step; if (event.key === "ArrowDown") selected.z += step;
+      clampObjectPosition(selected, state.roomConfig.width, state.roomConfig.length); plannerHistory.record(before, plannerSnapshot(), "nudge");
+      updateFurnitureTransform(selected); renderRoomTopView();
+    }
+  });
+}
+
+function initRoomTopViewLayout() {
+  const host = document.getElementById("roomPlan");
+  if (!host) return;
+  let frame = 0;
+  const schedule = () => {
+    cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => renderRoomTopView());
+  };
+  document.querySelectorAll('[data-bs-target="#room2dPane"]').forEach((tab) => {
+    tab.addEventListener("shown.bs.tab", schedule);
+    tab.addEventListener("click", () => setTimeout(schedule, 180));
+  });
+  if (window.ResizeObserver) {
+    window.__roomPlanResizeObserver?.disconnect?.();
+    const observed = host.parentElement || host;
+    let observedWidth = observed.clientWidth;
+    window.__roomPlanResizeObserver = new ResizeObserver(() => {
+      const nextWidth = observed.clientWidth;
+      if (!host.getClientRects().length || Math.abs(nextWidth - observedWidth) < 0.5) return;
+      observedWidth = nextWidth;
+      schedule();
+    });
+    window.__roomPlanResizeObserver.observe(observed);
+  }
+}
+
 function initProcessAnimation() {
   const grid = document.querySelector(".process-grid");
   if (!grid) return;
@@ -4276,11 +4561,16 @@ function syncObjectEditorControls() {
   const countertopEl = document.getElementById("objCountertopType");
 
   const type = typeEl?.value || "";
+  const previousTexture = textureEl?.value || "";
+  const allowedMaterials = allowedObjectMaterials(type);
+  if (textureEl) {
+    textureEl.innerHTML = allowedMaterials
+      .map((value) => `<option value="${value}">${escapeHtml(materialOptions[value] || value)}</option>`)
+      .join("");
+    textureEl.value = allowedMaterials.includes(previousTexture) ? previousTexture : allowedMaterials[0];
+  }
   const texture = textureEl?.value || "";
   const isAppliance = String(type).startsWith("appliance_");
-  if (isAppliance && textureEl && textureEl.value !== "metal_graphite") {
-    textureEl.value = "metal_graphite";
-  }
 
   const millingAllowed = texture === "mdf_film_matte" || texture === "mdf_film_gloss";
   if (millingRow) millingRow.classList.toggle("d-none", !millingAllowed);
@@ -4293,8 +4583,9 @@ function syncObjectEditorControls() {
   const useCustomColorEl = document.getElementById("objUseCustomColor");
   const customColorEl = document.getElementById("objCustomColor");
   if (useCustomColorEl && customColorEl) {
-    useCustomColorEl.disabled = isAppliance;
-    if (isAppliance) {
+    const fixedFinish = isAppliance || bathroomFixtureTypes.has(type) || type === "bathroom_shower" || type === "bathroom_mirror";
+    useCustomColorEl.disabled = fixedFinish;
+    if (fixedFinish) {
       useCustomColorEl.checked = false;
       customColorEl.disabled = true;
     } else {
@@ -4306,6 +4597,11 @@ function syncObjectEditorControls() {
 function initObjectPicker() {
   const modalEl = document.getElementById("objectPickerModal");
   if (!modalEl) return;
+  const extraCategories = document.getElementById("extraObjectCategories");
+  const accordion = modalEl.querySelector("#objectPickerAccordion");
+  if (extraCategories?.content && accordion && !accordion.querySelector("#objectPickerWardrobe")) {
+    accordion.appendChild(extraCategories.content.cloneNode(true));
+  }
   modalEl.addEventListener("click", (event) => {
     const btn = event.target.closest?.("[data-pick-object]");
     if (!btn) return;
@@ -4325,8 +4621,14 @@ function initObjectPicker() {
     const texture = btn.dataset.texture || "";
     const countertop = btn.dataset.countertop || "";
     const section = btn.dataset.section || "living";
+    const elevation = Number(btn.dataset.y) || 0;
+    const drawers = btn.dataset.drawers === undefined ? null : Number(btn.dataset.drawers);
+    const handles = btn.dataset.handles === undefined ? null : Number(btn.dataset.handles);
 
     state.objectEditor.section = section;
+    state.objectEditor.elevation = elevation;
+    state.objectEditor.drawers = drawers;
+    state.objectEditor.handles = handles;
     if (typeEl) typeEl.value = type;
     if (nameEl) nameEl.value = name;
     if (wEl && w) wEl.value = w;
@@ -4339,7 +4641,7 @@ function initObjectPicker() {
     if (millingEl) millingEl.checked = false;
 
     syncObjectEditorControls();
-    bootstrap.Modal.getInstance(modalEl)?.hide();
+    window.bootstrap?.Modal.getInstance(modalEl)?.hide();
   });
 }
 
@@ -4419,6 +4721,8 @@ async function boot() {
   });
   initProcessAnimation();
   initPlannerProgress();
+  initPlannerShortcuts();
+  initRoomTopViewLayout();
   initPlannerFullscreen();
   initLightbox();
   initObjectPicker();
@@ -4496,6 +4800,7 @@ async function boot() {
   document.getElementById("objTexture")?.addEventListener("change", () => {
     syncObjectEditorControls();
   });
+  document.getElementById("objType")?.addEventListener("change", syncObjectEditorControls);
   syncObjectEditorControls();
 
   try {

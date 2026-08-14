@@ -90,15 +90,16 @@ def ensure_shop_user(auth: AuthContext = Depends(get_auth_context)) -> None:
         raise HTTPException(status_code=403, detail="Insufficient role for shop actions")
 
 
-def ensure_planner_user(auth: AuthContext = Depends(get_auth_context)) -> None:
+def ensure_planner_user(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
     """Room projects for customers and production staff."""
     if not auth.enforced:
-        return
+        return auth
     claims = auth.claims
     if claims is None:
         raise HTTPException(status_code=401, detail="Unauthorized")
     if not _has_privileged_role(claims, ("user", "planner:write")):
         raise HTTPException(status_code=403, detail="Insufficient role for planner actions")
+    return auth
 
 
 def ensure_planner_writer(auth: AuthContext = Depends(get_auth_context)) -> None:

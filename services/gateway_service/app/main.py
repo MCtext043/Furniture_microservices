@@ -53,12 +53,15 @@ BACKENDS = {
 
 FRONTEND_DIR = Path(__file__).resolve().parents[3] / "frontend"
 FRONTEND_ASSETS_DIR = FRONTEND_DIR / "assets"
+PLANNER_MODULES_DIR = FRONTEND_DIR / "planner"
 if FRONTEND_ASSETS_DIR.is_dir():
     app.mount(
         "/frontend-assets",
         StaticFiles(directory=str(FRONTEND_ASSETS_DIR)),
         name="frontend-assets",
     )
+if PLANNER_MODULES_DIR.is_dir():
+    app.mount("/planner-modules", StaticFiles(directory=str(PLANNER_MODULES_DIR)), name="planner-modules")
 
 
 async def _forward(request: Request, base_url: str, path: str) -> Response:

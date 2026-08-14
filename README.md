@@ -371,3 +371,17 @@ pytest
 ## Лицензия и контакты
 
 Внутренний проект WoodCraft Market. Вопросы по деплою — см. `deploy/` и историю коммитов.
+# 3D Planner Architecture
+
+The production 3D planner uses a versioned scene model, stable placement IDs, a centralized furniture registry, incremental Three.js updates, demand-driven rendering, reference-aware resource disposal and atomic revision-guarded persistence.
+
+Core modules live in `frontend/planner/`:
+
+- `core/` — render scheduling, events, diagnostics and GPU resource ownership;
+- `furniture/` — registry and self-contained furniture definitions;
+- `interaction/` — history and oriented collision detection;
+- `persistence/` — schema migration and scene serialization.
+
+`PUT /planner/projects/{project_id}/scene` atomically upserts placements by `(project_id, client_id)`, removes absent placements and rejects stale revisions. Database migration `010_planner_scene_v2` upgrades existing projects without editing older migrations. The existing vanilla frontend remains authoritative; `frontend-react` is not connected to production.
+
+See [docs/3d-planner-audit.md](docs/3d-planner-audit.md) for the dependency audit, schema, extension guide, GLB workflow, tests, benchmarks and known limitations.

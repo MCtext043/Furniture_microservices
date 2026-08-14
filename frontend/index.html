@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Prata&display=swap" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
-  <link href="styles.css?v=20260722-frontend-redesign-v1" rel="stylesheet" />
+  <link href="styles.css?v=20260815-planner-core-v1" rel="stylesheet" />
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Перейти к содержанию</a>
@@ -300,6 +300,66 @@
                 <button class="btn btn-secondary mt-3" id="btnEstimateCost">Пересчитать стоимость</button>
               </div>
             </div>
+
+            <template id="extraObjectCategories">
+            <div class="accordion-item">
+              <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerWardrobe" aria-expanded="false">Гардеробная</button></h3>
+              <div id="objectPickerWardrobe" class="accordion-collapse collapse" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body">
+                  <div class="small text-muted mb-2">Хранение одежды и обуви</div>
+                  <div class="list-group">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="wardrobe" data-type="wardrobe" data-name="Распашной шкаф" data-w="1600" data-d="600" data-h="2400" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-wardrobe"></use></svg></span><span><strong>Распашной шкаф</strong><small>1600×600×2400 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="wardrobe" data-type="wardrobe_sliding" data-name="Шкаф-купе" data-w="2200" data-d="650" data-h="2400" data-texture="wood_dark_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-wardrobe"></use></svg></span><span><strong>Шкаф-купе</strong><small>2200×650×2400 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="wardrobe" data-type="wardrobe_corner" data-name="Угловой шкаф" data-w="1200" data-d="1200" data-h="2400" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-wardrobe"></use></svg></span><span><strong>Угловой шкаф</strong><small>1200×1200×2400 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="wardrobe" data-type="cabinet" data-name="Комод" data-w="1200" data-d="480" data-h="900" data-drawers="4" data-handles="4" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-cabinet"></use></svg></span><span><strong>Комод</strong><small>1200×480×900 мм · 4 ящика</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="wardrobe" data-type="shelf" data-name="Обувница" data-w="900" data-d="350" data-h="1100" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-shelf"></use></svg></span><span><strong>Обувница</strong><small>900×350×1100 мм</small></span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerBathroom" aria-expanded="false">Ванная</button></h3>
+              <div id="objectPickerBathroom" class="accordion-collapse collapse" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body">
+                  <div class="small text-muted mb-2">Сантехника и мебель</div>
+                  <div class="list-group">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bath_vanity" data-name="Тумба с раковиной" data-w="900" data-d="500" data-h="850" data-drawers="2" data-handles="2" data-texture="mdf_film_matte"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-sink"></use></svg></span><span><strong>Тумба с раковиной</strong><small>900×500×850 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bathroom_sink" data-name="Раковина" data-w="600" data-d="480" data-h="180" data-y="750" data-texture="ceramic_white"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-sink"></use></svg></span><span><strong>Подвесная раковина</strong><small>600×480×180 мм · на стену</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bathroom_bathtub" data-name="Ванна" data-w="1700" data-d="750" data-h="600" data-texture="ceramic_white"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-bath"></use></svg></span><span><strong>Ванна</strong><small>1700×750×600 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bathroom_shower" data-name="Душевая кабина" data-w="900" data-d="900" data-h="2100" data-texture="glass_clear"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-shower"></use></svg></span><span><strong>Душевая кабина</strong><small>900×900×2100 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bathroom_toilet" data-name="Унитаз" data-w="380" data-d="680" data-h="780" data-texture="ceramic_white"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-toilet"></use></svg></span><span><strong>Унитаз</strong><small>380×680×780 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="appliance_washer" data-name="Стиральная машина" data-w="600" data-d="600" data-h="850" data-texture="metal_graphite"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-washer"></use></svg></span><span><strong>Стиральная машина</strong><small>600×600×850 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bathroom_mirror" data-name="Зеркало" data-w="800" data-d="40" data-h="900" data-y="1100" data-texture="glass_clear"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-mirror"></use></svg></span><span><strong>Зеркало</strong><small>800×40×900 мм · на стену</small></span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerBedroom" aria-expanded="false">Спальня</button></h3>
+              <div id="objectPickerBedroom" class="accordion-collapse collapse" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body"><div class="list-group">
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bedroom" data-type="bed" data-name="Двуспальная кровать" data-w="1800" data-d="2100" data-h="1100" data-texture="fabric_gray"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-bed"></use></svg></span><span><strong>Двуспальная кровать</strong><small>1800×2100×1100 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bedroom" data-type="bed" data-name="Односпальная кровать" data-w="1000" data-d="2100" data-h="950" data-texture="fabric_gray"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-bed"></use></svg></span><span><strong>Односпальная кровать</strong><small>1000×2100×950 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bedroom" data-type="cabinet" data-name="Прикроватная тумба" data-w="500" data-d="420" data-h="500" data-drawers="2" data-handles="2" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-cabinet"></use></svg></span><span><strong>Прикроватная тумба</strong><small>500×420×500 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bedroom" data-type="wardrobe" data-name="Шкаф для спальни" data-w="1800" data-d="600" data-h="2300" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-wardrobe"></use></svg></span><span><strong>Шкаф</strong><small>1800×600×2300 мм</small></span></button>
+                </div></div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerOffice" aria-expanded="false">Кабинет</button></h3>
+              <div id="objectPickerOffice" class="accordion-collapse collapse" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body"><div class="list-group">
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="office" data-type="table" data-name="Рабочий стол" data-w="1400" data-d="700" data-h="750" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-table"></use></svg></span><span><strong>Рабочий стол</strong><small>1400×700×750 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="office" data-type="chair" data-name="Рабочее кресло" data-w="650" data-d="650" data-h="1100" data-texture="fabric_gray"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-chair"></use></svg></span><span><strong>Рабочее кресло</strong><small>650×650×1100 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="office" data-type="shelf" data-name="Книжный стеллаж" data-w="1000" data-d="350" data-h="2100" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-shelf"></use></svg></span><span><strong>Книжный стеллаж</strong><small>1000×350×2100 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="office" data-type="cabinet" data-name="Офисная тумба" data-w="500" data-d="500" data-h="650" data-drawers="3" data-handles="3" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-cabinet"></use></svg></span><span><strong>Офисная тумба</strong><small>500×500×650 мм</small></span></button>
+                </div></div>
+              </div>
+            </div>
+            </template>
           </div>
         </div>
       </div>
@@ -439,6 +499,30 @@
               <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"
                 d="M6.5 6.5h11v13h-11zM8.5 9h7v7h-7zM9 8.1h0.1M11 8.1h0.1M13 8.1h0.1" />
             </symbol>
+            <symbol id="icon-bed" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M4.5 18.5v-9M19.5 18.5v-5H4.5M7 13.5V9h4.5c1.4 0 2.5 1.1 2.5 2.5v2M4.5 17h15" />
+            </symbol>
+            <symbol id="icon-chair" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M7 5.5h10v8H7zM6 13.5h12M8 13.5v6M16 13.5v6" />
+            </symbol>
+            <symbol id="icon-bath" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M4 12h16v2.5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4zM7 12V7.5A2.5 2.5 0 0 1 9.5 5H11M7 18.5v1M17 18.5v1" />
+            </symbol>
+            <symbol id="icon-shower" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M6 20V8a4 4 0 0 1 8 0M11 8h6M12.5 11v.1M15 11v.1M17.5 11v.1M14 14v.1M16.5 14v.1M5 20h14" />
+            </symbol>
+            <symbol id="icon-sink" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M5 10h14a7 5 0 0 1-14 0zM12 15v4M9 19h6M10 10V7a2 2 0 0 1 4 0" />
+            </symbol>
+            <symbol id="icon-toilet" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M7 4.5h8v7H7zM6 11.5h11c0 4-2 6.5-5.5 6.5S6 15.5 6 11.5zM9 18v1.5h6" />
+            </symbol>
+            <symbol id="icon-washer" viewBox="0 0 24 24">
+              <path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="M6 4h12v16H6zM8.5 6.5h.1M11 6.5h4M9 13a3 3 0 1 0 6 0 3 3 0 0 0-6 0z" />
+            </symbol>
+            <symbol id="icon-mirror" viewBox="0 0 24 24">
+              <rect x="7" y="3.5" width="10" height="17" rx="5" fill="none" stroke="currentColor" stroke-width="1.7" />
+            </symbol>
           </svg>
           <div class="accordion" id="objectPickerAccordion">
             <div class="accordion-item">
@@ -497,6 +581,14 @@
                       <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-wardrobe"></use></svg></span>
                       <span><strong>Пенал</strong><small>600×560×2200 мм</small></span>
                     </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="cabinet" data-name="Навесной шкаф" data-w="800" data-d="340" data-h="720" data-y="1400" data-drawers="0" data-handles="2" data-texture="mdf_film_matte">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-cabinet"></use></svg></span>
+                      <span><strong>Навесной шкаф</strong><small>800×340×720 мм · на стену</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="cabinet" data-name="Кухонный остров" data-w="1600" data-d="900" data-h="900" data-drawers="3" data-handles="3" data-texture="mdf_film_matte" data-countertop="quartz">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-table"></use></svg></span>
+                      <span><strong>Кухонный остров</strong><small>1600×900×900 мм</small></span>
+                    </button>
                   </div>
                   <div class="small text-muted mb-2">Техника</div>
                   <div class="list-group">
@@ -528,6 +620,10 @@
                       <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-oven"></use></svg></span>
                       <span><strong>Духовой шкаф</strong><small>600×560×600 мм</small></span>
                     </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_dishwasher" data-name="Посудомоечная машина" data-w="600" data-d="560" data-h="820" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-washer"></use></svg></span>
+                      <span><strong>Посудомоечная машина</strong><small>600×560×820 мм</small></span>
+                    </button>
                   </div>
                   <div class="alert alert-light border mt-3 small mb-0">
                     <div class="fw-semibold mb-1">Фасады кухни</div>
@@ -557,7 +653,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="dimensions3d.js?v=20260721-cad-dimensions-v2"></script>
-  <script src="textures3d.js?v=20260721-cad-dimensions-v1"></script>
-  <script defer src="app.js?v=20260723-frontend-improvements-v1"></script>
+  <script src="textures3d.js?v=20260815-bathroom-v1"></script>
+  <script type="module" src="app.js?v=20260815-planner-core-v1"></script>
 </body>
 </html>
