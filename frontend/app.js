@@ -1,3 +1,11 @@
+import { FurnitureRegistry } from "/planner-modules/furniture/FurnitureRegistry.js";
+import { registerBuiltInFurniture } from "/planner-modules/furniture/definitions/index.js";
+import { migrateLegacyObject, migrateScene, toLegacyObject } from "/planner-modules/persistence/migrations.js";
+import { serializeScene } from "/planner-modules/persistence/SceneSerializer.js";
+import { RenderScheduler } from "/planner-modules/core/RenderScheduler.js";
+import { ResourceManager } from "/planner-modules/core/ResourceManager.js";
+
+const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
 const APP_MODE = window.APP_MODE || "user";
 const LS_API = "furniture_gateway_url";
 const LS_TOKEN = "furniture_jwt";
@@ -15,6 +23,7 @@ const state = {
   deliveryQuote: null,
   deliveryAddress: "",
   projectId: null,
+  sceneRevision: 0,
   three: null,
   cuttingParts: [],
   roomConfig: { width: 6000, length: 5000, height: 2800 },
@@ -1326,6 +1335,7 @@ async function createRoom() {
   try {
     const project = await savePlannerProject();
     state.projectId = project.id;
+    if (!state.sceneRevision) state.sceneRevision = Number(project.scene_revision) || 0;
     document.getElementById("plannerHint").textContent = `Проект №${project.id} сохранён: ${project.name}`;
     await syncPlannerObjectsToBackend();
     await loadUserProjects();
@@ -1362,33 +1372,20 @@ async function savePlannerProject() {
 
 async function syncPlannerObjectsToBackend() {
   if (!state.projectId) return;
-  for (const obj of state.objects3d) {
-    const defaults = furnitureAccessoryDefaults(obj.type);
-    try {
-      await api(
-        "POST",
-        `/planner/projects/${state.projectId}/furniture`,
-        {
-          name: obj.name,
-          width: obj.width,
-          depth: obj.depth,
-          height: obj.height,
-          x: obj.x,
-          y: Number(obj.y) || 0,
-          z: obj.z,
-          rotation_y: obj.rotationY || 0,
-          furniture_type: obj.type,
-          texture: obj.texture || "wood_oak",
-          custom_color: obj.customColor || "",
-          drawers: obj.drawers ?? defaults.drawers,
-          handles: obj.handles ?? defaults.handles,
-        },
-        true
-      );
-    } catch {
-      // best effort sync
-    }
-  }
+  const response = await api(
+    "PUT",
+    `/planner/projects/${state.projectId}/scene`,
+    serializeScene({
+      revision: state.sceneRevision,
+      roomConfig: state.roomConfig,
+      roomFinish: state.roomFinish,
+      objects: state.objects3d,
+      bomJson: JSON.stringify(buildBomFromObjects()),
+    }),
+    true
+  );
+  state.sceneRevision = response.revision;
+  return response;
 }
 
 function createDemoObjects() {
@@ -1554,12 +1551,13 @@ function furnitureAccessoryDefaults(type) {
 
 function disposeRoom3D() {
   if (!state.three) return;
-  const { renderer, host, dimensionManager, resizeObserver, animationFrame, renderFrame, resizeHandler } = state.three;
+  const { renderer, host, dimensionManager, resizeObserver, animationFrame, renderScheduler, resourceManager, resizeHandler } = state.three;
   resizeObserver?.disconnect();
   if (animationFrame) cancelAnimationFrame(animationFrame);
-  if (renderFrame) cancelAnimationFrame(renderFrame);
+  renderScheduler?.dispose();
   if (resizeHandler) window.removeEventListener("resize", resizeHandler);
   dimensionManager?.dispose();
+  resourceManager?.dispose();
   window.__room3dRenderer = null;
   if (renderer) {
     renderer.dispose();
@@ -1576,13 +1574,7 @@ function requestRoom3DRender({ shadows = false } = {}) {
   if (!state.three || document.hidden) return;
   const three = state.three;
   if (shadows && three.renderer?.shadowMap) three.renderer.shadowMap.needsUpdate = true;
-  if (three.renderFrame) return;
-  three.renderFrame = requestAnimationFrame(() => {
-    if (!state.three || state.three !== three) return;
-    three.renderFrame = 0;
-    three.dimensionManager?.update(three.camera, three.renderer);
-    three.renderer.render(three.scene, three.camera);
-  });
+  three.renderScheduler?.request(shadows ? "shadows" : "scene");
 }
 
 function canUseWebGL() {
@@ -1723,7 +1715,13 @@ function initRoom3D() {
     radius: 11000,
     target: new THREE.Vector3(0, 1000, 0),
   };
-  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, dimensionManager, host, orbit, objectGroups: new Map(), renderFrame: 0 };
+  const resourceManager = new ResourceManager();
+  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, dimensionManager, host, orbit, objectGroups: new Map(), resourceManager };
+  state.three.renderScheduler = new RenderScheduler(() => {
+    if (!state.three) return;
+    dimensionManager?.update(camera, renderer);
+    renderer.render(scene, camera);
+  });
   window.__requestRoom3DRender = requestRoom3DRender;
   if (window.ResizeObserver) {
     const resizeObserver = new ResizeObserver(() => {
@@ -1996,6 +1994,10 @@ function furnitureRenderSignature(item) {
 
 function disposeFurnitureGroup(group) {
   if (!group) return;
+  if (state.three?.resourceManager) {
+    state.three.resourceManager.disposeValue(group);
+    return;
+  }
   const materials = new Set();
   group.traverse((child) => {
     if (!child.isMesh) return;
@@ -2039,8 +2041,11 @@ function renderRoom3D() {
       }
       const texturePreset = resolveTexturePreset(item);
       const materialSet = createFurnitureMaterialSet(item, texturePreset);
+      const placement = migrateLegacyObject(item);
       group = window.Texture3D?.buildFurnitureGroup
-        ? window.Texture3D.buildFurnitureGroup(item, w, h, d, materialSet)
+        ? furnitureRegistry.buildGeometry(placement, {
+            buildLegacy: (normalized) => window.Texture3D.buildFurnitureGroup(toLegacyObject(normalized), w, h, d, materialSet),
+          })
         : (() => {
             const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), materialSet.body);
             mesh.position.y = h / 2;
@@ -3770,6 +3775,7 @@ async function loadPlannerProject(projectId) {
   if (!project) throw new Error("Проект не найден");
 
   state.projectId = project.id;
+  state.sceneRevision = Number(project.scene_revision) || 0;
   state.selectedTier = project.selected_tier || "standard";
   state.roomConfig = {
     width: Number(project.room_width) || 6000,
@@ -3777,23 +3783,19 @@ async function loadPlannerProject(projectId) {
     height: Number(project.room_height) || 2800,
   };
 
-  const furniture = await api("GET", `/planner/projects/${projectId}/furniture`);
-  state.objects3d = furniture.map((row) => ({
-    id: makeId(),
-    type: row.furniture_type || "cabinet",
-    texture: row.texture || "wood_oak",
-    customColor: row.custom_color || "",
-    name: row.name,
-    width: row.width,
-    depth: row.depth,
-    height: row.height,
-    x: row.x,
-    y: row.y || 0,
-    z: row.z,
-    rotationY: row.rotation_y || 0,
-    drawers: row.drawers ?? 0,
-    handles: row.handles ?? 0,
-  }));
+  let scene;
+  try {
+    scene = migrateScene(await api("GET", `/planner/projects/${projectId}/scene`, undefined, true));
+  } catch (error) {
+    console.warn("Versioned scene unavailable; loading legacy placements", error);
+    scene = migrateScene({ placements: await api("GET", `/planner/projects/${projectId}/furniture`, undefined, true) });
+  }
+  state.sceneRevision = scene.revision;
+  if (scene.room) {
+    state.roomConfig = { width: Number(scene.room.width), length: Number(scene.room.length), height: Number(scene.room.height) };
+    state.roomFinish = { ...state.roomFinish, ...(scene.room.finish || {}) };
+  }
+  state.objects3d = scene.placements.map(toLegacyObject);
   state.selected3dObjectId = state.objects3d[0]?.id || null;
 
   if (project.bom_json) {

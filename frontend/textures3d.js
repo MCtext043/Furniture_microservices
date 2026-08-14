@@ -533,6 +533,7 @@
     if (panelGeometryCache.has(key)) return panelGeometryCache.get(key);
     if (!radius || !THREE.ExtrudeGeometry) {
       const simple = prepareGeometry(new THREE.BoxGeometry(width, height, depth));
+      simple.userData = { ...(simple.userData || {}), sharedResource: true };
       panelGeometryCache.set(key, simple);
       return simple;
     }
@@ -550,6 +551,7 @@
     geometry.translate(0, 0, -depth / 2);
     normalizeGeometryUvs(geometry);
     prepareGeometry(geometry);
+    geometry.userData = { ...(geometry.userData || {}), sharedResource: true };
     panelGeometryCache.set(key, geometry);
     return geometry;
   }
