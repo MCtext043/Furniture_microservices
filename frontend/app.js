@@ -7,6 +7,7 @@ import { ResourceManager } from "/planner-modules/core/ResourceManager.js";
 import { HistoryManager } from "/planner-modules/interaction/HistoryManager.js";
 import { findCollisions } from "/planner-modules/interaction/CollisionController.js";
 import { PlannerDiagnostics } from "/planner-modules/core/PlannerDiagnostics.js";
+import { ModelAssetLoader } from "/planner-modules/furniture/ModelAssetLoader.js";
 
 const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
 const APP_MODE = window.APP_MODE || "user";
@@ -174,6 +175,21 @@ function applyPlannerSnapshot(snapshot) {
 }
 
 const plannerHistory = new HistoryManager(applyPlannerSnapshot);
+const modelAssetLoader = new ModelAssetLoader({
+  async parse(buffer) {
+    const { GLTFLoader } = await import("https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js");
+    return new Promise((resolve, reject) => new GLTFLoader().parse(buffer, "", (gltf) => resolve(gltf.scene), reject));
+  },
+  clone(scene) {
+    const copy = scene.clone(true);
+    copy.traverse((node) => {
+      if (node.geometry) node.geometry = node.geometry.clone();
+      if (Array.isArray(node.material)) node.material = node.material.map((material) => material.clone());
+      else if (node.material) node.material = node.material.clone();
+    });
+    return copy;
+  },
+});
 
 const materialOptions = Object.fromEntries(Object.entries(texturePresets).map(([value, preset]) => [value, preset.title]));
 const bathroomFixtureTypes = new Set(["bathroom_sink", "bathroom_bathtub", "bathroom_toilet"]);
@@ -1587,6 +1603,7 @@ function disposeRoom3D() {
   host?.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
   state.three = null;
   window.__requestRoom3DRender = null;
+  modelAssetLoader.clear();
 }
 
 function requestRoom3DRender({ shadows = false } = {}) {
@@ -2011,7 +2028,7 @@ function rebuildRoomGeometry() {
 function furnitureRenderSignature(item) {
   return JSON.stringify([
     item.type, item.texture, item.customColor, item.width, item.depth, item.height,
-    item.drawers, item.handles, item.countertopType, item.milling,
+    item.drawers, item.handles, item.countertopType, item.milling, item.rendererMode, item.modelAssetKey, item.modelVersion,
   ]);
 }
 
@@ -2065,7 +2082,20 @@ function renderRoom3D() {
       const texturePreset = resolveTexturePreset(item);
       const materialSet = createFurnitureMaterialSet(item, texturePreset);
       const placement = migrateLegacyObject(item);
-      group = window.Texture3D?.buildFurnitureGroup
+      if ((placement.rendererMode === "gltf" || placement.rendererMode === "hybrid") && placement.modelAssetKey) {
+        group = new THREE.Group();
+        const placeholder = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: 0xb8c0c8, wireframe: true, transparent: true, opacity: 0.45 }));
+        placeholder.position.y = h / 2; group.add(placeholder);
+        const targetGroup = group;
+        modelAssetLoader.load(placement.modelAssetKey, placement.modelVersion).then((model) => {
+          if (state.three?.objectGroups.get(item.id) !== targetGroup) return;
+          targetGroup.remove(placeholder); placeholder.geometry.dispose(); placeholder.material.dispose();
+          const box = new THREE.Box3().setFromObject(model); const size = box.getSize(new THREE.Vector3());
+          const native = placement.configuration.nativeDimensions || [size.x, size.y, size.z];
+          const scale = Math.min(w / Math.max(native[0],1), h / Math.max(native[1],1), d / Math.max(native[2],1));
+          model.scale.setScalar(scale); model.position.y -= box.min.y * scale; targetGroup.add(model); requestRoom3DRender({ shadows: true });
+        }).catch((error) => { targetGroup.userData.assetError = error.message; console.error("GLB model load failed", error); requestRoom3DRender(); });
+      } else group = window.Texture3D?.buildFurnitureGroup
         ? furnitureRegistry.buildGeometry(placement, {
             buildLegacy: (normalized) => window.Texture3D.buildFurnitureGroup(toLegacyObject(normalized), w, h, d, materialSet),
           })

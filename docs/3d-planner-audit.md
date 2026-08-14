@@ -45,14 +45,14 @@ Kitchen definitions include base, wall, tall, drawer, sink, oven, corner, open s
 
 ## GLB asset workflow
 
-Upload a compressed `.glb` through `POST /assets/upload` with an object key such as `models/chairs/model.glb`, or request a presigned upload using `/assets/presign-put`. Store the key and immutable `model_version` on the placement. Retrieval uses `/assets/objects/{object_key}`. Parametric furniture remains the production default. GLTF/Draco/KTX2 runtime loading is the next integration step; the persistence schema already supports `parametric`, `gltf` and `hybrid` records without breaking old scenes.
+Upload a compressed `.glb` through `POST /assets/upload` with an object key such as `models/chairs/model.glb`, or request a presigned upload using `/assets/presign-put`. Store the key and immutable `model_version` on the placement. Retrieval uses `/assets/objects/{object_key}`. `ModelAssetLoader` shows a placeholder while loading, caches by key/version, reports failures without destroying the scene, and deep-clones disposable instance resources. Parametric furniture remains the production default. Draco/KTX2 are optional future bandwidth improvements; ordinary GLB works without them.
 
 ## Verification and performance
 
 Automated checks:
 
-- 8 planner core unit tests: registry, migration, serialization, scheduling, history, OBB collision, kitchen run and wardrobe BOM;
-- 8 planner backend tests: legacy API plus atomic upsert/removal, duplicate rejection and revision conflict;
+- 9 planner core unit tests: registry, migration, serialization, scheduling, history, OBB collision, kitchen run, wardrobe BOM and GLB caching;
+- 9 planner backend tests: legacy API plus atomic upsert/removal, duplicate rejection, ownership and revision conflict;
 - browser smoke tests: WebGL creation, add object, and add/undo/redo with zero page errors.
 
 Headless Chromium at 1280×900 (DPR 1), measured 2026-08-15:

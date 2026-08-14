@@ -64,7 +64,7 @@ class FurnitureCreate(BaseModel):
     definition_version: int = Field(default=1, ge=1)
     configuration_json: dict = Field(default_factory=dict)
     appearance_json: dict = Field(default_factory=dict)
-    renderer_mode: str = Field(default="parametric", pattern=r"^(parametric|gltf|hybrid)$")
+    renderer_mode: str = Field(default="parametric", pattern=r"^(parametric|gltf|hybrid|primitive)$")
     model_asset_key: str | None = Field(default=None, max_length=255)
     model_version: int | None = Field(default=None, ge=1)
 

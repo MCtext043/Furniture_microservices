@@ -8,6 +8,7 @@ import { HistoryManager } from "./interaction/HistoryManager.js";
 import { intersectsOriented } from "./interaction/CollisionController.js";
 import { registerBuiltInFurniture } from "./furniture/definitions/index.js";
 import { KitchenRun } from "./furniture/definitions/kitchen.js";
+import { ModelAssetLoader } from "./furniture/ModelAssetLoader.js";
 
 test("FurnitureRegistry rejects duplicates and delegates behavior", () => {
   const registry = new FurnitureRegistry();
@@ -69,4 +70,11 @@ test("wardrobe validates section widths and builds module BOM", () => {
   assert.equal(definition.validateConfiguration(configuration).valid,true);
   const parts=definition.buildBom({configuration}).parts;
   assert.ok(parts.some(p=>p.role==="rail")); assert.ok(parts.some(p=>p.id.includes("drawer")));
+});
+
+test("ModelAssetLoader caches by asset key and version", async () => {
+  let requests=0; const source={clone:()=>({instance:true}),traverse:()=>{}};
+  const loader=new ModelAssetLoader({fetchAsset:async()=>{requests++;return{ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}},parse:async()=>source});
+  assert.equal((await loader.load("models/chair.glb",2)).instance,true); await loader.load("models/chair.glb",2);
+  assert.equal(requests,1); loader.clear();
 });
