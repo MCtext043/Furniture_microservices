@@ -4,6 +4,8 @@ import { migrateLegacyObject, migrateScene, toLegacyObject } from "/planner-modu
 import { serializeScene } from "/planner-modules/persistence/SceneSerializer.js";
 import { RenderScheduler } from "/planner-modules/core/RenderScheduler.js";
 import { ResourceManager } from "/planner-modules/core/ResourceManager.js";
+import { HistoryManager } from "/planner-modules/interaction/HistoryManager.js";
+import { findCollisions } from "/planner-modules/interaction/CollisionController.js";
 
 const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
 const APP_MODE = window.APP_MODE || "user";
@@ -156,6 +158,21 @@ const texturePresets = {
   glass_clear: { title: "Закалённое прозрачное стекло", material: "glass", color: "#CDE7EE" },
   chrome_polished: { title: "Полированный хром", material: "metal", color: "#D6DCE1" },
 };
+
+function plannerSnapshot() {
+  return { roomConfig: structuredClone(state.roomConfig), roomFinish: structuredClone(state.roomFinish), objects3d: structuredClone(state.objects3d), selected3dObjectId: state.selected3dObjectId };
+}
+
+function applyPlannerSnapshot(snapshot) {
+  state.roomConfig = structuredClone(snapshot.roomConfig);
+  state.roomFinish = structuredClone(snapshot.roomFinish);
+  state.objects3d = structuredClone(snapshot.objects3d);
+  state.selected3dObjectId = snapshot.selected3dObjectId;
+  if (state.three) rebuildRoomGeometry();
+  renderObjects3dList(); renderRoomTopView(); renderRoom3D(); renderBom();
+}
+
+const plannerHistory = new HistoryManager(applyPlannerSnapshot);
 
 const materialOptions = Object.fromEntries(Object.entries(texturePresets).map(([value, preset]) => [value, preset.title]));
 const bathroomFixtureTypes = new Set(["bathroom_sink", "bathroom_bathtub", "bathroom_toilet"]);
@@ -1909,6 +1926,8 @@ function selectFurnitureAtPointer(event, canvas) {
   dimensionManager?.clear();
   if (object.userData.dimensions) dimensionManager?.attach(object, object.userData.dimensions);
   dimensionManager?.setSelected(object);
+  renderRoomTopView();
+  renderObjects3dList();
   requestRoom3DRender();
 }
 
@@ -2199,6 +2218,7 @@ function beginDrag(ev, id) {
     state.three.furnitureGroup.children.find((child) => child.userData.objectId === id) || null
   );
   state.drag.active = true;
+  state.drag.historyBefore = plannerSnapshot();
   state.drag.id = id;
   state.drag.startX = ev.clientX;
   state.drag.startY = ev.clientY;
@@ -2232,6 +2252,7 @@ function beginRotate(ev, id) {
   const centerX = (metrics?.originX || host.getBoundingClientRect().left) + item.x * scale;
   const centerY = (metrics?.originY || host.getBoundingClientRect().top) + item.z * scale;
   state.rotate.active = true;
+  state.rotate.historyBefore = plannerSnapshot();
   state.rotate.id = id;
   state.rotate.centerX = centerX;
   state.rotate.centerY = centerY;
@@ -2263,6 +2284,9 @@ function handleDragMove(ev) {
   item.z = state.drag.baseZ + dz;
   snapObjectPosition(item, width, length);
   clampObjectPosition(item, width, length);
+  const collisions = findCollisions(item, state.objects3d, ev.altKey ? 0 : 2);
+  state.drag.chipEl?.classList.toggle("has-collision", collisions.length > 0);
+  state.drag.chipEl?.setAttribute("aria-invalid", String(collisions.length > 0));
   updateRoomPlanChipDom(item, scale, state.drag.wrapEl, state.drag.chipEl);
   updateFurnitureTransform(item);
   ev.preventDefault();
@@ -2282,19 +2306,25 @@ function handleRotateMove(ev) {
 
 function endDrag() {
   if (state.rotate.active) {
+    const before = state.rotate.historyBefore;
     state.rotate.active = false;
     state.rotate.id = null;
     state.rotate.wrapEl = null;
     state.rotate.chipEl = null;
+    state.rotate.historyBefore = null;
+    if (before) plannerHistory.record(before, plannerSnapshot(), "rotate");
     renderRoomTopView();
     renderBom();
     requestRoom3DRender({ shadows: true });
     return;
   }
+  const before = state.drag.historyBefore;
   state.drag.active = false;
   state.drag.id = null;
   state.drag.wrapEl = null;
   state.drag.chipEl = null;
+  state.drag.historyBefore = null;
+  if (before) plannerHistory.record(before, plannerSnapshot(), "move");
   requestRoom3DRender({ shadows: true });
 }
 
@@ -2310,6 +2340,7 @@ function applyRoomSize() {
     toast("Размеры комнаты должны быть не менее 2000 мм", false);
     return;
   }
+  const before = plannerSnapshot();
   state.roomConfig = { width, length, height };
   for (const item of state.objects3d) {
     clampObjectPosition(item, width, length);
@@ -2317,10 +2348,12 @@ function applyRoomSize() {
   rebuildRoomGeometry();
   renderRoomTopView();
   renderRoom3D();
+  plannerHistory.record(before, plannerSnapshot(), "room-size");
   toast("Размеры комнаты применены");
 }
 
 function addObject3DFromForm() {
+  const before = plannerSnapshot();
   const type = document.getElementById("objType").value;
   const texture = document.getElementById("objTexture").value;
   const name = document.getElementById("objName").value.trim() || "Новый объект";
@@ -2359,6 +2392,7 @@ function addObject3DFromForm() {
   };
   state.objects3d.push(item);
   state.selected3dObjectId = item.id;
+  plannerHistory.record(before, plannerSnapshot(), "add");
   renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
@@ -2921,10 +2955,12 @@ async function clearCuttingJobs() {
 }
 
 function removeObject3D(id) {
+  const before = plannerSnapshot();
   const index = state.objects3d.findIndex((obj) => obj.id === id);
   if (index < 0) return;
   const [removed] = state.objects3d.splice(index, 1);
   if (state.selected3dObjectId === removed.id) state.selected3dObjectId = null;
+  plannerHistory.record(before, plannerSnapshot(), "delete");
   renderObjects3dList();
   renderRoomTopView();
   renderRoom3D();
@@ -2942,15 +2978,18 @@ function renderObjects3dList() {
   }
   host.innerHTML = state.objects3d
     .map(
-      (item) => `<div class="d-flex justify-content-between align-items-center gap-2 border rounded px-2 py-1 mb-1">
+      (item) => `<div class="d-flex justify-content-between align-items-center gap-2 border rounded px-2 py-1 mb-1 ${item.id === state.selected3dObjectId ? "border-primary bg-light" : ""}" data-select-object="${item.id}" role="button" tabindex="0">
         <span>${escapeHtml(item.name)} <span class="text-muted">(${Math.round(item.width)}×${Math.round(item.depth)}×${Math.round(item.height)})</span></span>
         <button type="button" class="btn btn-sm btn-outline-danger py-0" data-delete-object="${item.id}">Удалить</button>
       </div>`
     )
     .join("");
   host.querySelectorAll("[data-delete-object]").forEach((button) => {
-    button.addEventListener("click", () => removeObject3D(button.dataset.deleteObject));
+    button.addEventListener("click", (event) => { event.stopPropagation(); removeObject3D(button.dataset.deleteObject); });
   });
+  host.querySelectorAll("[data-select-object]").forEach((row) => row.addEventListener("click", () => {
+    state.selected3dObjectId = row.dataset.selectObject; renderObjects3dList(); renderRoomTopView(); renderRoom3D();
+  }));
 }
 
 async function loadCrm() {
@@ -4346,6 +4385,31 @@ function initPlannerProgress() {
   updatePlannerProgress();
 }
 
+function initPlannerShortcuts() {
+  document.addEventListener("keydown", (event) => {
+    if (APP_MODE === "admin" || /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName || "")) return;
+    const modifier = event.ctrlKey || event.metaKey;
+    if (modifier && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? plannerHistory.redo() : plannerHistory.undo(); return; }
+    if (modifier && event.key.toLowerCase() === "y") { event.preventDefault(); plannerHistory.redo(); return; }
+    const selected = state.objects3d.find((item) => item.id === state.selected3dObjectId);
+    if (modifier && event.key.toLowerCase() === "d" && selected) {
+      event.preventDefault(); const before = plannerSnapshot(); const copy = structuredClone(selected);
+      copy.id = makeId(); copy.name = `${selected.name} (копия)`; copy.x += 100; copy.z += 100;
+      clampObjectPosition(copy, state.roomConfig.width, state.roomConfig.length); state.objects3d.push(copy); state.selected3dObjectId = copy.id;
+      plannerHistory.record(before, plannerSnapshot(), "duplicate"); applyPlannerSnapshot(plannerSnapshot()); return;
+    }
+    if (event.key === "Escape") { state.selected3dObjectId = null; state.three?.dimensionManager?.clear(); renderRoomTopView(); renderObjects3dList(); requestRoom3DRender(); return; }
+    if (event.key === "Delete" && selected) { event.preventDefault(); if (window.confirm(`Удалить «${selected.name}»?`)) removeObject3D(selected.id); return; }
+    if (selected && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+      event.preventDefault(); const before = plannerSnapshot(); const step = event.shiftKey ? 100 : 10;
+      if (event.key === "ArrowLeft") selected.x -= step; if (event.key === "ArrowRight") selected.x += step;
+      if (event.key === "ArrowUp") selected.z -= step; if (event.key === "ArrowDown") selected.z += step;
+      clampObjectPosition(selected, state.roomConfig.width, state.roomConfig.length); plannerHistory.record(before, plannerSnapshot(), "nudge");
+      updateFurnitureTransform(selected); renderRoomTopView();
+    }
+  });
+}
+
 function initRoomTopViewLayout() {
   const host = document.getElementById("roomPlan");
   if (!host) return;
@@ -4615,6 +4679,7 @@ async function boot() {
   });
   initProcessAnimation();
   initPlannerProgress();
+  initPlannerShortcuts();
   initRoomTopViewLayout();
   initPlannerFullscreen();
   initLightbox();

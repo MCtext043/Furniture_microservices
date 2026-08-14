@@ -4,6 +4,8 @@ import { FurnitureRegistry } from "./furniture/FurnitureRegistry.js";
 import { migrateLegacyObject, migrateScene, toLegacyObject } from "./persistence/migrations.js";
 import { serializeScene } from "./persistence/SceneSerializer.js";
 import { RenderScheduler } from "./core/RenderScheduler.js";
+import { HistoryManager } from "./interaction/HistoryManager.js";
+import { intersectsOriented } from "./interaction/CollisionController.js";
 
 test("FurnitureRegistry rejects duplicates and delegates behavior", () => {
   const registry = new FurnitureRegistry();
@@ -37,4 +39,16 @@ test("RenderScheduler coalesces rapid updates into one frame", () => {
   assert.equal(renders, 0);
   callback();
   assert.equal(renders, 1);
+});
+
+test("HistoryManager restores and reapplies snapshots", () => {
+  let state; const history = new HistoryManager((next) => { state = next; });
+  history.record({ x: 0 }, { x: 10 }, "move"); assert.equal(history.undo(), true); assert.equal(state.x, 0);
+  assert.equal(history.redo(), true); assert.equal(state.x, 10);
+});
+
+test("oriented collision uses SAT for arbitrary rotations", () => {
+  const a = { x: 0, z: 0, width: 100, depth: 40, rotationY: 45 };
+  assert.equal(intersectsOriented(a, { x: 30, z: 0, width: 80, depth: 30, rotationY: -20 }), true);
+  assert.equal(intersectsOriented(a, { x: 300, z: 0, width: 80, depth: 30, rotationY: -20 }), false);
 });
