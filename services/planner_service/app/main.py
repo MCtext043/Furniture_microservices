@@ -46,9 +46,13 @@ def _identity(auth: AuthContext) -> str | None:
     return auth.claims.sub if auth.claims and auth.claims.sub else None
 
 
+def _planner_privileged(auth: AuthContext) -> bool:
+    return bool(auth.claims and ({"admin", "planner:write", "*"} & set(auth.claims.roles)))
+
+
 def _assert_owner(project: RoomProject, auth: AuthContext) -> None:
     identity = _identity(auth)
-    if auth.enforced and (not identity or project.user_id != identity):
+    if auth.enforced and not _planner_privileged(auth) and (not identity or project.user_id != identity):
         raise HTTPException(status_code=403, detail="Project belongs to another user")
 
 
@@ -73,7 +77,7 @@ def create_project(payload: ProjectCreate, session: Session = Depends(get_sessio
 @app.get("/projects", response_model=list[ProjectOut])
 def list_projects(session: Session = Depends(get_session), auth: AuthContext = Depends(get_auth_context)) -> list[ProjectOut]:
     stmt = select(RoomProject)
-    if auth.enforced:
+    if auth.enforced and not _planner_privileged(auth):
         if not _identity(auth):
             raise HTTPException(status_code=401, detail="Unauthorized")
         stmt = stmt.where(RoomProject.user_id == _identity(auth))
@@ -83,7 +87,7 @@ def list_projects(session: Session = Depends(get_session), auth: AuthContext = D
 
 @app.get("/projects/user/{user_id}", response_model=list[ProjectOut])
 def list_user_projects(user_id: str, session: Session = Depends(get_session), auth: AuthContext = Depends(get_auth_context)) -> list[ProjectOut]:
-    if auth.enforced and _identity(auth) != user_id:
+    if auth.enforced and not _planner_privileged(auth) and _identity(auth) != user_id:
         raise HTTPException(status_code=403, detail="Cannot list another user's projects")
     rows = list(
         session.scalars(

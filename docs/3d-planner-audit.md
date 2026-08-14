@@ -52,7 +52,7 @@ Upload a compressed `.glb` through `POST /assets/upload` with an object key such
 Automated checks:
 
 - 9 planner core unit tests: registry, migration, serialization, scheduling, history, OBB collision, kitchen run, wardrobe BOM and GLB caching;
-- 9 planner backend tests: legacy API plus atomic upsert/removal, duplicate rejection, ownership and revision conflict;
+- 10 planner backend tests: legacy API plus atomic upsert/removal, duplicate rejection, ownership/admin access and revision conflict;
 - browser smoke tests: WebGL creation, add object, and add/undo/redo with zero page errors.
 
 Headless Chromium at 1280×900 (DPR 1), measured 2026-08-15:

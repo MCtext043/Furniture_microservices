@@ -77,3 +77,17 @@ def test_authenticated_identity_owns_project_and_other_user_is_forbidden(planner
         assert planner_client.patch(f"/projects/{project_id}", json={"name": "Stolen"}).status_code == 403
     finally:
         planner_app.dependency_overrides.pop(get_auth_context, None)
+
+
+def test_admin_can_read_all_projects(planner_client):
+    current = {"sub": "owner", "roles": ["user"]}
+    def auth_context():
+        return AuthContext(enforced=True, claims=TokenClaims(sub=current["sub"], username=current["sub"], roles=current["roles"]))
+    planner_app.dependency_overrides[get_auth_context] = auth_context
+    try:
+        project_id = planner_client.post("/projects", json={"name": "Admin visible"}).json()["id"]
+        current.update(sub="admin-1", roles=["admin"])
+        assert any(row["id"] == project_id for row in planner_client.get("/projects").json())
+        assert planner_client.get(f"/projects/{project_id}/scene").status_code == 200
+    finally:
+        planner_app.dependency_overrides.pop(get_auth_context, None)
