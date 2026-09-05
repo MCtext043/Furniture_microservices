@@ -2618,7 +2618,6 @@ function renderCostEstimate(bom = null) {
       <div class="estimate-card">
         <div class="estimate-kicker">Ориентировочная стоимость</div>
         <div class="estimate-total">от ${money(selectedTotal)}</div>
-        <p class="estimate-note">Итоговая цена считается по формуле: закупочная сумма × 2.2. Закупочная сумма — это себестоимость материалов проекта.</p>
         <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
       </div>
       <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>

@@ -2,9 +2,10 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
+  <link rel="icon" href="./assets/icon.ico?v=3" type="image/x-icon">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="description" content="Подберите мебель, соберите комнату в 3D и получите ориентировочную стоимость проекта." />
-  <title>WoodCraft — мебель и планировщик комнаты</title>
+  <title>Петров — мебель и планировщик комнаты</title>
   <script>document.documentElement.dataset.theme=localStorage.getItem("woodcraft_theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,9 +18,9 @@
 
   <nav class="navbar navbar-expand-lg sticky-top" aria-label="Основная навигация">
     <div class="container">
-      <a class="navbar-brand" href="#top" aria-label="WoodCraft, на главную">
-        <span class="brand-mark" aria-hidden="true">W</span>
-        <span>WoodCraft</span>
+      <a class="navbar-brand" href="#top" aria-label="Петров, на главную">
+        <span class="brand-mark" aria-hidden="true">П</span>
+        <span>Петров</span>
       </a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Открыть меню">
         <span class="navbar-toggler-icon"></span>
@@ -27,8 +28,8 @@
       <div class="collapse navbar-collapse" id="nav">
         <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-1">
           <li class="nav-item"><a class="nav-link" href="#howItWorks">Как это работает</a></li>
-          <li class="nav-item"><a class="nav-link" href="#catalog">Каталог</a></li>
           <li class="nav-item"><a class="nav-link" href="#planner">Планировщик</a></li>
+          <li class="nav-item"><a class="nav-link" href="#catalog">Каталог</a></li>
           <li class="nav-item"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Включить тёмную тему" title="Сменить тему"><span aria-hidden="true">☾</span></button></li>
           <li class="nav-item">
             <button class="btn btn-quiet ms-lg-2" data-bs-toggle="modal" data-bs-target="#accountModal" id="accountBtn">Войти</button>
@@ -110,33 +111,6 @@
           <li class="process-step"><span>03</span><strong>Оцените результат</strong><p>Проверьте расстановку в 3D и на плане сверху.</p></li>
           <li class="process-step"><span>04</span><strong>Сохраните проект</strong><p>Получите расчёт и отправьте решение в работу.</p></li>
         </ol>
-      </div>
-    </section>
-
-    <section class="section catalog-section" id="catalog">
-      <div class="container">
-        <div class="section-heading section-heading-split catalog-heading">
-          <div>
-            <div class="eyebrow">Каталог</div>
-            <h2>Основа будущего интерьера</h2>
-            <p>Выбирайте готовую мебель или используйте её как отправную точку для проекта.</p>
-          </div>
-          <div class="search-field">
-            <label for="searchInput">Поиск по каталогу</label>
-            <span class="search-icon" aria-hidden="true"></span>
-            <input class="form-control" id="searchInput" type="search" placeholder="Например, шкаф или стол" autocomplete="off" />
-            <button class="search-clear d-none" id="searchClear" type="button" aria-label="Очистить поиск">×</button>
-          </div>
-        </div>
-        <div class="catalog-toolbar">
-          <div class="category-list" id="categoryPills" aria-label="Категории товаров"></div>
-          <span class="catalog-hint">Нажмите на категорию, чтобы сузить выбор</span>
-        </div>
-        <div class="row g-4 product-grid" id="productGrid" aria-live="polite" aria-busy="true">
-          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
-          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
-          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
-        </div>
       </div>
     </section>
 
@@ -365,6 +339,34 @@
       </div>
     </section>
 
+    <section class="section catalog-section" id="catalog">
+      <div class="container">
+        <div class="section-heading section-heading-split catalog-heading">
+          <div>
+            <div class="eyebrow">Каталог</div>
+            <h2>Основа будущего интерьера</h2>
+            <p>Выбирайте готовую мебель или используйте её как отправную точку для проекта.</p>
+          </div>
+          <div class="search-field">
+            <label for="searchInput">Поиск по каталогу</label>
+            <span class="search-icon" aria-hidden="true"></span>
+            <input class="form-control" id="searchInput" type="search" placeholder="Например, шкаф или стол" autocomplete="off" />
+            <button class="search-clear d-none" id="searchClear" type="button" aria-label="Очистить поиск">×</button>
+          </div>
+        </div>
+        <div class="catalog-toolbar">
+          <div class="category-list" id="categoryPills" aria-label="Категории товаров"></div>
+          <span class="catalog-hint">Нажмите на категорию, чтобы сузить выбор</span>
+        </div>
+        <div class="row g-4 product-grid" id="productGrid" aria-live="polite" aria-busy="true">
+          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
+          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
+          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
+        </div>
+      </div>
+    </section>
+
+
     <section class="final-cta">
       <div class="container final-cta-inner">
         <div><div class="eyebrow">Можно начать без регистрации</div><h2>Посмотрите, как мебель впишется в вашу комнату</h2></div>
@@ -375,7 +377,7 @@
 
   <footer class="site-footer">
     <div class="container footer-grid">
-      <div><a class="navbar-brand" href="#top"><span class="brand-mark" aria-hidden="true">W</span><span>WoodCraft</span></a><p>Подбор мебели и проектирование комнаты в одном сервисе.</p></div>
+      <div><a class="navbar-brand" href="#top"><span class="brand-mark" aria-hidden="true">П</span><span>Петров</span></a><p>Подбор мебели и проектирование комнаты в одном сервисе.</p></div>
       <nav aria-label="Навигация в подвале"><a href="#catalog">Каталог</a><a href="#planner">Планировщик</a><a href="#howItWorks">Как это работает</a></nav>
       <div class="footer-service"><span>Для сотрудников</span><a href="admin.html">Панель администратора</a><a href="privacy.html">Политика конфиденциальности</a><a href="cookies.html">Файлы cookie</a></div>
     </div>

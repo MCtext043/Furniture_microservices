@@ -7,3 +7,4 @@ frontend-react/node_modules
 frontend-react/dist
 frontend-react/test-results
 frontend-react/*.tsbuildinfo
+frontend/styles_stock.css
