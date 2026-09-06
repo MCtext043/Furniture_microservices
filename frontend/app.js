@@ -58,7 +58,7 @@ const state = {
 
 const productEditorPhotos = { existing: [], pending: [], removed: [] };
 
-const demoCategories = ["Кухни", "Шкафы", "Гостиные", "Спальни", "Офис", "Детские"];
+const demoCategories = ["Готовые проекты", "Кухни", "Шкафы", "Гостиные", "Спальни", "Офис", "Детские"];
 const demoProducts = [
   ["Кухня Nord Line", "DEMO-KITCHEN-NORD", "FurniPro", "Кухни", 184900, 4, "Полный кухонный гарнитур с матовыми фасадами", "🍽️", "linear-gradient(135deg,#bf7b45,#f1c27d)"],
   ["Кровать Loft Oak", "DEMO-BED-LOFT", "OakLab", "Спальни", 75900, 3, "Двуспальная кровать с ящиками хранения", "🛏️", "linear-gradient(135deg,#855e42,#d9b88f)"],
@@ -70,6 +70,7 @@ const demoProducts = [
   ["Переговорный стол Team", "DEMO-TABLE-TEAM", "OfficeWood", "Офис", 58900, 4, "Большой стол для переговорной", "🤝", "linear-gradient(135deg,#134e5e,#71b280)"],
   ["Гардероб Family", "DEMO-WARD-FAMILY", "WoodLine", "Шкафы", 129900, 2, "Встроенный гардероб с индивидуальным наполнением", "👗", "linear-gradient(135deg,#42275a,#734b6d)"],
   ["Детская система Nova", "DEMO-KIDS-NOVA", "HappyRoom", "Детские", 96900, 3, "Кровать, шкаф и рабочая зона в одном стиле", "🚀", "linear-gradient(135deg,#36d1dc,#5b86e5)"],
+  ["Лофт кухня", "DEMO-LOFT-KITCHEN", "Loft kitchen", "Готовые проекты", 100000, 2, "Кухонный гарнитур в стиле лофт", "📺", "linear-gradient(135deg,#36d3ec,#5b36d1)"],
 ];
 
 const RETIRED_DEMO_SKUS = ["DEMO-SOFA-CLOUD", "DEMO-WARD-VERONA"];
@@ -781,17 +782,56 @@ function categoryName(id) {
   return "Каталог";
 }
 
+// function renderCategories() {
+//   const host = document.getElementById("categoryPills");
+//   if (!host) return;
+//   const counts = new Map();
+//   state.products.forEach((p) => counts.set(p.category_id, (counts.get(p.category_id) || 0) + 1));
+//   const buttons = [`<button class="category-pill ${state.activeCategory === "all" ? "active" : ""}" data-cat="all" aria-pressed="${state.activeCategory === "all"}">Все <span>${state.products.length}</span></button>`];
+//   for (const cat of visibleCategories()) {
+//     const count = counts.get(cat.id) || 0;
+//     if (!count) continue;
+//     const isActive = state.activeCategory === String(cat.id);
+//     buttons.push(`<button class="category-pill ${isActive ? "active" : ""}" data-cat="${cat.id}" aria-pressed="${isActive}">${escapeHtml(categoryName(cat.id))} <span>${count}</span></button>`);
+//   }
+//   host.innerHTML = buttons.join("");
+//   host.querySelectorAll("[data-cat]").forEach((btn) => {
+//     btn.addEventListener("click", () => {
+//       state.activeCategory = btn.dataset.cat;
+//       renderCategories();
+//       if (APP_MODE === "admin") renderAdminCatalogTable();
+//       else renderProducts();
+//     });
+//   });
+// }
+
 function renderCategories() {
   const host = document.getElementById("categoryPills");
   if (!host) return;
   const counts = new Map();
   state.products.forEach((p) => counts.set(p.category_id, (counts.get(p.category_id) || 0) + 1));
   const buttons = [`<button class="category-pill ${state.activeCategory === "all" ? "active" : ""}" data-cat="all" aria-pressed="${state.activeCategory === "all"}">Все <span>${state.products.length}</span></button>`];
-  for (const cat of visibleCategories()) {
+  
+  // Сортируем категории: "Готовые проекты" поднимаем наверх
+  const sortedCategories = visibleCategories().sort((a, b) => {
+    const nameA = categoryName(a.id);
+    const nameB = categoryName(b.id);
+    if (nameA === "Готовые проекты") return -1;
+    if (nameB === "Готовые проекты") return 1;
+    return 0;
+  });
+
+  for (const cat of sortedCategories) {
     const count = counts.get(cat.id) || 0;
     if (!count) continue;
+    
+    const cName = categoryName(cat.id);
     const isActive = state.activeCategory === String(cat.id);
-    buttons.push(`<button class="category-pill ${isActive ? "active" : ""}" data-cat="${cat.id}" aria-pressed="${isActive}">${escapeHtml(categoryName(cat.id))} <span>${count}</span></button>`);
+    
+    // Проверяем, является ли категория "Готовыми проектами", чтобы дать ей особый класс
+    const isSpecial = cName === "Готовые проекты" ? "category-yellow" : "";
+    
+    buttons.push(`<button class="category-pill ${isSpecial} ${isActive ? "active" : ""}" data-cat="${cat.id}" aria-pressed="${isActive}">${escapeHtml(cName)} <span>${count}</span></button>`);
   }
   host.innerHTML = buttons.join("");
   host.querySelectorAll("[data-cat]").forEach((btn) => {
@@ -803,6 +843,8 @@ function renderCategories() {
     });
   });
 }
+
+
 
 function filteredProducts() {
   const q = normalizeSearch(state.search);
@@ -1383,12 +1425,22 @@ async function savePlannerProject() {
   const bom = buildBomFromObjects();
   const cost = estimateProjectCost(bom);
   const tiers = estimateTierPrices(cost);
-  const projectName = document.getElementById("projectName")?.value?.trim() || `Проект ${customerName()}`;
+  
+  // Получаем данные из новых полей
+  const customerName = document.getElementById("customerName")?.value?.trim() || "Клиент";
+  const customerPhone = document.getElementById("customerPhone")?.value?.trim() || "";
+  const customerEmail = document.getElementById("customerEmail")?.value?.trim() || "";
   const projectLocation = document.getElementById("projectLocation")?.value?.trim() || "Онлайн";
+  
+  // Формируем название проекта из имени клиента
+  const projectName = `Проект ${customerName}`;
+  
   const payload = {
     name: projectName,
     location: projectLocation,
-    user_id: customerName(),
+    user_id: customerName,
+    customer_phone: customerPhone,
+    customer_email: customerEmail,
     room_width: state.roomConfig.width,
     room_length: state.roomConfig.length,
     room_height: state.roomConfig.height,
@@ -1398,6 +1450,7 @@ async function savePlannerProject() {
     bom_json: JSON.stringify(bom),
     selected_tier: state.selectedTier || "standard",
   };
+  
   if (state.projectId) {
     return api("PATCH", `/planner/projects/${state.projectId}`, payload, true);
   }
@@ -1425,7 +1478,7 @@ async function syncPlannerObjectsToBackend() {
 function createDemoObjects() {
   state.objects3d = [
     { id: makeId(), type: "wardrobe", texture: "wood_dark_oak", name: "Шкаф Verona", width: 1400, depth: 600, height: 2200, x: 5000, z: 900, rotationY: 0 },
-    { id: makeId(), type: "sofa", texture: "fabric_gray", name: "Диван Soft Cloud", width: 2200, depth: 1000, height: 900, x: 1500, z: 3500, rotationY: 90 },
+    { id: makeId(), type: "sofa", texture: "fabric_gray", name: "Диван Soft Cloud", width: 2200, depth: 1000, height: 900, x: 1500, z: 3500, rotationY: -90 },
     { id: makeId(), type: "cabinet", texture: "board_black", name: "Остров Chef", width: 1800, depth: 800, height: 900, x: 3000, z: 2200, rotationY: 0 },
   ];
   state.selected3dObjectId = state.objects3d[0]?.id || null;
@@ -1881,7 +1934,7 @@ function init3DPointerControls(canvas) {
     state.cameraDrag.startY = event.clientY;
     const sens = event.pointerType === "touch" ? 0.006 : 0.01;
     state.cameraDrag.pendingTheta -= dx * sens;
-    state.cameraDrag.pendingPhi += dy * sens;
+    state.cameraDrag.pendingPhi -= dy * sens;
     if (!state.cameraDrag.raf) {
       state.cameraDrag.raf = requestAnimationFrame(() => {
         if (!state.three) return;
@@ -2118,7 +2171,7 @@ function renderRoom3D() {
       objectGroups.set(item.id, group);
     }
     group.position.set(roomUnitToWorldX(item.x), Number(item.y) || 0, roomUnitToWorldZ(item.z));
-    group.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
+    group.rotation.y = -((Number(item.rotationY) || 0) * Math.PI) / 180;
     if (item.id === state.selected3dObjectId) selectedGroup = group;
   });
   // Shadow-map rendering repeats every mesh. Keep detailed shadows for normal scenes and
@@ -2138,7 +2191,7 @@ function updateFurnitureTransform(item) {
   const group = state.three.furnitureGroup.children.find((child) => child.userData.objectId === item.id);
   if (!group) return;
   group.position.set(roomUnitToWorldX(item.x), Number(item.y) || 0, roomUnitToWorldZ(item.z));
-  group.rotation.y = ((Number(item.rotationY) || 0) * Math.PI) / 180;
+  group.rotation.y = -((Number(item.rotationY) || 0) * Math.PI) / 180;
   group.updateMatrixWorld(true);
   requestRoom3DRender();
 }
@@ -2614,15 +2667,24 @@ function renderCostEstimate(bom = null) {
   const tiers = estimateTierPrices(cost);
   if (APP_MODE !== "admin") {
     const selectedTotal = tiers[state.selectedTier] || tiers.standard;
+    // host.innerHTML = `
+    //   <div class="estimate-card">
+    //     <div class="estimate-kicker">Ориентировочная стоимость</div>
+    //     <div class="estimate-total">от ${money(selectedTotal)}</div>
+    //     <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
+    //   </div>
+    //   <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
+    //   ${renderTierCards(tiers)}`;
     host.innerHTML = `
       <div class="estimate-card">
         <div class="estimate-kicker">Ориентировочная стоимость</div>
         <div class="estimate-total">от ${money(selectedTotal)}</div>
+        <div class="small text-muted mt-1 mb-2">Цена действительна 5 дней</div>
         <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
       </div>
       <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
-      ${renderTierCards(tiers)}
-      <div class="small text-muted mt-3">Закупочная сумма: <strong>${money(cost.procurementCost)}</strong>. Итог: <strong>${money(selectedTotal)}</strong>.</div>`;
+      ${renderTierCards(tiers)}`;
+
     bindTierCardSelection(host);
     host.querySelector("[data-exact-quote]")?.addEventListener("click", () => {
       if (!isAuthenticated()) bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
@@ -3363,7 +3425,6 @@ function renderCrmPanel() {
           <button type="button" class="nav-link ${state.crm.tab === "archive" ? "active" : ""}" data-crm-tab="archive">Архив (${archiveCount})</button>
         </li>
       </ul>
-      ${activeCount + archiveCount > 0 ? `<button type="button" class="btn btn-sm btn-outline-danger" id="btnClearCrmOrdersInline">Очистить историю</button>` : ""}
     </div>`;
   if (!orders.length) {
     host.innerHTML = `${tabs}<div class="text-muted">${state.crm.tab === "archive" ? "В архиве пока нет завершённых проектов." : "Нет активных заказов. Нажмите «Загрузить демо CRM» или дождитесь отправки проекта клиентом."}</div>`;
@@ -3635,25 +3696,52 @@ function buildTierSubmissionNotes(tier, bom, tiers) {
   const specs = profile.specs.join("; ");
   const price = tiers?.[tier];
   const priceText = price ? money(price) : "—";
-  return `Комплектация: ${tierTitle(tier)} (${priceText}). Материалы: ${specs}. Комната ${state.roomConfig.width}×${state.roomConfig.length}×${state.roomConfig.height} мм, объектов: ${state.objects3d.length}, деталей: ${bom.parts.length}`;
+  const customerName = document.getElementById("customerName")?.value?.trim() || "Клиент";
+  const customerPhone = document.getElementById("customerPhone")?.value?.trim() || "";
+  const customerEmail = document.getElementById("customerEmail")?.value?.trim() || "";
+  const contacts = [];
+  if (customerPhone) contacts.push(`тел: ${customerPhone}`);
+  if (customerEmail) contacts.push(`email: ${customerEmail}`);
+  const contactsText = contacts.length ? `, контакты: ${contacts.join(", ")}` : "";
+  return `Комплектация: ${tierTitle(tier)} (${priceText}). Материалы: ${specs}. Комната ${state.roomConfig.width}×${state.roomConfig.length}×${state.roomConfig.height} мм, объектов: ${state.objects3d.length}, деталей: ${bom.parts.length}${contactsText}`;
 }
 
+// function buildTierSubmissionNotes(tier, bom, tiers) {
+//   const profile = TIER_MATERIAL_PROFILES[tier] || TIER_MATERIAL_PROFILES.standard;
+//   const specs = profile.specs.join("; ");
+//   const price = tiers?.[tier];
+//   const priceText = price ? money(price) : "—";
+//   return `Комплектация: ${tierTitle(tier)} (${priceText}). Материалы: ${specs}. Комната ${state.roomConfig.width}×${state.roomConfig.length}×${state.roomConfig.height} мм, объектов: ${state.objects3d.length}, деталей: ${bom.parts.length}`;
+// }
+
 async function submitProjectToWork() {
-  if (!customerName()) {
-    toast("Войдите, чтобы отправить проект в работу", false);
-    bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
+  const customerName = document.getElementById("customerName")?.value?.trim();
+  const customerPhone = document.getElementById("customerPhone")?.value?.trim();
+  const customerEmail = document.getElementById("customerEmail")?.value?.trim();
+  
+  if (!customerName) {
+    toast("Укажите ваше имя перед отправкой", false);
+    document.getElementById("customerName")?.focus();
     return;
   }
+  
+  if (!customerPhone && !customerEmail) {
+    toast("Укажите телефон или email для связи", false);
+    return;
+  }
+  
   if (!state.objects3d.length) {
     toast("Добавьте мебель в комнату", false);
     return;
   }
+  
   const selectedTier = state.selectedTier || "standard";
   if (!PRICING_TIERS.some((tier) => tier.key === selectedTier)) {
     toast("Выберите комплектацию на вкладке «Стоимость»", false);
     document.querySelector('[data-bs-target="#costPane"]')?.click();
     return;
   }
+  
   try {
     const bom = buildBomFromObjects();
     const cost = estimateProjectCost(bom);
@@ -3663,17 +3751,27 @@ async function submitProjectToWork() {
     state.plannerStep = 4;
     updatePlannerProgress();
     await syncPlannerObjectsToBackend();
-    await api("POST", `/planner/projects/${state.projectId}/submit`, { selected_tier: selectedTier }, true);
+    
+    await api("POST", `/planner/projects/${state.projectId}/submit`, { 
+      selected_tier: selectedTier,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      customer_email: customerEmail,
+    }, true);
+    
     const materials = await buildCrmMaterialsFromBom(bom, selectedTier);
-    const projectName = document.getElementById("projectName")?.value?.trim() || `Кухня ${customerName()}`;
+    const projectName = `Проект ${customerName}`;
+    
     await api(
       "POST",
       "/catalog/crm/orders/submit-project",
       {
         planner_project_id: state.projectId,
         title: projectName,
-        customer: customerName(),
-        user_id: customerName(),
+        customer: customerName,
+        customer_phone: customerPhone,
+        customer_email: customerEmail,
+        user_id: customerName,
         pricing: tiers,
         selected_tier: selectedTier,
         materials,
@@ -3681,6 +3779,7 @@ async function submitProjectToWork() {
       },
       true
     );
+    
     document.getElementById("plannerHint").textContent = `Проект №${state.projectId} отправлен в производство (${tierTitle(selectedTier)}, ${money(tiers[selectedTier])})`;
     await loadUserOrders();
     toast("Проект отправлен в работу — админ увидит расчёты");
@@ -3862,6 +3961,26 @@ async function loadPlannerProject(projectId) {
     length: Number(project.room_length) || 5000,
     height: Number(project.room_height) || 2800,
   };
+
+  // 🔧 ЗАГРУЖАЕМ ДАННЫЕ В ПОЛЯ
+  const customerNameField = document.getElementById("customerName");
+  const customerPhoneField = document.getElementById("customerPhone");
+  const customerEmailField = document.getElementById("customerEmail");
+  const projectLocationField = document.getElementById("projectLocation");
+  
+  // Используем user_id как имя, если нет отдельных полей
+  if (customerNameField && project.user_id) {
+    customerNameField.value = project.user_id;
+  }
+  if (customerPhoneField && project.customer_phone) {
+    customerPhoneField.value = project.customer_phone;
+  }
+  if (customerEmailField && project.customer_email) {
+    customerEmailField.value = project.customer_email;
+  }
+  if (projectLocationField && project.location) {
+    projectLocationField.value = project.location;
+  }
 
   let scene;
   try {
@@ -4826,6 +4945,26 @@ async function boot() {
       grid.innerHTML = `<div class="col-12"><div class="alert alert-warning">Не удалось подключиться к backend (${escapeHtml(apiBase())}): ${escapeHtml(hint)}</div></div>`;
     }
   }
+
+  // Загрузка сохраненных данных пользователя (если есть)
+const savedName = localStorage.getItem("woodcraft_customer_name");
+const savedPhone = localStorage.getItem("woodcraft_customer_phone");
+const savedEmail = localStorage.getItem("woodcraft_customer_email");
+
+if (savedName) document.getElementById("customerName").value = savedName;
+if (savedPhone) document.getElementById("customerPhone").value = savedPhone;
+if (savedEmail) document.getElementById("customerEmail").value = savedEmail;
+
+// Сохранение данных при вводе (автозаполнение)
+document.getElementById("customerName")?.addEventListener("change", (e) => {
+  localStorage.setItem("woodcraft_customer_name", e.target.value);
+});
+document.getElementById("customerPhone")?.addEventListener("change", (e) => {
+  localStorage.setItem("woodcraft_customer_phone", e.target.value);
+});
+document.getElementById("customerEmail")?.addEventListener("change", (e) => {
+  localStorage.setItem("woodcraft_customer_email", e.target.value);
+});
 }
 
 document.addEventListener("DOMContentLoaded", boot);

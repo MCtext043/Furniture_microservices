@@ -96,7 +96,7 @@
       </div>
     </section>
 
-    <section class="section how-section" id="howItWorks">
+    <!-- <section class="section how-section" id="howItWorks">
       <div class="container">
         <div class="section-heading section-heading-split">
           <div>
@@ -104,6 +104,30 @@
             <h2>От пустой комнаты<br />до готового решения</h2>
           </div>
           <p>Планировщик ведёт по шагам и не требует опыта в профессиональных программах.</p>
+        </div>
+        <ol class="process-grid">
+          <li class="process-step"><span>01</span><strong>Укажите размеры</strong><p>Введите ширину, длину и высоту комнаты.</p></li>
+          <li class="process-step"><span>02</span><strong>Добавьте мебель</strong><p>Выберите тип, габариты и подходящий материал.</p></li>
+          <li class="process-step"><span>03</span><strong>Оцените результат</strong><p>Проверьте расстановку в 3D и на плане сверху.</p></li>
+          <li class="process-step"><span>04</span><strong>Сохраните проект</strong><p>Получите расчёт и отправьте решение в работу.</p></li>
+        </ol>
+      </div>
+    </section> -->
+
+    <section class="section how-section" id="howItWorks">
+      <div class="container">
+        <div class="section-heading section-heading-split">
+          <div>
+            <div class="eyebrow">Простой путь к проекту</div>
+            <h2>От пустой комнаты<br />до готового решения</h2>
+          </div>
+          <div class="heading-right">
+            <p>Планировщик ведёт по шагам и не требует опыта в профессиональных программах.</p>
+            <div class="accuracy-badge">
+              <span class="accuracy-icon">📐</span>
+              <span class="accuracy-text">Соберите комнату под себя <span class="accuracy-highlight">(с погрешностью 5% к стоимости)</span></span>
+            </div>
+          </div>
         </div>
         <ol class="process-grid">
           <li class="process-step"><span>01</span><strong>Укажите размеры</strong><p>Введите ширину, длину и высоту комнаты.</p></li>
@@ -233,10 +257,25 @@
               <div id="objects3dList" class="object-list" aria-live="polite">Объектов в комнате пока нет.</div>
             </div>
 
-            <div class="control-section save-section">
+            <!-- <div class="control-section save-section">
               <div class="control-heading"><span>03</span><div><h3>Сохранение</h3><p>Назовите проект, чтобы вернуться к нему позже.</p></div></div>
               <div class="field-grid field-grid-2">
                 <div class="form-field"><label for="projectName">Название проекта</label><input class="form-control" id="projectName" placeholder="Например, кухня дома" /></div>
+                <div class="form-field"><label for="projectLocation">Город или адрес</label><input class="form-control" id="projectLocation" placeholder="Самара" /></div>
+              </div>
+              <div class="control-actions save-actions">
+                <button class="btn btn-secondary" id="btnCreateRoom">Сохранить проект</button>
+                <button class="btn btn-quiet d-none" id="btnGenerateBom">Обновить детали</button>
+                <button class="btn btn-primary" id="btnSubmitToWork">Отправить в работу</button>
+              </div>
+              <div class="planner-hint" id="plannerHint" role="status">Войдите, чтобы сохранить проект на сервере.</div>
+            </div> -->
+            <div class="control-section save-section">
+              <div class="control-heading"><span>03</span><div><h3>Сохранение</h3><p>Заполните контактные данные, чтобы мы могли связаться с вами.</p></div></div>
+              <div class="field-grid field-grid-2">
+                <div class="form-field"><label for="customerName">Ваше имя</label><input class="form-control" id="customerName" placeholder="Иван Иванов" /></div>
+                <div class="form-field"><label for="customerPhone">Номер телефона</label><input class="form-control" id="customerPhone" placeholder="+7 (900) 123-45-67" type="tel" /></div>
+                <div class="form-field"><label for="customerEmail">Email</label><input class="form-control" id="customerEmail" placeholder="ivan@example.com" type="email" /></div>
                 <div class="form-field"><label for="projectLocation">Город или адрес</label><input class="form-control" id="projectLocation" placeholder="Самара" /></div>
               </div>
               <div class="control-actions save-actions">

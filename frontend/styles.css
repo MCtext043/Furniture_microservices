@@ -699,3 +699,229 @@ button, input, select, textarea { font: inherit; }
 .legal-content dt:first-child { margin-top:0; }
 .legal-content dd { margin:.3rem 0 0; }
 .legal-content a { color:var(--color-primary-hover); font-weight:700; }
+
+/* Обычное состояние желтой кнопки */
+.category-pill.category-yellow {
+  background-color: #ffca28 !important;
+  color: #212529 !important;
+  border-color: #f5b041 !important;
+}
+
+/* Состояние при наведении курсора (слегка темнеет) */
+.category-pill.category-yellow:hover {
+  background-color: #fbc02d !important;
+  color: #212529 !important;
+}
+
+/* Нажатое (активное) состояние кнопки "Готовые проекты" */
+.category-pill.category-yellow.active {
+  background-color: #f59e0b !important;
+  color: #ffffff !important;
+  border-color: #d97706 !important;
+  box-shadow: 0 0 0 0.25rem rgba(245, 158, 11, 0.4) !important;
+}
+
+/* ============================================================
+   ТЕМНАЯ ТЕМА ДЛЯ МОДАЛЬНЫХ ОКОН
+   ============================================================ */
+
+[data-theme="dark"] .modal-body {
+  color: var(--color-text) !important;
+  background-color: var(--color-surface) !important;
+}
+
+[data-theme="dark"] .modal-body .form-control,
+[data-theme="dark"] .modal-body .form-select,
+[data-theme="dark"] .modal-body input,
+[data-theme="dark"] .modal-body textarea,
+[data-theme="dark"] .modal-body select {
+  background-color: var(--color-surface-soft) !important;
+  color: var(--color-text) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .modal-body .form-control::placeholder {
+  color: var(--color-muted) !important;
+}
+
+[data-theme="dark"] .modal-body label,
+[data-theme="dark"] .modal-body .form-label,
+[data-theme="dark"] .modal-body .form-check-label {
+  color: var(--color-text) !important;
+}
+
+[data-theme="dark"] .modal-body .text-muted,
+[data-theme="dark"] .modal-body .small,
+[data-theme="dark"] .modal-body .helper-text,
+[data-theme="dark"] .modal-body .empty-copy {
+  color: var(--color-muted) !important;
+}
+
+[data-theme="dark"] .modal-body .btn-close {
+  filter: invert(1) brightness(2);
+}
+
+[data-theme="dark"] .modal-body .object-picker-item strong {
+  color: var(--color-text) !important;
+}
+
+[data-theme="dark"] .modal-body .object-picker-item small {
+  color: var(--color-muted) !important;
+}
+
+[data-theme="dark"] .modal-body .object-picker-icon-wrap {
+  background: var(--color-surface-soft) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .modal-body .object-picker-icon {
+  color: var(--color-text) !important;
+}
+
+[data-theme="dark"] .modal-body input[type="color"] {
+  background-color: var(--color-surface-soft) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .modal-body .list-group-item {
+  background-color: var(--color-surface) !important;
+  color: var(--color-text) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .modal-body .list-group-item .text-muted {
+  color: var(--color-muted) !important;
+}
+
+[data-theme="dark"] .modal-body .border {
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .modal-body .bg-light {
+  background-color: var(--color-surface-soft) !important;
+  color: var(--color-text) !important;
+}
+
+[data-theme="dark"] .modal-body .alert {
+  background-color: var(--color-surface-soft) !important;
+  color: var(--color-text) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .modal-body .alert-info {
+  background-color: rgba(13, 202, 240, 0.15) !important;
+  color: #8dd8f0 !important;
+  border-color: rgba(13, 202, 240, 0.2) !important;
+}
+
+[data-theme="dark"] .modal-body .alert-warning {
+  background-color: rgba(255, 193, 7, 0.15) !important;
+  color: #f0d88d !important;
+  border-color: rgba(255, 193, 7, 0.2) !important;
+}
+
+[data-theme="dark"] .modal-body .alert-danger {
+  background-color: rgba(220, 53, 69, 0.15) !important;
+  color: #f08d8d !important;
+  border-color: rgba(220, 53, 69, 0.2) !important;
+}
+
+[data-theme="dark"] .modal-body .alert-success {
+  background-color: rgba(25, 135, 84, 0.15) !important;
+  color: #8df0b8 !important;
+  border-color: rgba(25, 135, 84, 0.2) !important;
+}
+
+[data-theme="dark"] .modal-footer {
+  border-top-color: var(--color-border) !important;
+  background-color: var(--color-surface) !important;
+}
+
+[data-theme="dark"] .modal-footer .btn-secondary {
+  background-color: var(--color-surface-soft) !important;
+  color: var(--color-text) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .modal-footer .btn-secondary:hover {
+  background-color: #4a443e !important;
+}
+
+[data-theme="dark"] .modal-body .nav-tabs .nav-link {
+  color: var(--color-muted) !important;
+  border-color: transparent !important;
+}
+
+[data-theme="dark"] .modal-body .nav-tabs .nav-link.active {
+  color: var(--color-text) !important;
+  background-color: var(--color-surface) !important;
+  border-color: var(--color-border) !important;
+  border-bottom-color: var(--color-surface) !important;
+}
+
+[data-theme="dark"] .modal-body .nav-tabs .nav-link:hover {
+  color: var(--color-text) !important;
+  border-color: var(--color-border) !important;
+}
+
+[data-theme="dark"] .modal-body .tab-content {
+  color: var(--color-text) !important;
+}
+
+
+.section-heading.text-center {
+  text-align: center;
+}
+
+.section-heading.text-center h2 {
+  max-width: 100%;
+}
+
+.accuracy-badge-center {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.75rem auto 1.25rem;
+  padding: 0.6rem 1.8rem;
+  border: 2px solid var(--color-primary);
+  border-radius: 999px;
+  background: rgba(230, 186, 87, 0.08);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.accuracy-badge-center .accuracy-highlight {
+  color: var(--color-primary-hover);
+  font-weight: 700;
+}
+
+.heading-sub {
+  max-width: 640px;
+  margin: 0 auto;
+  color: var(--color-muted);
+  font-size: 1.05rem;
+}
+
+[data-theme="dark"] .accuracy-badge-center {
+  background: rgba(230, 186, 87, 0.12);
+  border-color: var(--color-primary);
+}
+
+/* Стили для полей контактов в блоке сохранения */
+.save-section .form-field input[type="tel"],
+.save-section .form-field input[type="email"] {
+  /* Наследуют стили от .form-control */
+}
+
+/* Дополнительный отступ между полями */
+.save-section .field-grid + .form-field {
+  margin-top: 0.5rem;
+}
+
+/* Адаптив для мобильных */
+@media (max-width: 575.98px) {
+  .save-section .field-grid.field-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
