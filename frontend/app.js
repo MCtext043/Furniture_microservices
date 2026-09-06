@@ -4903,6 +4903,10 @@ async function boot() {
   applyTheme(document.documentElement.dataset.theme || "light");
   bindClick("themeToggle", toggleTheme);
   bindClick("btnLogout", logoutCustomer);
+  document.querySelector("[data-open-plan]")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    document.querySelector('[data-bs-target="#room2dPane"]')?.click();
+  });
   const apiBaseInput = document.getElementById("apiBase");
   if (apiBaseInput) apiBaseInput.value = localStorage.getItem(LS_API) || defaultApiBase();
   bindClick("saveApiBase", () => {

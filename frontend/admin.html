@@ -7,15 +7,18 @@
   <title>Петров Admin — производство</title>
   <script>document.documentElement.dataset.theme=localStorage.getItem("woodcraft_theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
-  <link href="styles.css?v=20260721-planner-ui-v1" rel="stylesheet" />
+  <link href="styles.css?v=20260906-mobile-theme-v1" rel="stylesheet" />
 </head>
 <body>
   <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
     <div class="container">
       <a class="navbar-brand" href="#top">Петров Admin</a>
-      <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
-        <span class="navbar-toggler-icon"></span>
-      </button>
+      <div class="navbar-tools">
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="Включить тёмную тему"><span aria-hidden="true">☾</span></button>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+      </div>
       <div class="collapse navbar-collapse" id="nav">
         <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
           <li class="nav-item"><a class="nav-link" href="#catalog-admin">Каталог</a></li>
@@ -23,7 +26,6 @@
           <li class="nav-item"><a class="nav-link" href="#cutting">Раскрой</a></li>
           <li class="nav-item"><a class="nav-link" href="#planner">Проекты</a></li>
           <li class="nav-item"><a class="nav-link" href="index.html">Витрина</a></li>
-          <li class="nav-item"><button class="theme-toggle" id="themeToggle" type="button" aria-label="Включить тёмную тему"><span aria-hidden="true">☾</span></button></li>
           <li class="nav-item">
             <button class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#accountModal" id="accountBtn">Войти</button>
           </li>
@@ -317,7 +319,6 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="dimensions3d.js?v=20260721-cad-dimensions-v2"></script>
   <script src="textures3d.js?v=20260721-cad-dimensions-v1"></script>
-  
   <!-- Обработчик для кнопки подтверждения удаления -->
   <script>
     document.addEventListener('DOMContentLoaded', function() {
@@ -370,6 +371,6 @@
     });
   </script>
   
-  <script type="module" src="app.js?v=20260815-planner-core-v1"></script>
+  <script type="module" src="app.js?v=20260906-small-updates-v2"></script>
 </body>
 </html>

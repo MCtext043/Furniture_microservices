@@ -105,13 +105,19 @@ def main() -> int:
 
         remote_sh = (ROOT / "deploy" / "remote-deploy.sh").read_text(encoding="utf-8")
         remote_sh = remote_sh.replace("__REMOTE_DIR__", REMOTE_DIR)
+        if os.environ.get("FAST_DEPLOY") == "1":
+            remote_sh = "export FAST_DEPLOY=1\n" + remote_sh
+            log("    FAST_DEPLOY=1 (gateway/frontend only)")
         with sftp.open("/tmp/furniture-deploy-remote.sh", "w") as f:
             f.write(remote_sh.replace("\r\n", "\n"))
 
         local_env = ROOT / "deploy" / "local.env"
-        if local_env.is_file():
+        keep_remote_env = os.environ.get("KEEP_REMOTE_ENV", "1") == "1"
+        if local_env.is_file() and not keep_remote_env:
             sftp.put(str(local_env), "/tmp/furniture-secrets.env")
             log("    uploaded deploy/local.env")
+        elif keep_remote_env:
+            log("    KEEP_REMOTE_ENV=1 (server .env will not be overwritten)")
         sftp.close()
 
         log("[3] remote deploy (install-server.sh)")
@@ -121,6 +127,16 @@ def main() -> int:
             _, out, _ = run(ssh, f"cd {REMOTE_DIR} && docker compose --env-file .env -f docker-compose.server.yml ps -a 2>&1; docker compose --env-file .env -f docker-compose.server.yml logs --tail=30 caddy gateway-service 2>&1")
             log(out)
             return code
+
+        extra = os.environ.get("REBUILD_SERVICES", "").strip()
+        if extra:
+            services = " ".join(extra.split())
+            compose = f"cd {REMOTE_DIR} && docker compose --env-file .env -f docker-compose.server.yml"
+            log(f"[3b] rebuild extra services: {services}")
+            code = run_stream(ssh, f"{compose} build {services} && {compose} up -d --no-deps --force-recreate {services}")
+            if code != 0:
+                log("Extra service rebuild failed.")
+                return code
 
         log("[4] health checks")
         for url in (
