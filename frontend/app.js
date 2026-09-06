@@ -51,6 +51,7 @@ const state = {
   selectedTier: "standard",
   selected3dObjectId: null,
   productPhotoUrls: {},
+  productPhotoGalleries: {},
   wishlistIds: new Set(),
   commercePending: new Set(),
   plannerStep: 1,
@@ -903,7 +904,7 @@ function renderProducts() {
           </div>`;
       return `
         <div class="col-md-6 col-xl-4">
-          <article class="card product-card h-100">
+          <article class="card product-card h-100" data-open-product="${p.id}" role="button" tabindex="0">
             ${art}
             <div class="card-body d-flex flex-column">
               <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
@@ -923,12 +924,37 @@ function renderProducts() {
     })
     .join("");
 
+  host.querySelectorAll("[data-open-product]").forEach((card) => {
+    const open = () => openProductCard(Number(card.dataset.openProduct));
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("button")) return;
+      open();
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
+    });
+  });
   if (adminActions) {
-    host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openProductEditor(Number(btn.dataset.edit))));
-    host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", () => deactivateProduct(Number(btn.dataset.del))));
+    host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openProductEditor(Number(btn.dataset.edit));
+    }));
+    host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deactivateProduct(Number(btn.dataset.del));
+    }));
   } else {
-    host.querySelectorAll("[data-cart]").forEach((btn) => btn.addEventListener("click", () => addToCart(Number(btn.dataset.cart), btn)));
-    host.querySelectorAll("[data-wish]").forEach((btn) => btn.addEventListener("click", () => toggleWishlist(Number(btn.dataset.wish), btn)));
+    host.querySelectorAll("[data-cart]").forEach((btn) => btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      addToCart(Number(btn.dataset.cart), btn);
+    }));
+    host.querySelectorAll("[data-wish]").forEach((btn) => btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleWishlist(Number(btn.dataset.wish), btn);
+    }));
   }
 }
 
@@ -1416,6 +1442,8 @@ async function createRoom() {
     await syncPlannerObjectsToBackend();
     await loadUserProjects();
     toast("Проект комнаты сохранён");
+    const savedModal = document.getElementById("projectSavedModal");
+    if (savedModal) bootstrap.Modal.getOrCreateInstance(savedModal).show();
   } catch (error) {
     toast(`Планировщик недоступен: ${error.message}`, false);
   }
@@ -2874,6 +2902,7 @@ function handleProductPhotosSelected(event) {
     });
   }
   renderProductEditorPhotosPreview();
+  event.target.value = "";
 }
 
 async function uploadAssetFile(file, objectKey) {
@@ -2923,10 +2952,85 @@ async function syncProductEditorPhotos(productId) {
 
 async function hydrateProductPhotoUrls(products) {
   state.productPhotoUrls = {};
+  state.productPhotoGalleries = {};
   for (const product of products) {
-    const key = product.photos?.[0]?.object_key;
-    if (key) state.productPhotoUrls[product.id] = assetObjectUrl(key);
+    const urls = (product.photos || [])
+      .map((photo) => photo?.object_key)
+      .filter(Boolean)
+      .map((key) => assetObjectUrl(key));
+    if (urls.length) {
+      state.productPhotoGalleries[product.id] = urls;
+      state.productPhotoUrls[product.id] = urls[0];
+    }
   }
+}
+
+function productGalleryUrls(product) {
+  if (!product) return [];
+  if (state.productPhotoGalleries[product.id]?.length) return state.productPhotoGalleries[product.id];
+  return (product.photos || [])
+    .map((photo) => photo?.object_key)
+    .filter(Boolean)
+    .map((key) => assetObjectUrl(key));
+}
+
+function openProductCard(productId) {
+  const product = state.products.find((p) => p.id === productId);
+  const modal = document.getElementById("productCardModal");
+  if (!product || !modal) return;
+  const title = displayProductTitle(product);
+  const urls = productGalleryUrls(product);
+  const meta = demoMeta(product);
+  document.getElementById("productCardTitle").textContent = title;
+  document.getElementById("productCardCategory").textContent = categoryName(product.category_id);
+  document.getElementById("productCardBrand").textContent = displayProductBrand(product);
+  document.getElementById("productCardDesc").textContent = displayProductDescription(product) || "Практичное мебельное решение для дома.";
+  document.getElementById("productCardPrice").textContent = money(Number(product.price));
+  const stockEl = document.getElementById("productCardStock");
+  const outOfStock = Number(product.stock) <= 0;
+  stockEl.textContent = outOfStock ? "Нет в наличии" : `В наличии: ${product.stock}`;
+  stockEl.classList.toggle("is-empty", outOfStock);
+  const gallery = document.getElementById("productCardGallery");
+  if (urls.length) {
+    gallery.innerHTML = `
+      <div class="product-card-hero">
+        <img id="productCardHero" src="${urls[0]}" alt="${escapeHtml(title)}" />
+      </div>
+      ${urls.length > 1 ? `<div class="product-card-thumbs">${urls.map((url, index) => `
+        <button type="button" class="product-card-thumb ${index === 0 ? "is-active" : ""}" data-product-photo="${index}">
+          <img src="${url}" alt="">
+        </button>`).join("")}</div>` : ""}`;
+    gallery.querySelectorAll("[data-product-photo]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const index = Number(btn.dataset.productPhoto);
+        const hero = document.getElementById("productCardHero");
+        if (hero) hero.src = urls[index];
+        gallery.querySelectorAll(".product-card-thumb").forEach((thumb) => thumb.classList.toggle("is-active", thumb === btn));
+      });
+    });
+  } else {
+    gallery.innerHTML = `<div class="product-art product-card-placeholder" style="background:${meta.gradient}" role="img" aria-label="${escapeHtml(title)}">${meta.icon}</div>`;
+  }
+  const actions = document.getElementById("productCardActions");
+  if (APP_MODE === "admin") {
+    actions.innerHTML = `
+      <button type="button" class="btn btn-quiet" data-bs-dismiss="modal">Закрыть</button>
+      <button type="button" class="btn btn-primary" id="productCardEdit">Изменить</button>`;
+    document.getElementById("productCardEdit")?.addEventListener("click", () => {
+      bootstrap.Modal.getInstance(modal)?.hide();
+      openProductEditor(product.id);
+    });
+  } else {
+    const inCart = state.cart.some((item) => item.id === product.id);
+    const wished = state.wishlistIds.has(product.id);
+    actions.innerHTML = `
+      <button type="button" class="btn btn-quiet" data-bs-dismiss="modal">Закрыть</button>
+      <button type="button" class="btn btn-quiet wishlist-button ${wished ? "is-active" : ""}" id="productCardWish">${wished ? "♥ В избранном" : "♡ В избранное"}</button>
+      <button type="button" class="btn btn-primary" id="productCardCart" ${outOfStock ? "disabled" : ""}>${inCart ? "✓ В корзине" : outOfStock ? "Нет в наличии" : "В корзину"}</button>`;
+    document.getElementById("productCardWish")?.addEventListener("click", (event) => toggleWishlist(product.id, event.currentTarget));
+    document.getElementById("productCardCart")?.addEventListener("click", (event) => addToCart(product.id, event.currentTarget));
+  }
+  bootstrap.Modal.getOrCreateInstance(modal).show();
 }
 
 async function openProductEditor(productId) {
@@ -3028,6 +3132,7 @@ function renderAdminCatalogTable() {
               <td>${money(Number(p.price))}</td>
               <td>${p.stock}</td>
               <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary" data-open-product="${p.id}">Карточка</button>
                 <button class="btn btn-sm btn-outline-primary" data-edit="${p.id}">Изменить</button>
                 <button class="btn btn-sm btn-outline-danger" data-del="${p.id}">Скрыть</button>
               </td>
@@ -3035,6 +3140,7 @@ function renderAdminCatalogTable() {
         </tbody>
       </table>
     </div>`;
+  host.querySelectorAll("[data-open-product]").forEach((btn) => btn.addEventListener("click", () => openProductCard(Number(btn.dataset.openProduct))));
   host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openProductEditor(Number(btn.dataset.edit))));
   host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", () => deactivateProduct(Number(btn.dataset.del))));
 }
