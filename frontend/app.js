@@ -834,6 +834,13 @@ function renderCategories() {
     
     buttons.push(`<button class="category-pill ${isSpecial} ${isActive ? "active" : ""}" data-cat="${cat.id}" aria-pressed="${isActive}">${escapeHtml(cName)} <span>${count}</span></button>`);
   }
+  if (APP_MODE !== "admin") {
+    const wishCount = state.wishlistIds.size;
+    const wishActive = state.activeCategory === "wishlist";
+    const wishButton = `<button class="category-pill category-wishlist ${wishActive ? "active" : ""}" data-cat="wishlist" aria-pressed="${wishActive}">Избранное <span>${wishCount}</span></button>`;
+    const readyIndex = buttons.findIndex((html) => html.includes("category-yellow"));
+    buttons.splice(readyIndex >= 0 ? readyIndex + 1 : 1, 0, wishButton);
+  }
   host.innerHTML = buttons.join("");
   host.querySelectorAll("[data-cat]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -850,7 +857,9 @@ function renderCategories() {
 function filteredProducts() {
   const q = normalizeSearch(state.search);
   return state.products.map((p, index) => {
-    const catOk = state.activeCategory === "all" || String(p.category_id) === state.activeCategory;
+    const catOk = state.activeCategory === "all"
+      || (state.activeCategory === "wishlist" && state.wishlistIds.has(p.id))
+      || String(p.category_id) === state.activeCategory;
     if (!catOk) return null;
     if (!q) return { product: p, score: 0, index };
     const title = normalizeSearch(displayProductTitle(p));
@@ -874,7 +883,8 @@ function renderProducts() {
   host.setAttribute("aria-busy", "false");
   const products = filteredProducts();
   if (!products.length) {
-    host.innerHTML = `<div class="col-12"><div class="empty-state"><strong>Подходящих товаров не нашлось</strong><p>Попробуйте изменить запрос или вернуться ко всем категориям.</p><button class="btn btn-secondary" type="button" data-reset-catalog>Показать все товары</button></div></div>`;
+    const emptyWishlist = state.activeCategory === "wishlist";
+    host.innerHTML = `<div class="col-12"><div class="empty-state"><strong>${emptyWishlist ? "В избранном пока пусто" : "Подходящих товаров не нашлось"}</strong><p>${emptyWishlist ? "Нажмите сердечко на карточке товара — он появится здесь." : "Попробуйте изменить запрос или вернуться ко всем категориям."}</p><button class="btn btn-secondary" type="button" data-reset-catalog>Показать все товары</button></div></div>`;
     host.querySelector("[data-reset-catalog]")?.addEventListener("click", () => {
       state.search = "";
       state.activeCategory = "all";
@@ -1006,6 +1016,7 @@ async function toggleWishlist(id, button = null) {
   try {
     await requestNoBody(removing ? "DELETE" : "POST", `/catalog/users/${cartUserId()}/wishlist/products/${id}`, true);
     removing ? state.wishlistIds.delete(id) : state.wishlistIds.add(id);
+    renderCategories();
     renderProducts();
     toast(`${product ? displayProductTitle(product) : "Товар"} ${removing ? "удалён из" : "добавлен в"} избранное`);
   } catch (error) {
@@ -1029,6 +1040,7 @@ async function loadCommerceState() {
     }).filter(Boolean);
     state.wishlistIds = new Set(wishlistItems.map((item) => item.product_id));
     renderCart();
+    renderCategories();
     renderProducts();
   } catch (error) {
     console.warn("Commerce state unavailable:", formatApiError(error));

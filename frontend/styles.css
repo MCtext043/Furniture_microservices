@@ -309,6 +309,10 @@ html { scroll-padding-top: 5.5rem; }
 .product-actions { display: flex; gap: 0.4rem; align-items: center; }
 .product-actions .btn { min-height: 38px; padding: 0.45rem 0.75rem; font-size: 0.72rem; }
 .wishlist-button { width: 38px; padding: 0 !important; font-size: 1rem !important; }
+.product-card-wish { width: 48px; min-height: 48px; padding: 0 !important; font-size: 1.55rem !important; line-height: 1; }
+.product-card-wish.is-active { border-color:#bb3d3d; background:#fff0ef; color:#bd3434; }
+.product-card-wish.is-active:hover { background:#ffe3e1; color:#a62222; }
+[data-theme="dark"] .product-card-wish.is-active { border-color:#e06d68; background:rgba(190,51,48,.2); color:#ff8179; }
 .wishlist-button.is-active { border-color:#bb3d3d; background:#fff0ef; color:#bd3434; }
 .wishlist-button.is-active:hover { background:#ffe3e1; color:#a62222; }
 [data-theme="dark"] .wishlist-button.is-active { border-color:#e06d68; background:rgba(190,51,48,.2); color:#ff8179; }
@@ -806,6 +810,41 @@ html.is-scene-immersive .planner-diagnostics {
   color: #ffffff !important;
   border-color: #d97706 !important;
   box-shadow: 0 0 0 0.25rem rgba(245, 158, 11, 0.4) !important;
+}
+
+.category-pill.category-wishlist {
+  background-color: #fff0ef !important;
+  color: #bd3434 !important;
+  border-color: #e06d68 !important;
+}
+
+.category-pill.category-wishlist:hover {
+  background-color: #ffe3e1 !important;
+  color: #a62222 !important;
+}
+
+.category-pill.category-wishlist.active {
+  background-color: #e06d68 !important;
+  color: #ffffff !important;
+  border-color: #bb3d3d !important;
+  box-shadow: 0 0 0 0.25rem rgba(190, 51, 48, 0.35) !important;
+}
+
+[data-theme="dark"] .category-pill.category-wishlist {
+  background-color: rgba(190, 51, 48, 0.22) !important;
+  color: #ff8179 !important;
+  border-color: #e06d68 !important;
+}
+
+[data-theme="dark"] .category-pill.category-wishlist:hover {
+  background-color: rgba(190, 51, 48, 0.32) !important;
+  color: #ff8179 !important;
+}
+
+[data-theme="dark"] .category-pill.category-wishlist.active {
+  background-color: #c94b46 !important;
+  color: #ffffff !important;
+  border-color: #e06d68 !important;
 }
 
 /* ============================================================
