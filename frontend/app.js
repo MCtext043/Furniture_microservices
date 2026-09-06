@@ -3356,40 +3356,52 @@ function crmOrdersForTab(tab = state.crm.tab) {
 }
 
 function renderCrmOrderCard(order) {
+  // Формируем контакты для отображения
+  const contacts = [];
+  if (order.customer_phone) contacts.push(`📞 ${order.customer_phone}`);
+  if (order.customer_email) contacts.push(`✉️ ${order.customer_email}`);
+  const contactsHtml = contacts.length 
+    ? `<div class="small text-muted mb-1">${contacts.join(' · ')}</div>` 
+    : '';
+
   return `
-      <div class="border rounded p-3 mb-3" data-order-card="${order.id}">
-        <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
-          <div>
-            <strong>${escapeHtml(order.title)}</strong>
-            <span class="badge ${crmStatusBadge(order.status)} ms-2">${escapeHtml(order.status)}</span>
-            ${order.planner_project_id ? `<span class="badge text-bg-light ms-1">проект #${order.planner_project_id}</span>` : ""}
-          </div>
-          <span class="text-muted small">${escapeHtml(order.customer || "—")}</span>
+    <div class="border rounded p-3 mb-3" data-order-card="${order.id}">
+      <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+        <div>
+          <strong>${escapeHtml(order.title)}</strong>
+          <span class="badge ${crmStatusBadge(order.status)} ms-2">${escapeHtml(order.status)}</span>
+          ${order.planner_project_id ? `<span class="badge text-bg-light ms-1">проект #${order.planner_project_id}</span>` : ""}
         </div>
-        ${order.notes ? `<div class="small text-muted mb-2">${escapeHtml(order.notes)}</div>` : ""}
-        ${order.selected_tier ? `<div class="small mb-2"><span class="badge bg-info text-dark">Комплектация: ${escapeHtml(tierTitle(order.selected_tier))}</span> · <strong>${money(orderSelectedPrice(order))}</strong></div>` : ""}
-        ${order.materials?.length ? `<div class="small mb-2"><strong>Материалы:</strong> ${order.materials.map((line) => `${escapeHtml(line.material_name)} — ${line.required_qty} ${escapeHtml(line.unit)}`).join("; ")}</div>` : ""}
-        ${order.price_standard ? `<div class="small text-muted mb-2">Все цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
-        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-          <select class="form-select form-select-sm" style="max-width:160px" data-crm-status="${order.id}">
-            ${CRM_STATUSES.map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
-          </select>
-          <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>
-          <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
-          <button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>
-          <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>
-          <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>
-        </div>
-        <div id="crm-proc-${order.id}"></div>
-        <div id="crm-receipts-${order.id}" class="mt-2"></div>
-        <div id="crm-photos-${order.id}" class="mt-2"></div>
-      </div>`;
+        <span class="text-muted small">${escapeHtml(order.customer || "—")}</span>
+      </div>
+      ${contactsHtml}
+      ${order.notes ? `<div class="small text-muted mb-2">${escapeHtml(order.notes)}</div>` : ""}
+      ${order.selected_tier ? `<div class="small mb-2"><span class="badge bg-info text-dark">Комплектация: ${escapeHtml(tierTitle(order.selected_tier))}</span> · <strong>${money(orderSelectedPrice(order))}</strong></div>` : ""}
+      ${order.materials?.length ? `<div class="small mb-2"><strong>Материалы:</strong> ${order.materials.map((line) => `${escapeHtml(line.material_name)} — ${line.required_qty} ${escapeHtml(line.unit)}`).join("; ")}</div>` : ""}
+      ${order.price_standard ? `<div class="small text-muted mb-2">Все цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
+      <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+        <select class="form-select form-select-sm" style="max-width:160px" data-crm-status="${order.id}">
+          ${CRM_STATUSES.map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
+        </select>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
+        <button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>
+        <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>
+        <button type="button" class="btn btn-sm btn-outline-danger" data-crm-delete="${order.id}" title="Удалить заказ">🗑 Удалить</button>
+      </div>
+      <div id="crm-proc-${order.id}"></div>
+      <div id="crm-receipts-${order.id}" class="mt-2"></div>
+      <div id="crm-photos-${order.id}" class="mt-2"></div>
+    </div>`;
 }
 
 function bindCrmOrderPanel(host) {
+  // Существующие обработчики
   host.querySelectorAll("[data-crm-order]").forEach((btn) => {
     btn.addEventListener("click", () => renderCrmOrderProcurement(Number(btn.dataset.crmOrder)));
   });
+  
   host.querySelectorAll("[data-crm-save-status]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const orderId = Number(btn.dataset.crmSaveStatus);
@@ -3397,14 +3409,48 @@ function bindCrmOrderPanel(host) {
       updateCrmOrderStatus(orderId, select?.value || "конструктор");
     });
   });
+  
   host.querySelectorAll("[data-crm-photo]").forEach((btn) => {
     btn.addEventListener("click", () => uploadCrmOrderPhoto(Number(btn.dataset.crmPhoto)));
   });
+  
   host.querySelectorAll("[data-crm-receipt-upload]").forEach((btn) => {
     btn.addEventListener("click", () => uploadCrmOrderReceipt(Number(btn.dataset.crmReceiptUpload)));
   });
+  
   host.querySelectorAll("[data-crm-receipt-view]").forEach((btn) => {
     btn.addEventListener("click", () => toggleCrmOrderReceipts(Number(btn.dataset.crmReceiptView), btn));
+  });
+
+  // Обработчик для кнопки удаления
+  host.querySelectorAll("[data-crm-delete]").forEach((btn) => {
+    btn.addEventListener("click", function(event) {
+      event.stopPropagation();
+      const orderId = Number(this.dataset.crmDelete);
+      const order = state.crm.orders.find(o => o.id === orderId);
+      if (!order) {
+        toast('Заказ не найден', false);
+        return;
+      }
+      
+      // Заполняем модальное окно
+      const titleEl = document.getElementById("deleteOrderTitle");
+      const idEl = document.getElementById("deleteOrderId");
+      if (titleEl) titleEl.textContent = `"${escapeHtml(order.title)}" (№${order.id})`;
+      if (idEl) idEl.value = orderId;
+      
+      // Показываем модальное окно
+      const modalElement = document.getElementById("deleteOrderModal");
+      if (modalElement) {
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+      } else {
+        // Если модального окна нет, используем confirm
+        if (confirm(`Удалить заказ "${order.title}" (№${order.id})? Это действие нельзя отменить!`)) {
+          deleteCrmOrder(orderId);
+        }
+      }
+    });
   });
 }
 
@@ -3412,40 +3458,73 @@ function renderCrmPanel() {
   renderCrmWarehouse();
   const host = document.getElementById("crmOrdersPanel");
   if (!host) return;
+  
+  // Подсчет количества заказов
   const activeCount = state.crm.orders.filter((order) => order.status !== CRM_STATUS_DONE).length;
   const archiveCount = state.crm.orders.filter((order) => order.status === CRM_STATUS_DONE).length;
   const orders = crmOrdersForTab(state.crm.tab);
+  
+  // HTML для вкладок
   const tabs = `
-    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
-      <ul class="nav nav-pills mb-0">
-        <li class="nav-item">
-          <button type="button" class="nav-link ${state.crm.tab === "active" ? "active" : ""}" data-crm-tab="active">Активные (${activeCount})</button>
-        </li>
-        <li class="nav-item">
-          <button type="button" class="nav-link ${state.crm.tab === "archive" ? "active" : ""}" data-crm-tab="archive">Архив (${archiveCount})</button>
-        </li>
-      </ul>
-    </div>`;
+    <ul class="nav nav-pills mb-3" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link ${state.crm.tab === "active" ? "active" : ""}" 
+                data-crm-tab="active" 
+                type="button" 
+                role="tab">
+          Активные <span class="badge bg-secondary">${activeCount}</span>
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link ${state.crm.tab === "archive" ? "active" : ""}" 
+                data-crm-tab="archive" 
+                type="button" 
+                role="tab">
+          Архив <span class="badge bg-secondary">${archiveCount}</span>
+        </button>
+      </li>
+    </ul>
+  `;
+  
+  // Если нет заказов
   if (!orders.length) {
-    host.innerHTML = `${tabs}<div class="text-muted">${state.crm.tab === "archive" ? "В архиве пока нет завершённых проектов." : "Нет активных заказов. Нажмите «Загрузить демо CRM» или дождитесь отправки проекта клиентом."}</div>`;
+    host.innerHTML = `
+      ${tabs}
+      <div class="text-muted py-3">
+        ${state.crm.tab === "archive" 
+          ? "В архиве пока нет завершённых проектов." 
+          : "Нет активных заказов. Нажмите «Загрузить демо CRM» или дождитесь отправки проекта клиентом."}
+      </div>
+    `;
+    
+    // Привязываем обработчики для вкладок
     host.querySelectorAll("[data-crm-tab]").forEach((btn) => {
       btn.addEventListener("click", () => {
         state.crm.tab = btn.dataset.crmTab;
         renderCrmPanel();
       });
     });
-    host.querySelector("#btnClearCrmOrdersInline")?.addEventListener("click", clearCrmOrders);
     return;
   }
-  host.innerHTML = `${tabs}${orders.map((order) => renderCrmOrderCard(order)).join("")}`;
+  
+  // Отображаем заказы
+  host.innerHTML = `
+    ${tabs}
+    ${orders.map((order) => renderCrmOrderCard(order)).join("")}
+  `;
+  
+  // Привязываем обработчики для вкладок
   host.querySelectorAll("[data-crm-tab]").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.crm.tab = btn.dataset.crmTab;
       renderCrmPanel();
     });
   });
-  host.querySelector("#btnClearCrmOrdersInline")?.addEventListener("click", clearCrmOrders);
+  
+  // Привязываем обработчики для кнопок в карточках
   bindCrmOrderPanel(host);
+  
+  // Загружаем фото для каждого заказа
   orders.forEach((order) => renderCrmOrderPhotos(order.id));
 }
 
@@ -4763,6 +4842,21 @@ function initObjectPicker() {
   });
 }
 
+async function deleteCrmOrder(orderId) {
+  try {
+    await requestNoBody("DELETE", `/catalog/crm/orders/${orderId}`, true);
+    // Удаляем заказ из state
+    state.crm.orders = state.crm.orders.filter(order => order.id !== orderId);
+    // Очищаем кеш закупок
+    delete state.crm.procurementByOrder[orderId];
+    // Обновляем отображение
+    renderCrmPanel();
+    toast("Заказ успешно удалён");
+  } catch (error) {
+    toast(`Не удалось удалить заказ: ${formatApiError(error)}`, false);
+  }
+}
+
 function initRoomFinishControls() {
   const floorTextureEl = document.getElementById("roomFloorTexture");
   const wallTextureEl = document.getElementById("roomWallTexture");
@@ -4966,5 +5060,11 @@ document.getElementById("customerEmail")?.addEventListener("change", (e) => {
   localStorage.setItem("woodcraft_customer_email", e.target.value);
 });
 }
+
+window.deleteCrmOrder = deleteCrmOrder;
+window.apiBase = apiBase;
+window.token = token;
+window.toast = toast;
+window.escapeHtml = escapeHtml;
 
 document.addEventListener("DOMContentLoaded", boot);

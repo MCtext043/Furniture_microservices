@@ -98,6 +98,9 @@
         </div>
       </section>
 
+      <!-- ============================================================
+           СЕКЦИЯ CRM - ИСПРАВЛЕННАЯ
+           ============================================================ -->
       <section class="mb-5" id="crm">
         <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
           <div>
@@ -120,6 +123,7 @@
           <div class="col-lg-7">
             <div class="service-card p-4">
               <h3 class="h6 mb-3">Заказы</h3>
+              <!-- Контейнер для заказов -->
               <div id="crmOrdersPanel" class="small text-muted">Загрузка...</div>
             </div>
           </div>
@@ -277,6 +281,29 @@
     </div>
   </div>
 
+  <!-- ============================================================
+       МОДАЛЬНОЕ ОКНО ПОДТВЕРЖДЕНИЯ УДАЛЕНИЯ ЗАКАЗА
+       ============================================================ -->
+  <div class="modal fade" id="deleteOrderModal" tabindex="-1" aria-labelledby="deleteOrderModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="deleteOrderModalLabel">⚠️ Подтверждение удаления</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <p>Вы действительно хотите удалить заказ <strong id="deleteOrderTitle"></strong>?</p>
+          <p class="text-danger small">Это действие невозможно отменить. Все данные заказа, включая фото и чеки, будут удалены.</p>
+          <input type="hidden" id="deleteOrderId" value="">
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-danger" id="confirmDeleteOrder">Да, удалить заказ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="lightbox" id="imageLightbox" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Просмотр изображения">
     <button class="lightbox-close" type="button" data-lightbox-close aria-label="Закрыть просмотр">×</button>
     <button class="lightbox-nav lightbox-prev" type="button" data-lightbox-prev aria-label="Предыдущее изображение">‹</button>
@@ -290,6 +317,59 @@
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="dimensions3d.js?v=20260721-cad-dimensions-v2"></script>
   <script src="textures3d.js?v=20260721-cad-dimensions-v1"></script>
+  
+  <!-- Обработчик для кнопки подтверждения удаления -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      const confirmBtn = document.getElementById('confirmDeleteOrder');
+      if (confirmBtn) {
+        confirmBtn.addEventListener('click', async function() {
+          const orderIdInput = document.getElementById('deleteOrderId');
+          if (!orderIdInput) {
+            toast('Ошибка: ID заказа не найден', false);
+            return;
+          }
+          
+          const orderId = Number(orderIdInput.value);
+          if (!orderId) {
+            toast('Ошибка: ID заказа не указан', false);
+            return;
+          }
+          
+          // Закрываем модальное окно
+          const modalElement = document.getElementById('deleteOrderModal');
+          if (modalElement) {
+            const modal = bootstrap.Modal.getInstance(modalElement);
+            if (modal) modal.hide();
+          }
+          
+          // Выполняем удаление через глобальную функцию
+          if (typeof window.deleteCrmOrder === 'function') {
+            await window.deleteCrmOrder(orderId);
+          } else {
+            // Fallback: вызываем через app.js
+            try {
+              const response = await fetch(`${window.apiBase ? window.apiBase() : ''}/catalog/crm/orders/${orderId}`, {
+                method: 'DELETE',
+                headers: {
+                  'Authorization': `Bearer ${localStorage.getItem('furniture_jwt') || ''}`,
+                  'Accept': 'application/json'
+                }
+              });
+              if (response.ok) {
+                location.reload();
+              } else {
+                alert('Не удалось удалить заказ');
+              }
+            } catch (e) {
+              alert('Ошибка: ' + e.message);
+            }
+          }
+        });
+      }
+    });
+  </script>
+  
   <script type="module" src="app.js?v=20260815-planner-core-v1"></script>
 </body>
 </html>

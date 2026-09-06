@@ -925,3 +925,21 @@ button, input, select, textarea { font: inherit; }
     grid-template-columns: 1fr;
   }
 }
+
+/* Кнопка удаления заказа */
+[data-crm-delete] {
+  transition: all 0.2s ease;
+}
+
+[data-crm-delete]:hover {
+  transform: scale(1.05);
+}
+
+/* Модальное окно удаления */
+#deleteOrderModal .modal-body strong {
+  color: var(--color-danger);
+}
+
+[data-theme="dark"] #deleteOrderModal .modal-body strong {
+  color: #f58a7a;
+}
