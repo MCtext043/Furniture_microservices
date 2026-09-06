@@ -42,7 +42,7 @@ const state = {
   objectEditor: { section: "living", elevation: 0, drawers: null, handles: null },
   drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0, scale: 1, wrapEl: null, chipEl: null },
   rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0, scale: 1, wrapEl: null, chipEl: null },
-  cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0 },
+  cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0, pointers: new Map(), pinchDistance: 0, pinching: false },
   lastCutResult: null,
   selectedCutJobId: null,
   crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active" },
@@ -1840,9 +1840,10 @@ function refreshRoom3DLayout() {
   if (!state.three) return;
   const { host, camera, renderer } = state.three;
   const workspace = host.closest(".planner-workspace");
+  const immersive = host.classList.contains("is-scene-immersive");
   const fullscreen = document.fullscreenElement === workspace || workspace?.classList.contains("is-fullscreen-fallback");
   const cssHeight = Math.round(host.getBoundingClientRect().height);
-  const height = Math.max(320, fullscreen ? window.innerHeight - 180 : cssHeight || 540);
+  const height = Math.max(320, immersive ? window.innerHeight : fullscreen ? window.innerHeight - 180 : cssHeight || 540);
   const width = host.clientWidth || 640;
   camera.aspect = width / height;
   camera.updateProjectionMatrix();
@@ -1909,52 +1910,113 @@ function updateDynamicWallVisibility() {
   walls.front.visible = sideState.z !== 1;
 }
 
+function pinchDistance(pointers) {
+  const pts = [...pointers.values()];
+  if (pts.length < 2) return 0;
+  return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+}
+
+function applyOrbitRadius(nextRadius) {
+  if (!state.three) return;
+  state.three.orbit.radius = Math.min(Math.max(nextRadius, 3000), 18000);
+  updateOrbitCamera();
+  requestRoom3DRender();
+}
+
 function init3DPointerControls(canvas) {
   canvas.style.cursor = "grab";
   canvas.style.touchAction = "none";
   canvas.style.userSelect = "none";
+  const drag = state.cameraDrag;
+  if (!(drag.pointers instanceof Map)) drag.pointers = new Map();
+
+  const scheduleOrbit = () => {
+    if (drag.raf) return;
+    drag.raf = requestAnimationFrame(() => {
+      drag.raf = 0;
+      if (!state.three || drag.pinching) return;
+      const { orbit } = state.three;
+      orbit.theta += drag.pendingTheta;
+      orbit.phi = Math.min(Math.max(orbit.phi + drag.pendingPhi, 0.22), Math.PI / 2 - 0.04);
+      drag.pendingTheta = 0;
+      drag.pendingPhi = 0;
+      updateOrbitCamera();
+      requestRoom3DRender();
+    });
+  };
+
   canvas.addEventListener("pointerdown", (event) => {
-    if (event.pointerType === "touch" && event.isPrimary === false) return;
-    state.cameraDrag.active = true;
-    state.cameraDrag.startX = event.clientX;
-    state.cameraDrag.startY = event.clientY;
-    state.cameraDrag.moved = false;
-    state.cameraDrag.pendingTheta = 0;
-    state.cameraDrag.pendingPhi = 0;
-    canvas.style.cursor = "grabbing";
-    canvas.setPointerCapture(event.pointerId);
-    event.preventDefault();
-  });
-  canvas.addEventListener("pointermove", (event) => {
-    if (!state.cameraDrag.active || !state.three) return;
-    const dx = event.clientX - state.cameraDrag.startX;
-    const dy = event.clientY - state.cameraDrag.startY;
-    if (Math.abs(dx) + Math.abs(dy) > 3) state.cameraDrag.moved = true;
-    state.cameraDrag.startX = event.clientX;
-    state.cameraDrag.startY = event.clientY;
-    const sens = event.pointerType === "touch" ? 0.006 : 0.01;
-    state.cameraDrag.pendingTheta -= dx * sens;
-    state.cameraDrag.pendingPhi -= dy * sens;
-    if (!state.cameraDrag.raf) {
-      state.cameraDrag.raf = requestAnimationFrame(() => {
-        if (!state.three) return;
-        const { orbit } = state.three;
-        orbit.theta += state.cameraDrag.pendingTheta;
-        orbit.phi = Math.min(Math.max(orbit.phi + state.cameraDrag.pendingPhi, 0.22), Math.PI / 2 - 0.04);
-        state.cameraDrag.pendingTheta = 0;
-        state.cameraDrag.pendingPhi = 0;
-        state.cameraDrag.raf = 0;
-        updateOrbitCamera();
-        requestRoom3DRender();
-      });
+    drag.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (event.pointerType !== "touch") {
+      try { canvas.setPointerCapture(event.pointerId); } catch { /* ignore */ }
     }
+    if (drag.pointers.size >= 2) {
+      drag.pinching = true;
+      drag.active = false;
+      drag.moved = true;
+      drag.pinchDistance = pinchDistance(drag.pointers);
+      canvas.style.cursor = "grab";
+      event.preventDefault();
+      return;
+    }
+    drag.active = true;
+    drag.startX = event.clientX;
+    drag.startY = event.clientY;
+    drag.moved = false;
+    drag.pendingTheta = 0;
+    drag.pendingPhi = 0;
+    canvas.style.cursor = "grabbing";
     event.preventDefault();
   });
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (!drag.pointers.has(event.pointerId)) return;
+    drag.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (drag.pointers.size >= 2 && state.three) {
+      const next = pinchDistance(drag.pointers);
+      if (drag.pinchDistance > 0 && next > 0) {
+        applyOrbitRadius(state.three.orbit.radius * (drag.pinchDistance / next));
+      }
+      drag.pinchDistance = next;
+      drag.pinching = true;
+      drag.moved = true;
+      event.preventDefault();
+      return;
+    }
+    if (!drag.active || drag.pinching || !state.three) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    drag.startX = event.clientX;
+    drag.startY = event.clientY;
+    const sens = event.pointerType === "touch" ? 0.006 : 0.01;
+    drag.pendingTheta -= dx * sens;
+    drag.pendingPhi -= dy * sens;
+    scheduleOrbit();
+    event.preventDefault();
+  });
+
   const stopDrag = (event) => {
-    if (event?.type === "pointerup" && !state.cameraDrag.moved) {
+    const wasPinching = drag.pinching;
+    if (event) drag.pointers.delete(event.pointerId);
+    else drag.pointers.clear();
+    if (drag.pointers.size >= 2) {
+      drag.pinchDistance = pinchDistance(drag.pointers);
+      return;
+    }
+    drag.pinching = false;
+    drag.pinchDistance = 0;
+    if (drag.pointers.size === 1) {
+      const remaining = [...drag.pointers.values()][0];
+      drag.active = true;
+      drag.startX = remaining.x;
+      drag.startY = remaining.y;
+      return;
+    }
+    if (event?.type === "pointerup" && !drag.moved && !wasPinching) {
       selectFurnitureAtPointer(event, canvas);
     }
-    state.cameraDrag.active = false;
+    drag.active = false;
     canvas.style.cursor = "grab";
     if (state.three?.pendingLayoutRefresh) {
       state.three.pendingLayoutRefresh = false;
@@ -1962,16 +2024,17 @@ function init3DPointerControls(canvas) {
     }
   };
   canvas.addEventListener("pointerup", stopDrag);
-  canvas.addEventListener("pointerleave", stopDrag);
+  canvas.addEventListener("pointerleave", (event) => {
+    if (event.pointerType === "touch") return;
+    stopDrag(event);
+  });
   canvas.addEventListener("pointercancel", stopDrag);
   canvas.addEventListener(
     "wheel",
     (event) => {
       if (!state.three) return;
       event.preventDefault();
-      state.three.orbit.radius = Math.min(Math.max(state.three.orbit.radius + event.deltaY * 10, 3000), 18000);
-      updateOrbitCamera();
-      requestRoom3DRender();
+      applyOrbitRadius(state.three.orbit.radius + event.deltaY * 10);
     },
     { passive: false }
   );
@@ -4687,28 +4750,67 @@ function initProcessAnimation() {
   observer.observe(grid);
 }
 
+function isSceneImmersive() {
+  return document.getElementById("room3d")?.classList.contains("is-scene-immersive") || false;
+}
+
+function ensureSceneImmersiveChrome() {
+  let chrome = document.getElementById("sceneImmersiveChrome");
+  if (chrome) return chrome;
+  chrome = document.createElement("div");
+  chrome.id = "sceneImmersiveChrome";
+  chrome.className = "scene-immersive-chrome";
+  chrome.hidden = true;
+  chrome.innerHTML = `<button class="scene-exit-btn" id="btnSceneExit" type="button">✕ Выйти</button>`;
+  document.body.appendChild(chrome);
+  chrome.querySelector("#btnSceneExit")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSceneImmersive(false);
+  });
+  return chrome;
+}
+
+function setSceneImmersive(active) {
+  const host = document.getElementById("room3d");
+  const enterBtn = document.getElementById("btnPlannerFullscreen");
+  const chrome = ensureSceneImmersiveChrome();
+  if (!host) return;
+  if (active && !host._immersiveParent) {
+    host._immersiveParent = host.parentElement;
+    host._immersiveNext = host.nextSibling;
+    document.body.appendChild(host);
+  }
+  if (!active && host._immersiveParent) {
+    const parent = host._immersiveParent;
+    const next = host._immersiveNext;
+    if (next && next.parentNode === parent) parent.insertBefore(host, next);
+    else parent.appendChild(host);
+    host._immersiveParent = null;
+    host._immersiveNext = null;
+  }
+  host.classList.toggle("is-scene-immersive", active);
+  document.documentElement.classList.toggle("is-scene-immersive", active);
+  document.body.classList.toggle("is-scene-immersive", active);
+  chrome.hidden = !active;
+  if (enterBtn) {
+    enterBtn.textContent = active ? "× Выйти из полного экрана" : "⛶ На весь экран";
+    enterBtn.setAttribute("aria-pressed", String(active));
+  }
+  requestAnimationFrame(refreshRoom3DLayout);
+}
+
 function initPlannerFullscreen() {
   const button = document.getElementById("btnPlannerFullscreen");
-  const workspace = document.querySelector(".planner-workspace");
-  if (!button || !workspace) return;
-  const sync = () => {
-    const active = document.fullscreenElement === workspace || workspace.classList.contains("is-fullscreen-fallback");
-    button.textContent = active ? "× Выйти из полного экрана" : "⛶ На весь экран";
-    button.setAttribute("aria-pressed", String(active));
-    requestAnimationFrame(refreshRoom3DLayout);
-  };
-  button.addEventListener("click", async () => {
-    if (document.fullscreenElement === workspace) await document.exitFullscreen();
-    else if (workspace.requestFullscreen) await workspace.requestFullscreen();
-    else workspace.classList.toggle("is-fullscreen-fallback");
-    sync();
+  const host = document.getElementById("room3d");
+  if (!button || !host) return;
+  ensureSceneImmersiveChrome();
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    setSceneImmersive(!isSceneImmersive());
   });
-  document.addEventListener("fullscreenchange", sync);
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && workspace.classList.contains("is-fullscreen-fallback")) {
-      workspace.classList.remove("is-fullscreen-fallback");
-      sync();
-    }
+    if (event.key === "Escape" && isSceneImmersive()) setSceneImmersive(false);
   });
 }
 
