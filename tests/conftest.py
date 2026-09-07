@@ -75,6 +75,8 @@ _TRUNCATE_CATALOG = text(
     """
     TRUNCATE TABLE
       crm_order_photos,
+      crm_order_receipts,
+      crm_order_procurements,
       crm_order_materials,
       crm_production_orders,
       crm_warehouse_stock,

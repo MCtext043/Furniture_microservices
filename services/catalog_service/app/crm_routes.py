@@ -233,6 +233,7 @@ def list_user_orders(user_id: str, session: Session = Depends(get_session)) -> l
     )
     return [_order_out(session, order) for order in orders]
 
+
 @router.delete("/orders/{order_id}", dependencies=[Depends(ensure_catalog_writer)])
 @crm_db_guard
 def delete_order(
@@ -282,7 +283,7 @@ def submit_project_order(payload: CrmSubmitProjectIn, session: Session = Depends
     order = CrmProductionOrder(
         title=payload.title,
         customer=payload.customer,
-        status="конструктор",
+        status="черновой замер",
         notes=payload.notes,
         planner_project_id=payload.planner_project_id,
         user_id=payload.user_id,
@@ -462,12 +463,13 @@ def order_procurement(order_id: int, session: Session = Depends(get_session)) ->
             unit_price = float(getattr(line.material, "purchase_price_rub", 0) or 0)
         purchased_qty = float(override.purchased_qty) if override else 0.0
         is_purchased = bool(override.is_purchased) if override else False
-        if is_purchased:
+        purchased_qty_effective = max(0.0, purchased_qty)
+        if is_purchased and purchased_qty_effective < to_buy:
             purchased_qty_effective = to_buy
-        else:
-            purchased_qty_effective = min(max(0.0, purchased_qty), to_buy)
         line_total = to_buy * unit_price
         purchased_total = purchased_qty_effective * unit_price
+        overspend_qty = max(0.0, purchased_qty_effective - to_buy)
+        overspend_rub = overspend_qty * unit_price
         procurement_sum += line_total
         purchased_sum += purchased_total
         procurement.append(
@@ -483,10 +485,13 @@ def order_procurement(order_id: int, session: Session = Depends(get_session)) ->
                 line_total_rub=line_total,
                 purchased_qty=purchased_qty_effective,
                 purchased_total_rub=purchased_total,
+                overspend_qty=overspend_qty,
+                overspend_rub=overspend_rub,
                 is_purchased=is_purchased,
             )
         )
     progress = (purchased_sum / procurement_sum * 100.0) if procurement_sum > 0 else 0.0
+    overspend_sum = sum(line.overspend_rub for line in procurement)
     return CrmOrderProcurementOut(
         order_id=order.id,
         title=order.title,
@@ -495,6 +500,7 @@ def order_procurement(order_id: int, session: Session = Depends(get_session)) ->
         lines=procurement,
         procurement_sum_rub=procurement_sum,
         purchased_sum_rub=purchased_sum,
+        overspend_sum_rub=overspend_sum,
         progress_percent=progress,
     )
 
@@ -520,11 +526,55 @@ def update_order_procurement(
     by_material = {row.material_id: row for row in existing}
 
     for line in payload:
-        row = by_material.get(line.material_id)
+        material = None
+        if line.material_id:
+            material = session.get(CrmMaterial, line.material_id)
+        if not material and line.material_name:
+            material = session.scalar(select(CrmMaterial).where(CrmMaterial.name == line.material_name))
+        if not material:
+            if not line.material_name:
+                raise HTTPException(status_code=400, detail="Укажите название материала")
+            material = CrmMaterial(
+                name=line.material_name,
+                unit=line.unit or "шт",
+                purchase_price_rub=line.unit_price_rub or 0,
+            )
+            session.add(material)
+            session.flush()
+            session.add(CrmWarehouseStock(material_id=material.id, quantity=0))
+        if line.material_name and line.material_name != material.name:
+            clash = session.scalar(select(CrmMaterial).where(CrmMaterial.name == line.material_name))
+            if clash and clash.id != material.id:
+                raise HTTPException(status_code=409, detail=f"Материал «{line.material_name}» уже есть")
+            material.name = line.material_name
+        if line.unit:
+            material.unit = line.unit
+        if line.unit_price_rub is not None:
+            material.purchase_price_rub = line.unit_price_rub
+
+        order_line = session.scalar(
+            select(CrmOrderMaterial).where(
+                CrmOrderMaterial.order_id == order_id,
+                CrmOrderMaterial.material_id == material.id,
+            )
+        )
+        required = line.required_qty if line.required_qty is not None else (line.to_buy_qty if line.to_buy_qty is not None else 1)
+        if not order_line:
+            session.add(
+                CrmOrderMaterial(
+                    order_id=order_id,
+                    material_id=material.id,
+                    required_qty=required or 1,
+                )
+            )
+        elif line.required_qty is not None:
+            order_line.required_qty = line.required_qty
+
+        row = by_material.get(material.id)
         if not row:
-            row = CrmOrderProcurement(order_id=order_id, material_id=line.material_id)
+            row = CrmOrderProcurement(order_id=order_id, material_id=material.id)
             session.add(row)
-            by_material[line.material_id] = row
+            by_material[material.id] = row
 
         if line.to_buy_qty is not None:
             row.to_buy_qty = line.to_buy_qty
@@ -590,7 +640,7 @@ def seed_crm_demo(session: Session = Depends(get_session)) -> dict[str, int]:
         order = CrmProductionOrder(
             title="Кухня Nord — заказ #1042",
             customer="Иванова М.",
-            status="конструктор",
+            status="черновой замер",
             notes="Гарнитур 3.2м, фасады матовые",
             price_standard=184900,
             price_comfort=218000,

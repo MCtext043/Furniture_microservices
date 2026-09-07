@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: furniture
       POSTGRES_DB: furniture
     ports:
-      - "5432:5432"
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/postgres/init_test_db.sql:/docker-entrypoint-initdb.d/02_furniture_test.sql:ro
@@ -22,8 +22,8 @@ services:
     image: rabbitmq:3.13-management-alpine
     container_name: furniture-rabbitmq
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "${RABBITMQ_HOST_PORT:-5672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -39,8 +39,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio_data:/data
 
@@ -75,7 +75,7 @@ services:
       context: .
       dockerfile: services/catalog_service/Dockerfile
     ports:
-      - "8001:8000"
+      - "${CATALOG_HOST_PORT:-8001}:8000"
     environment:
       DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
       JWT_SECRET_KEY: demo_jwt_secret_local_only
@@ -93,7 +93,7 @@ services:
       context: .
       dockerfile: services/cutting_service/Dockerfile
     ports:
-      - "8002:8000"
+      - "${CUTTING_HOST_PORT:-8002}:8000"
     environment:
       DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
       JWT_SECRET_KEY: demo_jwt_secret_local_only
@@ -111,7 +111,7 @@ services:
       context: .
       dockerfile: services/planner_service/Dockerfile
     ports:
-      - "8003:8000"
+      - "${PLANNER_HOST_PORT:-8003}:8000"
     environment:
       DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
       JWT_SECRET_KEY: demo_jwt_secret_local_only
@@ -129,7 +129,7 @@ services:
       context: .
       dockerfile: services/auth_service/Dockerfile
     ports:
-      - "8004:8000"
+      - "${AUTH_HOST_PORT:-8004}:8000"
     environment:
       DATABASE_URL: postgresql+psycopg2://furniture:furniture@postgres:5432/furniture
       JWT_SECRET_KEY: demo_jwt_secret_local_only
@@ -146,7 +146,7 @@ services:
       context: .
       dockerfile: services/assets_service/Dockerfile
     ports:
-      - "8005:8000"
+      - "${ASSETS_HOST_PORT:-8005}:8000"
     environment:
       JWT_SECRET_KEY: demo_jwt_secret_local_only
       S3_ENDPOINT_URL: http://minio:9000
@@ -167,7 +167,7 @@ services:
       context: .
       dockerfile: services/gateway_service/Dockerfile
     ports:
-      - "8080:8000"
+      - "${GATEWAY_HOST_PORT:-8080}:8000"
     environment:
       GATEWAY_CATALOG_URL: http://catalog-service:8000
       GATEWAY_CUTTING_URL: http://cutting-service:8000

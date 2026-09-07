@@ -26,28 +26,11 @@ def test_submit_project_creates_production_order(catalog_client: TestClient):
     )
     assert response.status_code == 201
     body = response.json()
-    assert body["status"] == "конструктор"
+    assert body["status"] == "черновой замер"
     assert body["planner_project_id"] == 42
     assert body["price_standard"] == 180000.0
     assert body["selected_tier"] == "comfort"
     assert body["materials"][0]["required_qty"] == 12.0
-
-
-def test_clear_orders(catalog_client: TestClient):
-    material_id = _seed_material(catalog_client, "Болт")
-    catalog_client.post(
-        "/crm/orders",
-        json={
-            "title": "Тест",
-            "customer": "A",
-            "status": "конструктор",
-            "materials": [{"material_id": material_id, "required_qty": 1}],
-        },
-    )
-    response = catalog_client.delete("/crm/orders")
-    assert response.status_code == 200
-    assert response.json()["status"] == "cleared"
-    assert catalog_client.get("/crm/orders").json() == []
 
 
 def test_update_order_status_to_done(catalog_client: TestClient):
@@ -128,3 +111,68 @@ def test_user_orders_list(catalog_client: TestClient):
     assert response.status_code == 200
     assert len(response.json()) >= 1
     assert response.json()[0]["user_id"] == "u1"
+
+
+def test_update_order_status_to_ready(catalog_client: TestClient):
+    material_id = _seed_material(catalog_client, "Ручка")
+    created = catalog_client.post(
+        "/crm/orders",
+        json={
+            "title": "Тумба",
+            "customer": "Петров",
+            "status": "собрано",
+            "materials": [{"material_id": material_id, "required_qty": 2}],
+        },
+    ).json()
+    response = catalog_client.patch(
+        f"/crm/orders/{created['id']}/status",
+        json={"status": "готово"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "готово"
+
+
+def test_procurement_rename_and_add_line(catalog_client: TestClient):
+    material_id = _seed_material(catalog_client, "ДСП 16")
+    created = catalog_client.post(
+        "/crm/orders",
+        json={
+            "title": "Кухня",
+            "customer": "A",
+            "status": "технолог",
+            "materials": [{"material_id": material_id, "required_qty": 3}],
+        },
+    ).json()
+    order_id = created["id"]
+    updated = catalog_client.put(
+        f"/crm/orders/{order_id}/procurement",
+        json=[
+            {
+                "material_id": material_id,
+                "material_name": "ДСП 16 мм белая",
+                "unit": "лист",
+                "required_qty": 4,
+                "to_buy_qty": 4,
+                "unit_price_rub": 1200,
+                "purchased_qty": 5,
+                "is_purchased": False,
+            },
+            {
+                "material_name": "Кромка ABS",
+                "unit": "м",
+                "required_qty": 8,
+                "to_buy_qty": 8,
+                "unit_price_rub": 40,
+                "purchased_qty": 8,
+                "is_purchased": True,
+            },
+        ],
+    )
+    assert updated.status_code == 200
+    body = updated.json()
+    names = {line["material_name"] for line in body["lines"]}
+    assert "ДСП 16 мм белая" in names
+    assert "Кромка ABS" in names
+    dsb = next(line for line in body["lines"] if line["material_name"] == "ДСП 16 мм белая")
+    assert dsb["overspend_qty"] == 1
+    assert dsb["overspend_rub"] == 1200

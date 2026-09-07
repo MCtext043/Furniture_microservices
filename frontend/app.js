@@ -107,8 +107,18 @@ const TIER_MATERIAL_PROFILES = {
   },
 };
 
-const CRM_STATUSES = ["конструктор", "закупка", "сборка", "готова"];
-const CRM_STATUS_DONE = "готова";
+const CRM_STATUSES = [
+  "черновой замер",
+  "чистовой замер",
+  "выбор цветов",
+  "технолог",
+  "распил-фасады-фурнитура",
+  "доставлено",
+  "собрано",
+  "готово",
+];
+const CRM_STATUS_DONE = "готово";
+const CRM_STATUS_DONE_ALIASES = new Set(["готово", "готова"]);
 
 const typePresets = {
   wardrobe: { title: "Шкаф", color: "#8B5E3C", texture: "wood" },
@@ -370,7 +380,7 @@ function toast(message, ok = true) {
 function formatApiError(error) {
   const raw = String(error?.message || error || "");
   if (raw.includes("Invalid credentials")) {
-    return "Неверный логин или пароль. На сервере используйте admin и пароль из deploy/local.env (AUTH_BOOTSTRAP_PASSWORD).";
+    return "Неверный логин или пароль.";
   }
   return raw.replace(/^"|"$/g, "");
 }
@@ -3329,11 +3339,59 @@ function numOrZero(value) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function crmProcurementOverspend(toBuyQty, purchasedQty, unitPrice) {
+  return Math.max(0, purchasedQty - toBuyQty) * unitPrice;
+}
+
+function renderCrmProcurementRow(line = {}) {
+  const materialId = Number(line.material_id || 0);
+  const isNew = !materialId;
+  const toBuy = numOrZero(line.to_buy_qty);
+  const unitPrice = numOrZero(line.unit_price_rub);
+  const lineTotal = numOrZero(line.line_total_rub) || toBuy * unitPrice;
+  const purchasedQty = numOrZero(line.purchased_qty);
+  const isPurchased = !!line.is_purchased;
+  const overspend = numOrZero(line.overspend_rub) || crmProcurementOverspend(toBuy, purchasedQty, unitPrice);
+  const unit = line.unit || "шт";
+  const required = numOrZero(line.required_qty) || (isNew ? 1 : 0);
+  return `<tr data-crm-proc-row="${materialId}" ${isNew ? 'data-crm-proc-new="1"' : ""}>
+    <td>
+      <input class="form-control form-control-sm" data-crm-proc-name value="${escapeHtml(line.material_name || "")}" placeholder="Название материала" />
+      <input class="form-control form-control-sm mt-1" data-crm-proc-unit value="${escapeHtml(unit)}" placeholder="ед." />
+    </td>
+    <td>
+      <input class="form-control form-control-sm" type="number" min="0" step="0.01" value="${required}" data-crm-proc-required />
+    </td>
+    <td>${isNew ? "—" : `${numOrZero(line.in_stock_qty)} ${escapeHtml(unit)}`}</td>
+    <td>
+      <input class="form-control form-control-sm" type="number" min="0" step="0.01" value="${toBuy}" data-crm-proc-to-buy />
+    </td>
+    <td>
+      <input class="form-control form-control-sm" type="number" min="0" step="1" value="${unitPrice}" data-crm-proc-unit-price />
+    </td>
+    <td class="fw-semibold"><span data-crm-proc-line-total>${money(lineTotal)}</span></td>
+    <td class="text-danger"><span data-crm-proc-overspend>${money(overspend)}</span></td>
+    <td>
+      <div class="d-flex align-items-center gap-2">
+        <input class="form-check-input mt-0" type="checkbox" ${isPurchased ? "checked" : ""} data-crm-proc-done />
+        <input class="form-control form-control-sm" style="max-width:110px" type="number" min="0" step="0.01"
+          value="${purchasedQty}" ${isPurchased ? "disabled" : ""} data-crm-proc-purchased-qty />
+      </div>
+      <div class="small text-muted mt-1"><span data-crm-proc-purchased-total>${money(numOrZero(line.purchased_total_rub))}</span></div>
+    </td>
+    <td>${isNew ? `<button type="button" class="btn btn-sm btn-outline-danger" data-crm-proc-remove-row>×</button>` : ""}</td>
+  </tr>`;
+}
+
 function renderCrmProcurementTable(orderId, data) {
   const hasPrices = (data.lines || []).some((l) => numOrZero(l.unit_price_rub) > 0);
   const progressText = `${money(numOrZero(data.purchased_sum_rub))} / ${money(numOrZero(data.procurement_sum_rub))} · ${Math.round(
     numOrZero(data.progress_percent)
   )}%`;
+  const overspendSum = numOrZero(data.overspend_sum_rub) || (data.lines || []).reduce(
+    (sum, line) => sum + crmProcurementOverspend(numOrZero(line.to_buy_qty), numOrZero(line.purchased_qty), numOrZero(line.unit_price_rub)),
+    0
+  );
 
   return `
     <div data-crm-proc-wrapper="${orderId}">
@@ -3342,72 +3400,41 @@ function renderCrmProcurementTable(orderId, data) {
           <thead class="table-light">
             <tr>
               <th style="min-width:220px">Материал</th>
-              <th style="min-width:130px">Нужно</th>
-              <th style="min-width:120px">Склад</th>
-              <th style="min-width:130px" class="text-danger">Купить</th>
-              <th style="min-width:120px">Цена, ₽</th>
-              <th style="min-width:120px">Итого, ₽</th>
+              <th style="min-width:110px">Нужно</th>
+              <th style="min-width:90px">Склад</th>
+              <th style="min-width:110px" class="text-danger">Купить</th>
+              <th style="min-width:110px">Цена, ₽</th>
+              <th style="min-width:110px">Итого, ₽</th>
+              <th style="min-width:110px">Перерасход</th>
               <th style="min-width:170px">Закуплено</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
-            ${(data.lines || [])
-              .map((line) => {
-                const toBuy = numOrZero(line.to_buy_qty);
-                const unitPrice = numOrZero(line.unit_price_rub);
-                const lineTotal = numOrZero(line.line_total_rub) || toBuy * unitPrice;
-                const purchasedQty = numOrZero(line.purchased_qty);
-                const isPurchased = !!line.is_purchased;
-                const baseToBuy = Number.isFinite(Number(line.to_buy_qty_base)) ? numOrZero(line.to_buy_qty_base) : toBuy;
-                const baseHint = baseToBuy !== toBuy ? ` (по складу: ${baseToBuy})` : "";
-                return `<tr data-crm-proc-row="${line.material_id}">
-                  <td>
-                    <div class="fw-semibold">${escapeHtml(line.material_name)}</div>
-                    <div class="small text-muted">ед.: ${escapeHtml(line.unit)}${baseHint}</div>
-                  </td>
-                  <td>${line.required_qty} ${escapeHtml(line.unit)}</td>
-                  <td>${line.in_stock_qty} ${escapeHtml(line.unit)}</td>
-                  <td>
-                    <input class="form-control form-control-sm" type="number" min="0" step="0.01"
-                      value="${toBuy}" data-crm-proc-to-buy />
-                  </td>
-                  <td>
-                    <input class="form-control form-control-sm" type="number" min="0" step="1"
-                      value="${unitPrice}" data-crm-proc-unit-price />
-                  </td>
-                  <td class="fw-semibold"><span data-crm-proc-line-total>${money(lineTotal)}</span></td>
-                  <td>
-                    <div class="d-flex align-items-center gap-2">
-                      <input class="form-check-input mt-0" type="checkbox" ${isPurchased ? "checked" : ""} data-crm-proc-done />
-                      <input class="form-control form-control-sm" style="max-width:110px" type="number" min="0" step="0.01"
-                        value="${purchasedQty}" ${isPurchased ? "disabled" : ""} data-crm-proc-purchased-qty />
-                      <span class="small text-muted">${escapeHtml(line.unit)}</span>
-                    </div>
-                    <div class="small text-muted mt-1"><span data-crm-proc-purchased-total>${money(
-                      numOrZero(line.purchased_total_rub)
-                    )}</span></div>
-                  </td>
-                </tr>`;
-              })
-              .join("")}
+            ${(data.lines || []).map((line) => renderCrmProcurementRow(line)).join("")}
           </tbody>
           <tfoot class="table-light">
             <tr>
               <th colspan="5" class="text-end">Закупочная сумма</th>
-              <th colspan="2"><span class="fw-bold" data-crm-proc-sum>${money(numOrZero(data.procurement_sum_rub))}</span></th>
+              <th colspan="4"><span class="fw-bold" data-crm-proc-sum>${money(numOrZero(data.procurement_sum_rub))}</span></th>
+            </tr>
+            <tr>
+              <th colspan="5" class="text-end">Перерасход</th>
+              <th colspan="4"><span class="fw-semibold text-danger" data-crm-proc-overspend-sum>${money(overspendSum)}</span></th>
             </tr>
             <tr>
               <th colspan="5" class="text-end">Уже закупили</th>
-              <th colspan="2"><span class="fw-semibold" data-crm-proc-progress>${progressText}</span></th>
+              <th colspan="4"><span class="fw-semibold" data-crm-proc-progress>${progressText}</span></th>
             </tr>
             <tr class="table-success">
               <th colspan="5" class="text-end">Итоговая сумма (закупка × ${RETAIL_MULTIPLIER})</th>
-              <th colspan="2"><span class="fw-bold" data-crm-proc-final-sum>${money(numOrZero(data.procurement_sum_rub) * RETAIL_MULTIPLIER)}</span></th>
+              <th colspan="4"><span class="fw-bold" data-crm-proc-final-sum>${money(numOrZero(data.procurement_sum_rub) * RETAIL_MULTIPLIER)}</span></th>
             </tr>
           </tfoot>
         </table>
       </div>
       <div class="d-flex flex-wrap gap-2 mt-2 align-items-center">
+        <button type="button" class="btn btn-sm btn-outline-success" data-crm-proc-add="${orderId}">Добавить пункт</button>
         <button type="button" class="btn btn-sm btn-outline-primary" data-crm-proc-save="${orderId}">Сохранить закупку</button>
         <button type="button" class="btn btn-sm btn-outline-dark" data-crm-pdf="${orderId}">PDF закупки</button>
         <span class="small text-muted ms-auto">Прогресс: <strong data-crm-proc-progress-inline>${progressText}</strong></span>
@@ -3424,18 +3451,24 @@ function renderCrmProcurementTable(orderId, data) {
 function collectCrmProcurementEdits(table) {
   return Array.from(table.querySelectorAll("[data-crm-proc-row]")).map((row) => {
     const materialId = Number(row.dataset.crmProcRow);
+    const name = String(row.querySelector("[data-crm-proc-name]")?.value || "").trim();
+    const unit = String(row.querySelector("[data-crm-proc-unit]")?.value || "").trim() || "шт";
     const toBuyQty = numOrZero(row.querySelector("[data-crm-proc-to-buy]")?.value);
     const unitPrice = numOrZero(row.querySelector("[data-crm-proc-unit-price]")?.value);
     const purchasedQty = numOrZero(row.querySelector("[data-crm-proc-purchased-qty]")?.value);
+    const requiredQty = numOrZero(row.querySelector("[data-crm-proc-required]")?.value);
     const isPurchased = !!row.querySelector("[data-crm-proc-done]")?.checked;
     return {
-      material_id: materialId,
+      material_id: materialId || null,
+      material_name: name,
+      unit,
+      required_qty: requiredQty,
       to_buy_qty: toBuyQty,
       unit_price_rub: unitPrice,
       purchased_qty: purchasedQty,
       is_purchased: isPurchased,
     };
-  });
+  }).filter((line) => line.material_id || line.material_name);
 }
 
 function recalcCrmProcurementTable(wrapper) {
@@ -3445,20 +3478,27 @@ function recalcCrmProcurementTable(wrapper) {
   let sum = 0;
   let purchasedSum = 0;
 
+  let overspendSum = 0;
   table.querySelectorAll("[data-crm-proc-row]").forEach((row) => {
     const toBuyQty = numOrZero(row.querySelector("[data-crm-proc-to-buy]")?.value);
     const unitPrice = numOrZero(row.querySelector("[data-crm-proc-unit-price]")?.value);
     const purchasedQtyRaw = numOrZero(row.querySelector("[data-crm-proc-purchased-qty]")?.value);
     const done = !!row.querySelector("[data-crm-proc-done]")?.checked;
-    const purchasedQty = done ? toBuyQty : Math.min(Math.max(0, purchasedQtyRaw), toBuyQty);
+    const purchasedQty = done ? Math.max(toBuyQty, purchasedQtyRaw) : Math.max(0, purchasedQtyRaw);
 
     const lineTotal = toBuyQty * unitPrice;
     const purchasedTotal = purchasedQty * unitPrice;
+    const overspend = crmProcurementOverspend(toBuyQty, purchasedQty, unitPrice);
     sum += lineTotal;
     purchasedSum += purchasedTotal;
+    overspendSum += overspend;
 
-    row.querySelector("[data-crm-proc-line-total]").textContent = money(lineTotal);
-    row.querySelector("[data-crm-proc-purchased-total]").textContent = money(purchasedTotal);
+    const lineTotalEl = row.querySelector("[data-crm-proc-line-total]");
+    const purchasedTotalEl = row.querySelector("[data-crm-proc-purchased-total]");
+    const overspendEl = row.querySelector("[data-crm-proc-overspend]");
+    if (lineTotalEl) lineTotalEl.textContent = money(lineTotal);
+    if (purchasedTotalEl) purchasedTotalEl.textContent = money(purchasedTotal);
+    if (overspendEl) overspendEl.textContent = money(overspend);
   });
 
   const percent = sum > 0 ? Math.round((purchasedSum / sum) * 100) : 0;
@@ -3467,6 +3507,8 @@ function recalcCrmProcurementTable(wrapper) {
   wrapper.querySelector("[data-crm-proc-sum]").textContent = money(sum);
   wrapper.querySelector("[data-crm-proc-progress]").textContent = progressText;
   wrapper.querySelector("[data-crm-proc-progress-inline]").textContent = progressText;
+  const overspendSumEl = wrapper.querySelector("[data-crm-proc-overspend-sum]");
+  if (overspendSumEl) overspendSumEl.textContent = money(overspendSum);
   const finalSumEl = wrapper.querySelector("[data-crm-proc-final-sum]");
   if (finalSumEl) finalSumEl.textContent = money(sum * RETAIL_MULTIPLIER);
 }
@@ -3478,20 +3520,20 @@ function bindCrmProcurementTable(host, orderId) {
 
   const recalc = () => recalcCrmProcurementTable(wrapper);
 
-  table.querySelectorAll("[data-crm-proc-to-buy],[data-crm-proc-unit-price],[data-crm-proc-purchased-qty]").forEach((input) => {
-    input.addEventListener("input", recalc);
-    input.addEventListener("change", recalc);
-  });
-
-  table.querySelectorAll("[data-crm-proc-done]").forEach((checkbox) => {
-    checkbox.addEventListener("change", () => {
-      const row = checkbox.closest("[data-crm-proc-row]");
-      if (!row) return;
+  const bindRowInputs = (row) => {
+    row.querySelectorAll("[data-crm-proc-to-buy],[data-crm-proc-unit-price],[data-crm-proc-purchased-qty],[data-crm-proc-required]").forEach((input) => {
+      input.addEventListener("input", recalc);
+      input.addEventListener("change", recalc);
+    });
+    row.querySelector("[data-crm-proc-done]")?.addEventListener("change", () => {
       const purchasedInput = row.querySelector("[data-crm-proc-purchased-qty]");
       const toBuyInput = row.querySelector("[data-crm-proc-to-buy]");
-      if (purchasedInput && toBuyInput) {
+      const checkbox = row.querySelector("[data-crm-proc-done]");
+      if (purchasedInput && toBuyInput && checkbox) {
         if (checkbox.checked) {
-          purchasedInput.value = String(numOrZero(toBuyInput.value));
+          if (numOrZero(purchasedInput.value) < numOrZero(toBuyInput.value)) {
+            purchasedInput.value = String(numOrZero(toBuyInput.value));
+          }
           purchasedInput.disabled = true;
         } else {
           purchasedInput.disabled = false;
@@ -3499,7 +3541,19 @@ function bindCrmProcurementTable(host, orderId) {
       }
       recalc();
     });
+    row.querySelector("[data-crm-proc-remove-row]")?.addEventListener("click", () => {
+      row.remove();
+      recalc();
+    });
+  };
+
+  wrapper.querySelector(`[data-crm-proc-add="${orderId}"]`)?.addEventListener("click", () => {
+    const tbody = table.querySelector("tbody");
+    if (!tbody) return;
+    tbody.insertAdjacentHTML("beforeend", renderCrmProcurementRow());
+    bindRowInputs(tbody.lastElementChild);
   });
+  table.querySelectorAll("[data-crm-proc-row]").forEach(bindRowInputs);
 
   wrapper.querySelector(`[data-crm-proc-save="${orderId}"]`)?.addEventListener("click", async () => {
     try {
@@ -3519,21 +3573,34 @@ function bindCrmProcurementTable(host, orderId) {
   recalc();
 }
 
+function crmStatusOptions(current) {
+  if (!current || CRM_STATUSES.includes(current)) return CRM_STATUSES;
+  return [current, ...CRM_STATUSES];
+}
+
 function crmStatusBadge(status) {
   const map = {
+    "черновой замер": "text-bg-secondary",
+    "чистовой замер": "text-bg-info",
+    "выбор цветов": "text-bg-info",
+    технолог: "text-bg-primary",
+    "распил-фасады-фурнитура": "text-bg-warning",
+    доставлено: "text-bg-warning",
+    собрано: "text-bg-success",
+    готово: "text-bg-dark",
     конструктор: "text-bg-info",
     закупка: "text-bg-warning",
     сборка: "text-bg-success",
-    готова: "text-bg-secondary",
+    готова: "text-bg-dark",
   };
   return map[status] || "text-bg-secondary";
 }
 
 function crmOrdersForTab(tab = state.crm.tab) {
   if (tab === "archive") {
-    return state.crm.orders.filter((order) => order.status === CRM_STATUS_DONE);
+    return state.crm.orders.filter((order) => CRM_STATUS_DONE_ALIASES.has(order.status));
   }
-  return state.crm.orders.filter((order) => order.status !== CRM_STATUS_DONE);
+  return state.crm.orders.filter((order) => !CRM_STATUS_DONE_ALIASES.has(order.status));
 }
 
 function renderCrmOrderCard(order) {
@@ -3561,8 +3628,8 @@ function renderCrmOrderCard(order) {
       ${order.materials?.length ? `<div class="small mb-2"><strong>Материалы:</strong> ${order.materials.map((line) => `${escapeHtml(line.material_name)} — ${line.required_qty} ${escapeHtml(line.unit)}`).join("; ")}</div>` : ""}
       ${order.price_standard ? `<div class="small text-muted mb-2">Все цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
       <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-        <select class="form-select form-select-sm" style="max-width:160px" data-crm-status="${order.id}">
-          ${CRM_STATUSES.map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
+        <select class="form-select form-select-sm" style="max-width:280px" data-crm-status="${order.id}">
+          ${crmStatusOptions(order.status).map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
         </select>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>
         <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
@@ -3587,7 +3654,7 @@ function bindCrmOrderPanel(host) {
     btn.addEventListener("click", () => {
       const orderId = Number(btn.dataset.crmSaveStatus);
       const select = host.querySelector(`[data-crm-status="${orderId}"]`);
-      updateCrmOrderStatus(orderId, select?.value || "конструктор");
+      updateCrmOrderStatus(orderId, select?.value || "черновой замер");
     });
   });
   
@@ -3641,8 +3708,8 @@ function renderCrmPanel() {
   if (!host) return;
   
   // Подсчет количества заказов
-  const activeCount = state.crm.orders.filter((order) => order.status !== CRM_STATUS_DONE).length;
-  const archiveCount = state.crm.orders.filter((order) => order.status === CRM_STATUS_DONE).length;
+  const activeCount = state.crm.orders.filter((order) => !CRM_STATUS_DONE_ALIASES.has(order.status)).length;
+  const archiveCount = state.crm.orders.filter((order) => CRM_STATUS_DONE_ALIASES.has(order.status)).length;
   const orders = crmOrdersForTab(state.crm.tab);
   
   // HTML для вкладок
@@ -3712,11 +3779,11 @@ function renderCrmPanel() {
 async function updateCrmOrderStatus(orderId, status) {
   try {
     await api("PATCH", `/catalog/crm/orders/${orderId}/status`, { status }, true);
-    if (status === CRM_STATUS_DONE) {
+    if (CRM_STATUS_DONE_ALIASES.has(status)) {
       state.crm.tab = "archive";
     }
     await loadCrm();
-    toast(status === CRM_STATUS_DONE ? "Проект завершён и перемещён в архив" : `Статус заказа: ${status}`);
+    toast(CRM_STATUS_DONE_ALIASES.has(status) ? "Проект завершён и перемещён в архив" : `Статус заказа: ${status}`);
   } catch (error) {
     toast(`Не удалось обновить статус: ${error.message}`, false);
   }
@@ -3853,6 +3920,7 @@ async function exportCrmProcurementPdf(orderId) {
         { text: order ? `${order.title} · ${order.customer}` : `Заказ #${orderId}`, style: "meta" },
         { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta" },
         { text: `Закупочная сумма: ${money(Number(cached.procurement_sum_rub || 0))}`, style: "meta" },
+        { text: `Перерасход: ${money(Number(cached.overspend_sum_rub || 0))}`, style: "meta" },
         {
           text: `Закуплено: ${money(Number(cached.purchased_sum_rub || 0))} (${Math.round(Number(cached.progress_percent || 0))}%)`,
           style: "meta",
@@ -3860,7 +3928,7 @@ async function exportCrmProcurementPdf(orderId) {
         },
         {
           table: {
-            widths: ["*", 60, 55, 55, 55, 60],
+            widths: ["*", 52, 48, 52, 52, 55, 60],
             body: [
               [
                 { text: "Материал", style: "thead" },
@@ -3869,6 +3937,7 @@ async function exportCrmProcurementPdf(orderId) {
                 { text: "Купить", style: "thead" },
                 { text: "Цена", style: "thead" },
                 { text: "Итого", style: "thead" },
+                { text: "Перерасход", style: "thead" },
               ],
               ...cached.lines.map((line) => [
                 line.material_name,
@@ -3877,6 +3946,7 @@ async function exportCrmProcurementPdf(orderId) {
                 line.to_buy_qty > 0 ? `${line.to_buy_qty} ${line.unit}` : "—",
                 money(Number(line.unit_price_rub || 0)),
                 money(Number(line.line_total_rub || 0)),
+                money(Number(line.overspend_rub || crmProcurementOverspend(numOrZero(line.to_buy_qty), numOrZero(line.purchased_qty), numOrZero(line.unit_price_rub)))),
               ]),
             ],
           },
@@ -4045,19 +4115,6 @@ async function submitProjectToWork() {
     toast("Проект отправлен в работу — админ увидит расчёты");
   } catch (error) {
     toast(`Не удалось отправить: ${error.message}`, false);
-  }
-}
-
-async function clearCrmOrders() {
-  if (!window.confirm("Очистить всю историю заказов CRM? Фото и материалы заказов будут удалены.")) return;
-  try {
-    await api("DELETE", "/catalog/crm/orders", undefined, true);
-    state.crm.procurementByOrder = {};
-    state.crm.tab = "active";
-    await loadCrm();
-    toast("История заказов очищена");
-  } catch (error) {
-    toast(`Не удалось очистить историю: ${formatApiError(error)}`, false);
   }
 }
 
@@ -5196,7 +5253,6 @@ async function boot() {
   bindClick("btnQuoteDelivery", quoteDelivery);
   bindClick("btnSeedDemo", async () => { await seedDemoData(); await loadCatalog(); renderAdminCatalogTable(); toast("Демо-данные загружены"); });
   bindClick("btnSeedCrm", seedCrmDemo);
-  bindClick("btnClearCrmOrders", clearCrmOrders);
   bindClick("btnRefreshJobs", renderCuttingJobs);
   bindClick("btnClearCuttingJobs", clearCuttingJobs);
 

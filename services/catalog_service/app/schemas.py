@@ -172,7 +172,7 @@ class CrmOrderMaterialLine(CrmOrderMaterialLineIn):
 class CrmOrderCreate(BaseModel):
     title: str = Field(min_length=2, max_length=180)
     customer: str = Field(default="", max_length=120)
-    status: str = Field(default="new", max_length=32)
+    status: str = Field(default="черновой замер", max_length=32)
     notes: str = ""
     materials: list[CrmOrderMaterialLineIn] = Field(min_length=1)
 
@@ -193,7 +193,9 @@ class CrmOrderOut(BaseModel):
 
 
 class CrmOrderStatusUpdate(BaseModel):
-    status: str = Field(pattern=r"^(конструктор|закупка|сборка|готова)$")
+    status: str = Field(
+        pattern=r"^(черновой замер|чистовой замер|выбор цветов|технолог|распил-фасады-фурнитура|доставлено|собрано|готово|конструктор|закупка|сборка|готова)$"
+    )
 
 
 class CrmOrderPhotoCreate(BaseModel):
@@ -251,11 +253,16 @@ class CrmProcurementLine(BaseModel):
     line_total_rub: float
     purchased_qty: float
     purchased_total_rub: float
+    overspend_qty: float = 0
+    overspend_rub: float = 0
     is_purchased: bool
 
 
 class CrmProcurementLineUpdateIn(BaseModel):
-    material_id: int
+    material_id: int | None = None
+    material_name: str | None = Field(default=None, min_length=2, max_length=120)
+    unit: str | None = Field(default=None, max_length=20)
+    required_qty: float | None = Field(default=None, ge=0)
     to_buy_qty: float | None = Field(default=None, ge=0)
     unit_price_rub: float | None = Field(default=None, ge=0)
     purchased_qty: float | None = Field(default=None, ge=0)
@@ -270,4 +277,5 @@ class CrmOrderProcurementOut(BaseModel):
     lines: list[CrmProcurementLine]
     procurement_sum_rub: float
     purchased_sum_rub: float
+    overspend_sum_rub: float = 0
     progress_percent: float

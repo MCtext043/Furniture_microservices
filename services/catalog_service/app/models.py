@@ -108,7 +108,7 @@ class CrmProductionOrder(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     title: Mapped[str] = mapped_column(String(180), index=True)
     customer: Mapped[str] = mapped_column(String(120), default="")
-    status: Mapped[str] = mapped_column(String(32), default="конструктор", index=True)
+    status: Mapped[str] = mapped_column(String(32), default="черновой замер", index=True)
     notes: Mapped[str] = mapped_column(Text, default="")
     planner_project_id: Mapped[int | None] = mapped_column(index=True, nullable=True)
     user_id: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
