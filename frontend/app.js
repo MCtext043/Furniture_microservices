@@ -2836,29 +2836,40 @@ function renderTierCards(tiers) {
 
 function renderHardwareConstructor() {
   return `<div class="hardware-constructor" id="hardwareConstructor">
+      <datalist id="hardwareSliderStops"><option value="0"></option><option value="50"></option><option value="100"></option></datalist>
       <div class="hardware-constructor-head">
         <strong>Конструктор комплектующих</strong>
-        <p>Слева — доступный вариант, справа — более качественный. Цена всех комплектаций меняется вместе.</p>
+        <p>Три положения: слева доступный вариант, по центру средний, справа более качественный. Цена всех комплектаций меняется вместе.</p>
       </div>
       ${HARDWARE_SLIDERS.map((item) => {
         const value = Number(state.hardwareLevels?.[item.key] ?? 50);
         return `<label class="hardware-slider">
           <span class="hardware-slider-title">${escapeHtml(item.title)}</span>
-          <span class="hardware-slider-scale"><span>${escapeHtml(item.cheap)}</span><span>${escapeHtml(item.quality)}</span></span>
-          <input type="range" min="0" max="100" step="1" value="${value}" data-hardware-key="${item.key}" aria-label="${escapeHtml(item.title)}">
+          <span class="hardware-slider-scale"><span>${escapeHtml(item.cheap)}</span><span>Средние</span><span>${escapeHtml(item.quality)}</span></span>
+          <input type="range" min="0" max="100" step="50" list="hardwareSliderStops" value="${value}" data-hardware-key="${item.key}" aria-label="${escapeHtml(item.title)}: три положения">
         </label>`;
       }).join("")}
     </div>`;
+}
+
+function snapHardwareLevel(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 25) return 0;
+  if (n < 75) return 50;
+  return 100;
 }
 
 function bindHardwareConstructor(host) {
   host.querySelectorAll("[data-hardware-key]").forEach((input) => {
     const apply = () => {
       if (!state.hardwareLevels) state.hardwareLevels = { hinges: 50, slides: 50, facades: 50, handles: 50 };
-      state.hardwareLevels[input.dataset.hardwareKey] = Number(input.value);
+      const snapped = snapHardwareLevel(input.value);
+      input.value = String(snapped);
+      state.hardwareLevels[input.dataset.hardwareKey] = snapped;
       refreshCostAmounts(host);
     };
     input.addEventListener("input", apply);
+    input.addEventListener("change", apply);
   });
 }
 
