@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session, joinedload
 from common.jwt_auth import ensure_catalog_writer
 
 from .db import get_session
+from .order_email import enqueue_order_email
 from .models import (
     CrmMaterial,
     CrmOrderMaterial,
@@ -272,6 +273,8 @@ def create_order(payload: CrmOrderCreate, session: Session = Depends(get_session
     session.add(order)
     session.flush()
     _add_order_lines(session, order.id, payload.materials)
+    session.flush()
+    enqueue_order_email(session, _order_out(session, order))
     session.commit()
     session.refresh(order)
     return _order_out(session, order)
@@ -295,6 +298,8 @@ def submit_project_order(payload: CrmSubmitProjectIn, session: Session = Depends
     session.add(order)
     session.flush()
     _add_order_lines(session, order.id, payload.materials)
+    session.flush()
+    enqueue_order_email(session, _order_out(session, order), payload.customer_phone, payload.customer_email)
     session.commit()
     session.refresh(order)
     return _order_out(session, order)

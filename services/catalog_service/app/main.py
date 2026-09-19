@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
@@ -6,6 +8,7 @@ from common.jwt_auth import ensure_catalog_writer, ensure_shop_user
 from common.messaging import publish_event
 
 from .db import SessionLocal, get_session
+from .order_email import email_lifespan
 from .delivery import GeoPoint, calculate_delivery_quote, estimate_road_distance_km, geocode_address
 from .models import CartItem, Category, Product, ProductPhoto, ProductReview, ShopSettings, WishlistItem
 from .schemas import (
@@ -32,7 +35,15 @@ from .schemas import (
 )
 
 
+@asynccontextmanager
+async def catalog_lifespan(app):
+    ensure_shop_settings_row()
+    async with email_lifespan(app):
+        yield
+
+
 app = FastAPI(
+    lifespan=catalog_lifespan,
     title="Furniture Catalog Service",
     description="Каталог мебели: карточки, категории, фильтры и поиск.",
     version="0.1.0",
@@ -77,7 +88,6 @@ async def _warehouse_point(settings: ShopSettings) -> GeoPoint:
     return point
 
 
-@app.on_event("startup")
 def ensure_shop_settings_row() -> None:
     session = SessionLocal()
     try:

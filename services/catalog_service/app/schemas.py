@@ -234,6 +234,8 @@ class CrmSubmitProjectIn(BaseModel):
     planner_project_id: int
     title: str = Field(min_length=2, max_length=180)
     customer: str = Field(default="", max_length=120)
+    customer_phone: str = Field(default="", max_length=80, pattern=r"^[^\r\n]*$")
+    customer_email: str = Field(default="", max_length=254, pattern=r"^[^\r\n]*$")
     user_id: str = Field(min_length=1, max_length=64)
     pricing: CrmPricingIn
     selected_tier: str = Field(default="standard", pattern=r"^(standard|comfort|premium)$")

@@ -1069,3 +1069,8 @@ html.is-scene-immersive .planner-diagnostics {
 [data-theme="dark"] #deleteOrderModal .modal-body strong {
   color: #f58a7a;
 }
+/* Visible social link beside the theme switch, including on mobile. */
+.vk-link { display: inline-flex; align-items: center; gap: 7px; color: var(--color-text); font-size: 13px; font-weight: 700; text-decoration: none; white-space: nowrap; padding: 6px; }
+.vk-link:hover { color: #0077ff; }
+.vk-link:focus-visible { outline: 2px solid #0077ff; outline-offset: 4px; border-radius: 6px; }
+@media (max-width: 380px) { .vk-link span { display: none; } }
