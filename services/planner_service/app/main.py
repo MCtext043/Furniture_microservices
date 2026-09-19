@@ -53,7 +53,7 @@ def _planner_privileged(auth: AuthContext) -> bool:
 def _assert_owner(project: RoomProject, auth: AuthContext) -> None:
     identity = _identity(auth)
     if auth.enforced and not _planner_privileged(auth) and (not identity or project.user_id != identity):
-        raise HTTPException(status_code=403, detail="Project belongs to another user")
+        raise HTTPException(status_code=403, detail="Этот проект принадлежит другому пользователю")
 
 
 @app.get("/health")
@@ -79,7 +79,7 @@ def list_projects(session: Session = Depends(get_session), auth: AuthContext = D
     stmt = select(RoomProject)
     if auth.enforced and not _planner_privileged(auth):
         if not _identity(auth):
-            raise HTTPException(status_code=401, detail="Unauthorized")
+            raise HTTPException(status_code=401, detail="Войдите в аккаунт")
         stmt = stmt.where(RoomProject.user_id == _identity(auth))
     rows = list(session.scalars(stmt.order_by(RoomProject.id.desc())))
     return [_project_out(row) for row in rows]
@@ -88,7 +88,7 @@ def list_projects(session: Session = Depends(get_session), auth: AuthContext = D
 @app.get("/projects/user/{user_id}", response_model=list[ProjectOut])
 def list_user_projects(user_id: str, session: Session = Depends(get_session), auth: AuthContext = Depends(get_auth_context)) -> list[ProjectOut]:
     if auth.enforced and not _planner_privileged(auth) and _identity(auth) != user_id:
-        raise HTTPException(status_code=403, detail="Cannot list another user's projects")
+        raise HTTPException(status_code=403, detail="Нельзя смотреть проекты другого пользователя")
     rows = list(
         session.scalars(
             select(RoomProject).where(RoomProject.user_id == user_id).order_by(RoomProject.id.desc())
@@ -111,7 +111,7 @@ def add_furniture(
 ) -> FurniturePlacement:
     project = session.get(RoomProject, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Проект не найден")
     _assert_owner(project, auth)
     furniture = FurniturePlacement(project_id=project_id, **payload.model_dump())
     session.add(furniture)
@@ -128,7 +128,7 @@ def add_furniture(
 def list_furniture(project_id: int, session: Session = Depends(get_session), auth: AuthContext = Depends(get_auth_context)) -> list[FurniturePlacement]:
     project = session.get(RoomProject, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Проект не найден")
     _assert_owner(project, auth)
     stmt = select(FurniturePlacement).where(FurniturePlacement.project_id == project_id)
     return list(session.scalars(stmt))
@@ -143,7 +143,7 @@ def update_project(
 ) -> ProjectOut:
     project = session.get(RoomProject, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Проект не найден")
     _assert_owner(project, auth)
     for field, value in payload.model_dump(exclude_unset=True).items():
         if field == "user_id" and _identity(auth):
@@ -164,7 +164,7 @@ def submit_project(
 ) -> ProjectOut:
     project = session.get(RoomProject, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Проект не найден")
     _assert_owner(project, auth)
     if payload and payload.selected_tier:
         project.selected_tier = payload.selected_tier
@@ -193,13 +193,13 @@ def save_scene(project_id: int, payload: SceneSaveIn, session: Session = Depends
     """Atomically replace a scene using stable client ids and optimistic revision checking."""
     project = session.get(RoomProject, project_id, with_for_update=True)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Проект не найден")
     _assert_owner(project, auth)
     if project.scene_revision != payload.expected_revision:
-        raise HTTPException(status_code=409, detail={"message": "Scene revision conflict", "current_revision": project.scene_revision})
+        raise HTTPException(status_code=409, detail={"message": "Сцена уже изменена, обновите проект", "current_revision": project.scene_revision})
     client_ids = [item.client_id for item in payload.placements]
     if len(client_ids) != len(set(client_ids)):
-        raise HTTPException(status_code=422, detail="Duplicate client_id in scene")
+        raise HTTPException(status_code=422, detail="В сцене повторяется идентификатор предмета")
 
     existing = {row.client_id: row for row in session.scalars(select(FurniturePlacement).where(FurniturePlacement.project_id == project_id)) if row.client_id}
     incoming = set(client_ids)
@@ -237,7 +237,7 @@ def save_scene(project_id: int, payload: SceneSaveIn, session: Session = Depends
 def get_scene(project_id: int, session: Session = Depends(get_session), auth: AuthContext = Depends(get_auth_context)) -> SceneOut:
     project = session.get(RoomProject, project_id)
     if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+        raise HTTPException(status_code=404, detail="Проект не найден")
     _assert_owner(project, auth)
     rows = list(session.scalars(select(FurniturePlacement).where(FurniturePlacement.project_id == project_id).order_by(FurniturePlacement.id)))
     return SceneOut(

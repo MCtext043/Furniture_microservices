@@ -112,7 +112,7 @@ def list_jobs(session: Session = Depends(get_session)) -> list[CuttingJobOut]:
 def get_job(job_id: int, session: Session = Depends(get_session)) -> CuttingJobDetail:
     job = session.get(CuttingJob, job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="Cutting job not found")
+        raise HTTPException(status_code=404, detail="Задача раскроя не найдена")
     result = None
     if job.result_json:
         try:

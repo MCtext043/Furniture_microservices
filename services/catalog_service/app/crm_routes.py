@@ -120,7 +120,7 @@ def _add_order_lines(session: Session, order_id: int, materials: list) -> None:
     for line in materials:
         material = session.get(CrmMaterial, line.material_id)
         if not material:
-            raise HTTPException(status_code=404, detail=f"Material {line.material_id} not found")
+            raise HTTPException(status_code=404, detail=f"Материал {line.material_id} не найден")
         session.add(
             CrmOrderMaterial(
                 order_id=order_id,
@@ -141,7 +141,7 @@ def list_materials(session: Session = Depends(get_session)) -> list[CrmMaterial]
 def create_material(payload: CrmMaterialCreate, session: Session = Depends(get_session)) -> CrmMaterial:
     existing = session.scalar(select(CrmMaterial).where(CrmMaterial.name == payload.name))
     if existing:
-        raise HTTPException(status_code=409, detail="Material already exists")
+        raise HTTPException(status_code=409, detail="Такой материал уже есть")
     material = CrmMaterial(**payload.model_dump())
     session.add(material)
     session.flush()
@@ -160,7 +160,7 @@ def update_material(
 ) -> CrmMaterial:
     material = session.get(CrmMaterial, material_id)
     if not material:
-        raise HTTPException(status_code=404, detail="Material not found")
+        raise HTTPException(status_code=404, detail="Материал не найден")
     if payload.name is not None:
         material.name = payload.name
     if payload.unit is not None:
@@ -198,7 +198,7 @@ def update_warehouse_stock(
 ) -> CrmWarehouseStockOut:
     material = session.get(CrmMaterial, material_id)
     if not material:
-        raise HTTPException(status_code=404, detail="Material not found")
+        raise HTTPException(status_code=404, detail="Материал не найден")
     row = session.get(CrmWarehouseStock, material_id)
     if not row:
         row = CrmWarehouseStock(material_id=material_id, quantity=payload.quantity)
@@ -245,7 +245,7 @@ def delete_order(
     # Проверяем, существует ли заказ
     order = session.get(CrmProductionOrder, order_id)
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Заказ не найден")
     
     # Каскадное удаление связанных данных
     session.execute(delete(CrmOrderPhoto).where(CrmOrderPhoto.order_id == order_id))
@@ -314,7 +314,7 @@ def update_order_status(
 ) -> CrmOrderOut:
     order = session.get(CrmProductionOrder, order_id)
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Заказ не найден")
     order.status = payload.status
     session.commit()
     session.refresh(order)
@@ -335,7 +335,7 @@ def add_order_photo(
 ) -> CrmOrderPhotoOut:
     order = session.get(CrmProductionOrder, order_id)
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Заказ не найден")
     photo = CrmOrderPhoto(
         order_id=order_id,
         object_key=payload.object_key,
@@ -359,7 +359,7 @@ def add_order_photo(
 def list_order_photos(order_id: int, session: Session = Depends(get_session)) -> list[CrmOrderPhotoOut]:
     order = session.get(CrmProductionOrder, order_id)
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Заказ не найден")
     photos = list(
         session.scalars(
             select(CrmOrderPhoto).where(CrmOrderPhoto.order_id == order_id).order_by(CrmOrderPhoto.id)
@@ -392,7 +392,7 @@ def add_order_receipt(
     """Один админ фотографирует чек закупки; другой позже видит его в списке чеков заказа."""
     order = session.get(CrmProductionOrder, order_id)
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Заказ не найден")
     receipt = CrmOrderReceipt(
         order_id=order_id,
         object_key=payload.object_key,
@@ -420,7 +420,7 @@ def add_order_receipt(
 def list_order_receipts(order_id: int, session: Session = Depends(get_session)) -> list[CrmOrderReceiptOut]:
     order = session.get(CrmProductionOrder, order_id)
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Заказ не найден")
     receipts = list(
         session.scalars(
             select(CrmOrderReceipt).where(CrmOrderReceipt.order_id == order_id).order_by(CrmOrderReceipt.id.desc())
@@ -445,7 +445,7 @@ def list_order_receipts(order_id: int, session: Session = Depends(get_session)) 
 def order_procurement(order_id: int, session: Session = Depends(get_session)) -> CrmOrderProcurementOut:
     order = session.get(CrmProductionOrder, order_id)
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Заказ не найден")
     overrides = list(
         session.scalars(select(CrmOrderProcurement).where(CrmOrderProcurement.order_id == order_id))
     )
@@ -523,7 +523,7 @@ def update_order_procurement(
 ) -> CrmOrderProcurementOut:
     order = session.get(CrmProductionOrder, order_id)
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(status_code=404, detail="Заказ не найден")
 
     existing = list(
         session.scalars(select(CrmOrderProcurement).where(CrmOrderProcurement.order_id == order_id))

@@ -162,7 +162,7 @@ def create_category(payload: CategoryCreate, session: Session = Depends(get_sess
     name = _validate_category_name(payload.name)
     existing = session.scalar(select(Category).where(Category.name == name))
     if existing:
-        raise HTTPException(status_code=409, detail="Category already exists")
+        raise HTTPException(status_code=409, detail="Категория уже существует")
     category = Category(name=name, parent_id=payload.parent_id)
     session.add(category)
     session.commit()
@@ -180,7 +180,7 @@ def list_categories(session: Session = Depends(get_session)) -> list[Category]:
 def get_category(category_id: int, session: Session = Depends(get_session)) -> Category:
     category = session.get(Category, category_id)
     if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
+        raise HTTPException(status_code=404, detail="Категория не найдена")
     return category
 
 
@@ -192,14 +192,14 @@ def update_category(
 ) -> Category:
     category = session.get(Category, category_id)
     if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
+        raise HTTPException(status_code=404, detail="Категория не найдена")
     if payload.name is not None:
         name = _validate_category_name(payload.name)
         existing = session.scalar(
             select(Category).where(Category.name == name, Category.id != category_id)
         )
         if existing:
-            raise HTTPException(status_code=409, detail="Category already exists")
+            raise HTTPException(status_code=409, detail="Категория уже существует")
         category.name = name
     if payload.parent_id is not None:
         category.parent_id = payload.parent_id
@@ -212,7 +212,7 @@ def update_category(
 def delete_category(category_id: int, session: Session = Depends(get_session)) -> None:
     category = session.get(Category, category_id)
     if not category:
-        raise HTTPException(status_code=404, detail="Category not found")
+        raise HTTPException(status_code=404, detail="Категория не найдена")
     for product in session.scalars(select(Product).where(Product.category_id == category_id)):
         product.category_id = None
     session.delete(category)
@@ -223,11 +223,11 @@ def delete_category(category_id: int, session: Session = Depends(get_session)) -
 def create_product(payload: ProductCreate, session: Session = Depends(get_session)) -> Product:
     existing_sku = session.scalar(select(Product).where(Product.sku == payload.sku))
     if existing_sku:
-        raise HTTPException(status_code=409, detail="SKU already exists")
+        raise HTTPException(status_code=409, detail="Товар с таким артикулом уже есть")
     if payload.category_id is not None:
         category = session.get(Category, payload.category_id)
         if not category:
-            raise HTTPException(status_code=404, detail="Category not found")
+            raise HTTPException(status_code=404, detail="Категория не найдена")
     product = Product(**payload.model_dump())
     session.add(product)
     session.commit()
@@ -307,7 +307,7 @@ def product_filters(session: Session = Depends(get_session)) -> ProductFiltersOu
 def get_product(product_id: int, session: Session = Depends(get_session)) -> ProductOut:
     product = session.get(Product, product_id)
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Товар не найден")
     photos_map = _photos_by_product(session, [product_id])
     return _product_out(product, photos_map.get(product_id, []))
 
@@ -320,11 +320,11 @@ def update_product(
 ) -> Product:
     product = session.get(Product, product_id)
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Товар не найден")
     if payload.category_id is not None:
         category = session.get(Category, payload.category_id)
         if not category:
-            raise HTTPException(status_code=404, detail="Category not found")
+            raise HTTPException(status_code=404, detail="Категория не найдена")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(product, field, value)
     session.commit()
@@ -337,7 +337,7 @@ def update_product(
 def list_product_photos(product_id: int, session: Session = Depends(get_session)) -> list[ProductPhoto]:
     product = session.get(Product, product_id)
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Товар не найден")
     return list(
         session.scalars(
             select(ProductPhoto)
@@ -361,7 +361,7 @@ def add_product_photo(
 ) -> ProductPhoto:
     product = session.get(Product, product_id)
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Товар не найден")
     photo = ProductPhoto(
         product_id=product_id,
         object_key=payload.object_key,
@@ -386,7 +386,7 @@ def delete_product_photo(
 ) -> None:
     photo = session.get(ProductPhoto, photo_id)
     if not photo or photo.product_id != product_id:
-        raise HTTPException(status_code=404, detail="Photo not found")
+        raise HTTPException(status_code=404, detail="Фото не найдено")
     session.delete(photo)
     session.commit()
 
@@ -395,7 +395,7 @@ def delete_product_photo(
 def delete_product(product_id: int, session: Session = Depends(get_session)) -> None:
     product = session.get(Product, product_id)
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Товар не найден")
     product.is_active = False
     session.commit()
 
@@ -408,7 +408,7 @@ def add_review(
 ) -> ProductReview:
     product = session.get(Product, product_id)
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Товар не найден")
     review = ProductReview(product_id=product_id, **payload.model_dump())
     session.add(review)
     session.commit()
@@ -420,7 +420,7 @@ def add_review(
 def list_reviews(product_id: int, session: Session = Depends(get_session)) -> list[ProductReview]:
     product = session.get(Product, product_id)
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Товар не найден")
     return list(session.scalars(select(ProductReview).where(ProductReview.product_id == product_id)))
 
 
@@ -432,7 +432,7 @@ def add_cart_item(
 ) -> CartItem:
     product = session.get(Product, payload.product_id)
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Товар не найден")
     existing = session.scalar(
         select(CartItem).where(CartItem.user_id == user_id, CartItem.product_id == payload.product_id)
     )
@@ -462,7 +462,7 @@ def update_cart_item(
 ) -> CartItem:
     item = session.get(CartItem, item_id)
     if not item or item.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Cart item not found")
+        raise HTTPException(status_code=404, detail="Товар в корзине не найден")
     item.quantity = payload.quantity
     session.commit()
     session.refresh(item)
@@ -473,7 +473,7 @@ def update_cart_item(
 def delete_cart_item(user_id: str, item_id: int, session: Session = Depends(get_session)) -> None:
     item = session.get(CartItem, item_id)
     if not item or item.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Cart item not found")
+        raise HTTPException(status_code=404, detail="Товар в корзине не найден")
     session.delete(item)
     session.commit()
 
@@ -488,7 +488,7 @@ def delete_cart_item(user_id: str, item_id: int, session: Session = Depends(get_
 def add_wishlist_item(user_id: str, product_id: int, session: Session = Depends(get_session)) -> WishlistItem:
     product = session.get(Product, product_id)
     if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
+        raise HTTPException(status_code=404, detail="Товар не найден")
     existing = session.scalar(
         select(WishlistItem).where(WishlistItem.user_id == user_id, WishlistItem.product_id == product_id)
     )
@@ -512,7 +512,7 @@ def delete_wishlist_item(user_id: str, product_id: int, session: Session = Depen
         select(WishlistItem).where(WishlistItem.user_id == user_id, WishlistItem.product_id == product_id)
     )
     if not item:
-        raise HTTPException(status_code=404, detail="Wishlist item not found")
+        raise HTTPException(status_code=404, detail="Товар в избранном не найден")
     session.delete(item)
     session.commit()
 

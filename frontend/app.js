@@ -48,7 +48,8 @@ const state = {
   crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active" },
   userOrders: [],
   userProjects: [],
-  selectedTier: "standard",
+  selectedTier: "comfort",
+  hardwareLevels: { hinges: 50, slides: 50, facades: 50, handles: 50 },
   selected3dObjectId: null,
   productPhotoUrls: {},
   productPhotoGalleries: {},
@@ -87,6 +88,13 @@ const PRICING_TIERS = [
   { key: "standard", title: "Стандарт", material: 1, hardware: 1, labor: 1 },
   { key: "comfort", title: "Комфорт", material: 1.18, hardware: 1.25, labor: 1.1 },
   { key: "premium", title: "Премиум", material: 1.42, hardware: 1.55, labor: 1.22 },
+];
+
+const HARDWARE_SLIDERS = [
+  { key: "hinges", title: "Петли", cheap: "Обычные", quality: "С доводчиком" },
+  { key: "slides", title: "Направляющие", cheap: "Шариковые", quality: "Полного выдвижения" },
+  { key: "facades", title: "Фасады", cheap: "ЛДСП", quality: "МДФ / эмаль" },
+  { key: "handles", title: "Ручки", cheap: "Стандарт", quality: "Премиум" },
 ];
 
 const TIER_MATERIAL_PROFILES = {
@@ -377,12 +385,50 @@ function toast(message, ok = true) {
   setTimeout(() => el.remove(), 4500);
 }
 
-function formatApiError(error) {
-  const raw = String(error?.message || error || "");
-  if (raw.includes("Invalid credentials")) {
-    return "Неверный логин или пароль.";
+function extractErrorText(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  const detail = error.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item?.msg || item?.message || "").filter(Boolean).join(". ");
   }
-  return raw.replace(/^"|"$/g, "");
+  if (detail && typeof detail === "object") return detail.message || "";
+  return String(error.message || error || "");
+}
+
+function formatApiError(error) {
+  let raw = extractErrorText(error).replace(/^"|"$/g, "").trim();
+  const status = Number(error?.status || error?.statusCode);
+  const map = [
+    [/unauthorized/i, "Войдите в аккаунт"],
+    [/not authenticated/i, "Войдите в аккаунт"],
+    [/missing bearer/i, "Войдите в аккаунт"],
+    [/missing or invalid credentials/i, "Войдите в аккаунт"],
+    [/invalid credentials/i, "Неверный логин или пароль"],
+    [/token expired/i, "Сессия истекла. Войдите снова"],
+    [/invalid token/i, "Недействительный токен. Войдите снова"],
+    [/forbidden/i, "Недостаточно прав для этого действия"],
+    [/insufficient role/i, "Недостаточно прав для этого действия"],
+    [/not found/i, "Данные не найдены"],
+    [/internal server error/i, "Ошибка сервера. Попробуйте позже"],
+    [/bad gateway/i, "Сервис временно недоступен. Попробуйте позже"],
+    [/service unavailable/i, "Сервис временно недоступен. Попробуйте позже"],
+    [/gateway timeout/i, "Сервер не ответил вовремя. Попробуйте ещё раз"],
+    [/failed to fetch/i, "Нет связи с сервером. Проверьте интернет"],
+    [/networkerror/i, "Нет связи с сервером. Проверьте интернет"],
+    [/abort(ed)?/i, "Превышено время ожидания. Попробуйте ещё раз"],
+  ];
+  for (const [pattern, text] of map) {
+    if (pattern.test(raw)) return text;
+  }
+  if (!raw || /^(ok|error|unauthorized|forbidden)$/i.test(raw)) {
+    if (status === 401) return "Войдите в аккаунт";
+    if (status === 403) return "Недостаточно прав для этого действия";
+    if (status === 404) return "Данные не найдены";
+    if (status >= 500) return "Ошибка сервера. Попробуйте позже";
+  }
+  return raw;
 }
 
 function escapeHtml(value) {
@@ -578,10 +624,17 @@ async function api(method, path, body, withAuth = false) {
     const message =
       typeof detail === "string"
         ? detail
-        : detail
-          ? JSON.stringify(detail)
-          : text || response.statusText;
-    throw new Error(message);
+        : Array.isArray(detail)
+          ? detail.map((item) => item?.msg || item?.message || "").filter(Boolean).join(". ")
+          : detail?.message
+            ? detail.message
+            : detail
+              ? JSON.stringify(detail)
+              : text || response.statusText;
+    const error = new Error(message);
+    error.status = response.status;
+    error.detail = detail;
+    throw error;
   }
   return payload;
 }
@@ -609,7 +662,12 @@ async function requestNoBody(method, path, withAuth = false) {
   const response = await fetch(`${apiBase()}${path}`, { method, headers });
   const text = await response.text();
   const payload = text ? JSON.parse(text) : null;
-  if (!response.ok) throw new Error(payload?.detail || text);
+  if (!response.ok) {
+    const error = new Error(payload?.detail || text || response.statusText);
+    error.status = response.status;
+    error.detail = payload?.detail;
+    throw error;
+  }
   return payload;
 }
 
@@ -669,7 +727,7 @@ async function registerCustomer() {
     toast("Аккаунт создан. Выполняем вход.");
     await loginCustomer();
   } catch (error) {
-    toast(`Не удалось зарегистрироваться: ${error.message}`, false);
+    toast(`Не удалось зарегистрироваться: ${formatApiError(error)}`, false);
   }
 }
 
@@ -1104,7 +1162,7 @@ async function quoteDelivery() {
   } catch (error) {
     state.deliveryQuote = null;
     renderCart();
-    toast(`Не удалось рассчитать доставку: ${error.message}`, false);
+    toast(`Не удалось рассчитать доставку: ${formatApiError(error)}`, false);
   }
 }
 
@@ -1122,7 +1180,7 @@ async function loadDeliverySettingsAdmin() {
         : "Координаты склада будут определены при сохранении адреса.";
     }
   } catch (error) {
-    toast(`Не удалось загрузить настройки доставки: ${error.message}`, false);
+    toast(`Не удалось загрузить настройки доставки: ${formatApiError(error)}`, false);
   }
 }
 
@@ -1141,7 +1199,7 @@ async function saveDeliverySettingsAdmin() {
     toast("Настройки доставки сохранены");
     await loadDeliverySettingsAdmin();
   } catch (error) {
-    toast(`Ошибка сохранения: ${error.message}`, false);
+    toast(`Ошибка сохранения: ${formatApiError(error)}`, false);
   }
 }
 
@@ -1364,7 +1422,7 @@ async function optimizeCutting(customParts = null, silent = false) {
     if (APP_MODE === "admin") renderCuttingJobs();
     return data;
   } catch (error) {
-    if (!silent) toast(`Раскрой недоступен: ${error.message}`, false);
+    if (!silent) toast(`Раскрой недоступен: ${formatApiError(error)}`, false);
     return null;
   }
 }
@@ -1467,7 +1525,7 @@ async function createRoom() {
     const savedModal = document.getElementById("projectSavedModal");
     if (savedModal) bootstrap.Modal.getOrCreateInstance(savedModal).show();
   } catch (error) {
-    toast(`Планировщик недоступен: ${error.message}`, false);
+    toast(`Планировщик недоступен: ${formatApiError(error)}`, false);
   }
 }
 
@@ -1910,7 +1968,7 @@ function ensureRoom3D() {
     console.error("3D init failed:", error);
     const host = document.getElementById("room3d");
     if (host) {
-      host.innerHTML = `<div class="text-warning small p-3">3D не запустился: ${escapeHtml(error.message || String(error))}<div class="mt-2 text-muted">Попробуйте: закрыть другие вкладки с 3D, включить аппаратное ускорение в браузере, обновить страницу (Ctrl+F5). План сверху остаётся доступен.</div></div>`;
+      host.innerHTML = `<div class="text-warning small p-3">3D не запустился: ${escapeHtml(formatApiError(error))}<div class="mt-2 text-muted">Попробуйте: закрыть другие вкладки с 3D, включить аппаратное ускорение в браузере, обновить страницу (Ctrl+F5). План сверху остаётся доступен.</div></div>`;
     }
   }
   if (document.getElementById("roomPlan")) renderRoomTopView();
@@ -2701,10 +2759,19 @@ function estimateProjectCost(bom) {
   return { materialCost: Math.round(materialCost), edgeCost: Math.round(edgeCost), procurementCost, total };
 }
 
+function hardwareQualityFactor() {
+  const values = HARDWARE_SLIDERS.map((item) => Number(state.hardwareLevels?.[item.key] ?? 50));
+  const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return 0.82 + (avg / 100) * 0.36;
+}
+
 function estimateTierPrices(cost) {
-  const result = {};
-  for (const tier of PRICING_TIERS) result[tier.key] = Math.round(cost.procurementCost * RETAIL_MULTIPLIER);
-  return result;
+  const comfort = Math.round(cost.procurementCost * RETAIL_MULTIPLIER * hardwareQualityFactor());
+  return {
+    standard: Math.round(comfort * 0.8),
+    comfort,
+    premium: Math.round(comfort * 1.3),
+  };
 }
 
 function tierTitle(key) {
@@ -2758,13 +2825,54 @@ function renderTierCards(tiers) {
           <span class="fw-semibold">${tier.title}</span>
           <span class="badge ${meta.badge}">${tier.title}</span>
         </div>
-        <div class="cost-highlight">${money(tiers[tier.key])}</div>
+        <div class="cost-highlight" data-tier-price="${tier.key}">${money(tiers[tier.key])}</div>
         <div class="small text-muted mt-1">${meta.hint}</div>
         ${profile ? `<ul class="small text-muted mt-2 mb-0 ps-3">${profile.specs.map((spec) => `<li>${escapeHtml(spec)}</li>`).join("")}</ul>` : ""}
         ${tier.key === selected && selectable ? `<div class="small text-primary fw-semibold mt-2">Выбрано</div>` : ""}
       </div>
     </div>`;
   }).join("")}</div>`;
+}
+
+function renderHardwareConstructor() {
+  return `<div class="hardware-constructor" id="hardwareConstructor">
+      <div class="hardware-constructor-head">
+        <strong>Конструктор комплектующих</strong>
+        <p>Слева — доступный вариант, справа — более качественный. Цена всех комплектаций меняется вместе.</p>
+      </div>
+      ${HARDWARE_SLIDERS.map((item) => {
+        const value = Number(state.hardwareLevels?.[item.key] ?? 50);
+        return `<label class="hardware-slider">
+          <span class="hardware-slider-title">${escapeHtml(item.title)}</span>
+          <span class="hardware-slider-scale"><span>${escapeHtml(item.cheap)}</span><span>${escapeHtml(item.quality)}</span></span>
+          <input type="range" min="0" max="100" step="1" value="${value}" data-hardware-key="${item.key}" aria-label="${escapeHtml(item.title)}">
+        </label>`;
+      }).join("")}
+    </div>`;
+}
+
+function bindHardwareConstructor(host) {
+  host.querySelectorAll("[data-hardware-key]").forEach((input) => {
+    const apply = () => {
+      if (!state.hardwareLevels) state.hardwareLevels = { hinges: 50, slides: 50, facades: 50, handles: 50 };
+      state.hardwareLevels[input.dataset.hardwareKey] = Number(input.value);
+      refreshCostAmounts(host);
+    };
+    input.addEventListener("input", apply);
+  });
+}
+
+function refreshCostAmounts(host) {
+  const data = buildBomFromObjects();
+  if (!data.parts.length && !state.objects3d.length) return;
+  const tiers = estimateTierPrices(estimateProjectCost(data));
+  const selectedTotal = tiers[state.selectedTier] || tiers.comfort;
+  const totalEl = host.querySelector(".estimate-total");
+  if (totalEl) totalEl.textContent = `от ${money(selectedTotal)}`;
+  host.querySelectorAll("[data-tier-price]").forEach((el) => {
+    const key = el.dataset.tierPrice;
+    if (tiers[key] != null) el.textContent = money(tiers[key]);
+  });
 }
 
 function renderCostEstimate(bom = null) {
@@ -2779,15 +2887,7 @@ function renderCostEstimate(bom = null) {
   const cost = estimateProjectCost(data);
   const tiers = estimateTierPrices(cost);
   if (APP_MODE !== "admin") {
-    const selectedTotal = tiers[state.selectedTier] || tiers.standard;
-    // host.innerHTML = `
-    //   <div class="estimate-card">
-    //     <div class="estimate-kicker">Ориентировочная стоимость</div>
-    //     <div class="estimate-total">от ${money(selectedTotal)}</div>
-    //     <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
-    //   </div>
-    //   <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
-    //   ${renderTierCards(tiers)}`;
+    const selectedTotal = tiers[state.selectedTier] || tiers.comfort;
     host.innerHTML = `
       <div class="estimate-card">
         <div class="estimate-kicker">Ориентировочная стоимость</div>
@@ -2796,9 +2896,11 @@ function renderCostEstimate(bom = null) {
         <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
       </div>
       <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
-      ${renderTierCards(tiers)}`;
+      ${renderTierCards(tiers)}
+      ${renderHardwareConstructor()}`;
 
     bindTierCardSelection(host);
+    bindHardwareConstructor(host);
     host.querySelector("[data-exact-quote]")?.addEventListener("click", () => {
       if (!isAuthenticated()) bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
       else submitProjectToWork();
@@ -2810,13 +2912,15 @@ function renderCostEstimate(bom = null) {
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Материалы (ЛДСП)</div><div class="fw-semibold">${money(cost.materialCost)}</div></div></div>
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Кромка</div><div class="fw-semibold">${money(cost.edgeCost)}</div></div></div>
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Закупочная сумма</div><div class="fw-semibold">${money(cost.procurementCost)}</div></div></div>
-      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Итог (×2.2)</div><div class="fw-semibold">${money(tiers.standard)}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Комфорт</div><div class="fw-semibold">${money(tiers.comfort)}</div></div></div>
     </div>
     <div class="mt-3">${renderTierCards(tiers)}</div>
+    ${renderHardwareConstructor()}
     <div class="mt-3 p-3 border rounded bg-white">
       <div class="small text-muted">Базовая сумма (стандарт)</div>
       <div class="cost-highlight">${money(tiers.standard)}</div>
     </div>`;
+  bindHardwareConstructor(host);
 }
 
 async function ensureCategoriesLoaded() {
@@ -3122,7 +3226,7 @@ async function saveProductEditor() {
     await loadCatalog();
     renderAdminCatalogTable();
   } catch (error) {
-    toast(`Ошибка сохранения: ${error.message}`, false);
+    toast(`Ошибка сохранения: ${formatApiError(error)}`, false);
   }
 }
 
@@ -3134,7 +3238,7 @@ async function deactivateProduct(productId) {
     await loadCatalog();
     renderAdminCatalogTable();
   } catch (error) {
-    toast(`Ошибка: ${error.message}`, false);
+    toast(`Ошибка: ${formatApiError(error)}`, false);
   }
 }
 
@@ -3203,7 +3307,7 @@ async function renderCuttingJobs() {
       button.addEventListener("click", () => viewCuttingJob(Number(button.dataset.viewCut)));
     });
   } catch (error) {
-    host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
   }
 }
 
@@ -3295,7 +3399,7 @@ async function loadCrm() {
   } catch (error) {
     const wh = document.getElementById("crmWarehouseTable");
     const orders = document.getElementById("crmOrdersPanel");
-    const msg = `<div class="text-danger">${escapeHtml(error.message)}</div>`;
+    const msg = `<div class="text-danger">${escapeHtml(formatApiError(error))}</div>`;
     if (wh) wh.innerHTML = msg;
     if (orders) orders.innerHTML = msg;
   }
@@ -3330,7 +3434,7 @@ async function renderCrmOrderProcurement(orderId) {
     host.innerHTML = renderCrmProcurementTable(orderId, data);
     bindCrmProcurementTable(host, orderId);
   } catch (error) {
-    host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
   }
 }
 
@@ -3785,7 +3889,7 @@ async function updateCrmOrderStatus(orderId, status) {
     await loadCrm();
     toast(CRM_STATUS_DONE_ALIASES.has(status) ? "Проект завершён и перемещён в архив" : `Статус заказа: ${status}`);
   } catch (error) {
-    toast(`Не удалось обновить статус: ${error.message}`, false);
+    toast(`Не удалось обновить статус: ${formatApiError(error)}`, false);
   }
 }
 
@@ -3804,7 +3908,7 @@ async function uploadCrmOrderPhoto(orderId) {
       await loadCrm();
       toast("Фото добавлено к заказу");
     } catch (error) {
-      toast(`Фото: ${error.message}`, false);
+      toast(`Фото: ${formatApiError(error)}`, false);
     }
   };
   input.click();
@@ -3899,7 +4003,7 @@ async function renderCrmOrderReceipts(orderId) {
       ${items}
     </div>`;
   } catch (error) {
-    host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
   }
 }
 
@@ -4114,7 +4218,7 @@ async function submitProjectToWork() {
     await loadUserOrders();
     toast("Проект отправлен в работу — админ увидит расчёты");
   } catch (error) {
-    toast(`Не удалось отправить: ${error.message}`, false);
+    toast(`Не удалось отправить: ${formatApiError(error)}`, false);
   }
 }
 
@@ -4187,7 +4291,7 @@ async function loadUserOrders() {
     state.userOrders = await api("GET", `/catalog/crm/orders/user/${encodeURIComponent(customerName())}`, undefined, true);
     await renderUserOrders();
   } catch (error) {
-    host.innerHTML = `<div class="text-danger small">${escapeHtml(error.message)}</div>`;
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
   }
 }
 

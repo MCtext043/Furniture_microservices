@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /admin.html
+Disallow: /catalog/docs
+Disallow: /cutting/docs
+Disallow: /planner/docs
+Disallow: /auth/docs
+Disallow: /assets/docs

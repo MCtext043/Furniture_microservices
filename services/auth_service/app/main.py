@@ -26,7 +26,7 @@ app = FastAPI(
 def _secret() -> str:
     secret = os.getenv("JWT_SECRET_KEY", "").strip()
     if not secret:
-        raise HTTPException(status_code=503, detail="JWT_SECRET_KEY is not configured")
+        raise HTTPException(status_code=503, detail="Сервер авторизации не настроен")
     return secret
 
 
@@ -109,7 +109,7 @@ def healthcheck() -> dict[str, str]:
 @app.post("/register", response_model=UserOut, status_code=201)
 def register_user(payload: RegisterRequest, session: Session = Depends(get_session)) -> User:
     if session.scalar(select(User).where(User.username == payload.username)):
-        raise HTTPException(status_code=409, detail="Username already taken")
+        raise HTTPException(status_code=409, detail="Это имя пользователя уже занято")
     user = User(username=payload.username, password_hash=_hash_password(payload.password), roles=["user"])
     session.add(user)
     session.commit()
@@ -121,7 +121,7 @@ def register_user(payload: RegisterRequest, session: Session = Depends(get_sessi
 def login(payload: LoginRequest, session: Session = Depends(get_session)) -> TokenResponse:
     user = session.scalar(select(User).where(User.username == payload.username))
     if not user or not _verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise HTTPException(status_code=401, detail="Неверный логин или пароль")
     return _issue_access_token(user)
 
 
@@ -129,7 +129,7 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)) -> Tok
 def me(authorization: str | None = Header(default=None)) -> JwtPayload:
     """Decode bearer token (debug / gateway validation pattern)."""
     if not authorization or not authorization.lower().startswith("bearer "):
-        raise HTTPException(status_code=401, detail="Missing bearer token")
+        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
     token = authorization.split(" ", 1)[1].strip()
     try:
         claims = jwt.decode(token, _secret(), algorithms=[ALGORITHM])
@@ -139,7 +139,7 @@ def me(authorization: str | None = Header(default=None)) -> JwtPayload:
             roles=list(claims.get("roles") or []),
         )
     except jwt.DecodeError as exc:
-        raise HTTPException(status_code=401, detail="Invalid token") from exc
+        raise HTTPException(status_code=401, detail="Недействительный токен. Войдите снова.") from exc
 
 
 @app.get("/roles")

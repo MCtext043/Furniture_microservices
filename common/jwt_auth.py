@@ -43,9 +43,9 @@ def _decode_optional(authorization: str | None) -> TokenClaims | None:
             roles = []
         return TokenClaims(sub=sub, username=username, roles=roles)
     except ExpiredSignatureError as exc:
-        raise HTTPException(status_code=401, detail="Token expired") from exc
+        raise HTTPException(status_code=401, detail="Сессия истекла. Войдите снова.") from exc
     except PyJWTError as exc:
-        raise HTTPException(status_code=401, detail="Invalid token") from exc
+        raise HTTPException(status_code=401, detail="Недействительный токен. Войдите снова.") from exc
 
 
 def get_auth_context(authorization: str | None = Header(default=None)) -> AuthContext:
@@ -58,7 +58,7 @@ def ensure_authenticated_when_enforced(auth: AuthContext = Depends(get_auth_cont
     if not auth.enforced:
         return auth
     if auth.claims is None:
-        raise HTTPException(status_code=401, detail="Missing or invalid credentials")
+        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
     return auth
 
 
@@ -74,9 +74,9 @@ def ensure_catalog_writer(auth: AuthContext = Depends(get_auth_context)) -> None
         return
     claims = auth.claims
     if claims is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
     if not _has_privileged_role(claims, ("catalog:write",)):
-        raise HTTPException(status_code=403, detail="Insufficient role for catalog write")
+        raise HTTPException(status_code=403, detail="Недостаточно прав для изменения каталога")
 
 
 def ensure_shop_user(auth: AuthContext = Depends(get_auth_context)) -> None:
@@ -85,9 +85,9 @@ def ensure_shop_user(auth: AuthContext = Depends(get_auth_context)) -> None:
         return
     claims = auth.claims
     if claims is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
     if not _has_privileged_role(claims, ("user", "catalog:write")):
-        raise HTTPException(status_code=403, detail="Insufficient role for shop actions")
+        raise HTTPException(status_code=403, detail="Недостаточно прав для корзины и избранного")
 
 
 def ensure_planner_user(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
@@ -96,9 +96,9 @@ def ensure_planner_user(auth: AuthContext = Depends(get_auth_context)) -> AuthCo
         return auth
     claims = auth.claims
     if claims is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
     if not _has_privileged_role(claims, ("user", "planner:write")):
-        raise HTTPException(status_code=403, detail="Insufficient role for planner actions")
+        raise HTTPException(status_code=403, detail="Недостаточно прав для планировщика")
     return auth
 
 
@@ -107,9 +107,9 @@ def ensure_planner_writer(auth: AuthContext = Depends(get_auth_context)) -> None
         return
     claims = auth.claims
     if claims is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
     if not _has_privileged_role(claims, ("planner:write",)):
-        raise HTTPException(status_code=403, detail="Insufficient role for planner write")
+        raise HTTPException(status_code=403, detail="Недостаточно прав для сохранения проекта")
 
 
 def ensure_cutting_runner(auth: AuthContext = Depends(get_auth_context)) -> None:
@@ -117,9 +117,9 @@ def ensure_cutting_runner(auth: AuthContext = Depends(get_auth_context)) -> None
         return
     claims = auth.claims
     if claims is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
     if not _has_privileged_role(claims, ("cutting:run",)):
-        raise HTTPException(status_code=403, detail="Insufficient role for cutting optimization")
+        raise HTTPException(status_code=403, detail="Недостаточно прав для расчёта раскроя")
 
 
 def ensure_assets_writer(auth: AuthContext = Depends(get_auth_context)) -> None:
@@ -127,6 +127,6 @@ def ensure_assets_writer(auth: AuthContext = Depends(get_auth_context)) -> None:
         return
     claims = auth.claims
     if claims is None:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
     if not _has_privileged_role(claims, ("assets:write",)):
-        raise HTTPException(status_code=403, detail="Insufficient role for asset uploads")
+        raise HTTPException(status_code=403, detail="Недостаточно прав для загрузки файлов")

@@ -123,7 +123,7 @@ async def upload_object(
     """Upload via gateway — browser cannot reach internal MinIO presigned URLs."""
     content = await file.read()
     if not content:
-        raise HTTPException(status_code=400, detail="Empty file")
+        raise HTTPException(status_code=400, detail="Файл пустой")
     cli = _client()
     try:
         cli.put_object(
@@ -146,7 +146,7 @@ def get_object(object_key: str) -> Response:
     except ClientError as exc:
         code = exc.response.get("Error", {}).get("Code", "")
         if code in {"NoSuchKey", "404"}:
-            raise HTTPException(status_code=404, detail="Object not found") from exc
+            raise HTTPException(status_code=404, detail="Файл не найден") from exc
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     content_type = obj.get("ContentType") or "application/octet-stream"
     return Response(content=body, media_type=content_type)

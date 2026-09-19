@@ -77,7 +77,7 @@ async def _forward(request: Request, base_url: str, path: str) -> Response:
             params=request.query_params.multi_items(),
         )
     except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"Upstream error: {exc}") from exc
+        raise HTTPException(status_code=502, detail="Сервис временно недоступен. Попробуйте позже.") from exc
     content_type = resp.headers.get("content-type")
     skip = {"content-encoding", "transfer-encoding", "connection"}
     hdrs = [(k, v) for k, v in resp.headers.items() if k.lower() not in skip]
@@ -102,6 +102,40 @@ def _register_proxy(prefix: str, base_url: str) -> None:
 
 for segment, target in BACKENDS.items():
     _register_proxy(segment, target)
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt(request: Request) -> Response:
+    base = str(request.base_url).rstrip("/")
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /admin.html\n"
+        "Disallow: /catalog/docs\n"
+        "Disallow: /cutting/docs\n"
+        "Disallow: /planner/docs\n"
+        "Disallow: /auth/docs\n"
+        "Disallow: /assets/docs\n"
+        f"Sitemap: {base}/sitemap.xml\n"
+    )
+    return Response(body, media_type="text/plain; charset=utf-8")
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+async def sitemap_xml(request: Request) -> Response:
+    base = str(request.base_url).rstrip("/")
+    urls = ("/", "/privacy.html", "/cookies.html")
+    items = "".join(
+        f"<url><loc>{base}{path}</loc><changefreq>weekly</changefreq></url>"
+        for path in urls
+    )
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+        f"{items}</urlset>"
+    )
+    return Response(body, media_type="application/xml; charset=utf-8")
+
 
 if FRONTEND_DIR.is_dir():
     app.mount("/", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
