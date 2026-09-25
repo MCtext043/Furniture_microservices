@@ -165,6 +165,39 @@ def cutting_client(cutting_engine):
 
 
 @pytest.fixture(scope="module")
+def auth_engine():
+    from services.auth_service.app.db import Base
+    from services.auth_service.app import models as _auth_models  # noqa: F401
+
+    engine = create_engine(os.environ["DATABASE_URL"], future=True, pool_pre_ping=True)
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    return engine
+
+
+@pytest.fixture
+def auth_client(auth_engine):
+    from services.auth_service.app.db import get_session
+    from services.auth_service.app.main import app as auth_app
+
+    with auth_engine.begin() as conn:
+        conn.execute(text("TRUNCATE TABLE auth_email_tokens, auth_users, auth_roles RESTART IDENTITY CASCADE"))
+
+    TestingSessionLocal = sessionmaker(bind=auth_engine, autoflush=False, autocommit=False)
+
+    def override_get_session():
+        session = TestingSessionLocal()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    auth_app.dependency_overrides[get_session] = override_get_session
+    yield TestClient(auth_app)
+    auth_app.dependency_overrides.pop(get_session, None)
+
+
+@pytest.fixture(scope="module")
 def planner_engine():
     from services.planner_service.app.db import Base
     from services.planner_service.app import models as _planner_models  # noqa: F401

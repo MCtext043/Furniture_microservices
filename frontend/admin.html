@@ -9,7 +9,7 @@
   <title>Петров Admin — производство</title>
   <script>document.documentElement.dataset.theme=localStorage.getItem("woodcraft_theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
-  <link href="styles.css?v=20260919-sliders3" rel="stylesheet" />
+  <link href="styles.css?v=20260920-prod1" rel="stylesheet" />
 </head>
 <body>
   <nav class="navbar navbar-expand-lg navbar-dark sticky-top">
@@ -24,9 +24,11 @@
       <div class="collapse navbar-collapse" id="nav">
         <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-2">
           <li class="nav-item"><a class="nav-link" href="#catalog-admin">Каталог</a></li>
+          <li class="nav-item"><a class="nav-link" href="#calendar">Календарь</a></li>
           <li class="nav-item"><a class="nav-link" href="#crm">CRM</a></li>
           <li class="nav-item"><a class="nav-link" href="#cutting">Раскрой</a></li>
           <li class="nav-item"><a class="nav-link" href="#planner">Проекты</a></li>
+          <li class="nav-item"><a class="nav-link" href="#staff-admin">Админы</a></li>
           <li class="nav-item"><a class="nav-link" href="index.html">Витрина</a></li>
           <li class="nav-item">
             <button class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#accountModal" id="accountBtn">Войти</button>
@@ -87,7 +89,6 @@
             <h2 class="section-title mb-1">Управление товарами</h2>
           </div>
           <div class="d-flex gap-2">
-            <button class="btn btn-outline-secondary btn-sm" id="btnSeedDemo">Загрузить демо-данные</button>
             <button class="btn btn-primary btn-sm" id="btnAddProduct">Добавить товар</button>
           </div>
         </div>
@@ -105,15 +106,16 @@
       <!-- ============================================================
            СЕКЦИЯ CRM - ИСПРАВЛЕННАЯ
            ============================================================ -->
+      <section class="mb-5" id="calendar">
+        <div id="orderCalendar" class="small text-muted">Календарь загрузится после входа.</div>
+      </section>
+
       <section class="mb-5" id="crm">
         <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
           <div>
             <div class="muted-title">CRM</div>
             <h2 class="section-title mb-1">Заказы на производство</h2>
             <p class="text-muted small mb-0">Сравнение потребности заказа с остатками на складе — что докупить.</p>
-          </div>
-          <div class="d-flex gap-2">
-            <button class="btn btn-outline-secondary btn-sm" id="btnSeedCrm">Загрузить демо CRM</button>
           </div>
         </div>
         <div class="row g-4">
@@ -152,7 +154,7 @@
                 </div>
                 <div class="d-flex gap-2 mt-2">
                   <button class="btn btn-sm btn-outline-primary" id="btnAddPart">Добавить</button>
-                  <button class="btn btn-sm btn-outline-secondary" id="btnResetParts">Демо-набор</button>
+                  <button class="btn btn-sm btn-outline-secondary" id="btnResetParts">Пример деталей</button>
                 </div>
               </div>
               <div class="mt-3" id="partsList"></div>
@@ -233,7 +235,34 @@
           </div>
         </div>
       </section>
+
+      <section class="mb-5 d-none" id="staff-admin">
+        <div class="service-card p-4">
+          <div class="muted-title">Доступ</div>
+          <h2 class="section-title h4 mb-3">Администраторы</h2>
+          <p class="text-muted small">Главный администратор из .env может создавать сотрудников. У них все права, кроме удаления записей.</p>
+          <div class="row g-2 mb-3">
+            <div class="col-md-4"><input class="form-control" id="staffUsername" placeholder="Логин" autocomplete="off" /></div>
+            <div class="col-md-4"><input class="form-control" id="staffPassword" type="password" placeholder="Пароль от 8 символов" autocomplete="new-password" /></div>
+            <div class="col-md-4"><input class="form-control" id="staffEmail" type="email" placeholder="Почта (необязательно)" /></div>
+          </div>
+          <button class="btn btn-primary btn-sm mb-4" id="btnCreateStaff" type="button">Добавить администратора</button>
+          <div id="staffDirectory" class="small text-muted">Загрузка...</div>
+        </div>
+      </section>
     </main>
+  </div>
+
+  <div class="modal fade" id="calendarOrderModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header">
+          <h5 class="modal-title">Заказ</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body" id="calendarOrderBody"></div>
+      </div>
+    </div>
   </div>
 
   <div class="modal fade" id="accountModal" tabindex="-1">
@@ -398,6 +427,6 @@
     });
   </script>
   
-  <script type="module" src="app.js?v=20260919-sliders3"></script>
+  <script type="module" src="app.js?v=20260920-prod1"></script>
 </body>
 </html>

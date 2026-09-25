@@ -9,6 +9,67 @@ def _seed_material(catalog_client: TestClient, name: str = "Лист ДСП 16м
     return response.json()["id"]
 
 
+def test_submit_project_creates_materials_from_names(catalog_client: TestClient):
+    response = catalog_client.post(
+        "/crm/orders/submit-project",
+        json={
+            "planner_project_id": 7,
+            "title": "Кухня без демо CRM",
+            "customer": "Новый клиент",
+            "user_id": "client-1",
+            "pricing": {"standard": 180000, "comfort": 215000, "premium": 260000},
+            "selected_tier": "standard",
+            "cutting": {"total_sheets": 3, "sheet_width": 2800, "sheet_height": 2070},
+            "materials": [{"material_name": "Лист ДСП 16мм", "unit": "лист", "required_qty": 3}],
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["materials"][0]["material_name"] == "Лист ДСП 16мм"
+    assert body["created_at"]
+    assert body["status_changed_at"]
+
+
+def test_submit_project_uses_cutting_when_materials_omitted(catalog_client: TestClient):
+    response = catalog_client.post(
+        "/crm/orders/submit-project",
+        json={
+            "planner_project_id": 8,
+            "title": "Шкаф из раскроя",
+            "customer": "Клиент",
+            "user_id": "client-2",
+            "pricing": {"standard": 100, "comfort": 120, "premium": 150},
+            "cutting": {"total_sheets": 2, "sheet_width": 2800, "sheet_height": 2070},
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["materials"][0]["required_qty"] == 2.0
+
+
+def test_status_change_moves_calendar_timestamp(catalog_client: TestClient):
+    material_id = _seed_material(catalog_client, "Кромка календарь")
+    created = catalog_client.post(
+        "/crm/orders",
+        json={
+            "title": "Календарь",
+            "customer": "Петров",
+            "status": "технолог",
+            "materials": [{"material_id": material_id, "required_qty": 1}],
+        },
+    ).json()
+    first = created["status_changed_at"]
+    updated = catalog_client.patch(
+        f"/crm/orders/{created['id']}/status",
+        json={"status": "готово"},
+    ).json()
+    assert updated["status"] == "готово"
+    assert updated["status_changed_at"] >= first
+    calendar = catalog_client.get("/crm/calendar")
+    assert calendar.status_code == 200
+    assert any(item["id"] == created["id"] for item in calendar.json())
+
+
 def test_submit_project_creates_production_order(catalog_client: TestClient):
     material_id = _seed_material(catalog_client)
     response = catalog_client.post(

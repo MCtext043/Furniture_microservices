@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -130,6 +130,10 @@ class CrmProductionOrder(Base):
     price_comfort: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     price_premium: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     selected_tier: Mapped[str] = mapped_column(String(16), default="standard")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    status_changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
 
 
 class CrmOrderPhoto(Base):

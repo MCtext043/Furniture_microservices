@@ -203,3 +203,21 @@ def test_part_name_does_not_affect_cutting_geometry(cutting_client: TestClient):
         (p["sheet_index"], p["x"], p["y"], p["width"], p["height"]) for p in verbose_body["placements"]
     )
     assert base_geom == verbose_geom
+
+
+def test_quote_does_not_save_job(cutting_client: TestClient):
+    response = cutting_client.post(
+        "/quote",
+        json={
+            "sheet_width": 1000,
+            "sheet_height": 500,
+            "parts": [{"name": "Полка", "width": 200, "height": 100, "quantity": 2}],
+        },
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_sheets"] >= 1
+    assert body["job_id"] is None
+    jobs = cutting_client.get("/jobs")
+    assert jobs.json() == []
+

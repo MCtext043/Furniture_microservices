@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from common.jwt_auth import ensure_catalog_writer, ensure_shop_user
+from common.jwt_auth import ensure_can_delete, ensure_catalog_writer, ensure_shop_user
 from common.messaging import publish_event
 
 from .db import SessionLocal, get_session
@@ -71,7 +71,7 @@ def _get_or_create_shop_settings(session: Session) -> ShopSettings:
         row = ShopSettings(
             free_delivery_threshold=3000,
             delivery_price_per_km=45,
-            warehouse_address="Москва, ул. Складская, 1",
+            warehouse_address="",
         )
         session.add(row)
         session.commit()
@@ -208,7 +208,7 @@ def update_category(
     return category
 
 
-@app.delete("/categories/{category_id}", status_code=204, tags=["categories"], dependencies=[Depends(ensure_catalog_writer)])
+@app.delete("/categories/{category_id}", status_code=204, tags=["categories"], dependencies=[Depends(ensure_can_delete)])
 def delete_category(category_id: int, session: Session = Depends(get_session)) -> None:
     category = session.get(Category, category_id)
     if not category:
@@ -377,7 +377,7 @@ def add_product_photo(
     "/products/{product_id}/photos/{photo_id}",
     status_code=204,
     tags=["products"],
-    dependencies=[Depends(ensure_catalog_writer)],
+    dependencies=[Depends(ensure_can_delete)],
 )
 def delete_product_photo(
     product_id: int,
@@ -391,7 +391,7 @@ def delete_product_photo(
     session.commit()
 
 
-@app.delete("/products/{product_id}", status_code=204, tags=["products"], dependencies=[Depends(ensure_catalog_writer)])
+@app.delete("/products/{product_id}", status_code=204, tags=["products"], dependencies=[Depends(ensure_can_delete)])
 def delete_product(product_id: int, session: Session = Depends(get_session)) -> None:
     product = session.get(Product, product_id)
     if not product:

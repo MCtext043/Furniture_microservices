@@ -5,6 +5,7 @@ WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt
 
+COPY common /app/common
 COPY services/__init__.py /app/services/__init__.py
 COPY services/gateway_service /app/services/gateway_service
 COPY frontend /app/frontend

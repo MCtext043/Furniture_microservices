@@ -141,6 +141,7 @@ services:
       JWT_SECRET_KEY: demo_jwt_secret_local_only
       AUTH_BOOTSTRAP_USERNAME: admin
       AUTH_BOOTSTRAP_PASSWORD: demo123456
+      AUTH_BOOTSTRAP_ROLES: superadmin,admin,catalog:write,planner:write,cutting:run,assets:write
     depends_on:
       postgres:
         condition: service_healthy

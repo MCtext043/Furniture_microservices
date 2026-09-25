@@ -12,7 +12,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session, joinedload
 
-from common.jwt_auth import ensure_catalog_writer
+from common.jwt_auth import ensure_can_delete, ensure_catalog_writer
 
 from .db import get_session
 from .order_email import enqueue_order_email
@@ -43,6 +43,7 @@ from .schemas import (
     CrmSubmitProjectIn,
     CrmWarehouseStockOut,
     CrmWarehouseStockUpdate,
+    CrmOrderMaterialLineIn,
 )
 
 router = APIRouter(prefix="/crm", tags=["crm"])
@@ -67,6 +68,39 @@ def crm_db_guard(func: F) -> F:
             raise HTTPException(status_code=503, detail=CRM_MIGRATION_HINT) from exc
 
     return wrapper  # type: ignore[return-value]
+
+
+def _iso(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
+def _get_or_create_material(
+    session: Session,
+    *,
+    material_id: int | None = None,
+    name: str | None = None,
+    unit: str | None = None,
+) -> CrmMaterial:
+    if material_id:
+        material = session.get(CrmMaterial, material_id)
+        if not material:
+            raise HTTPException(status_code=404, detail=f"Материал {material_id} не найден")
+        return material
+    clean_name = (name or "").strip()
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="Укажите материал")
+    material = session.scalar(select(CrmMaterial).where(CrmMaterial.name == clean_name))
+    if material:
+        return material
+    material = CrmMaterial(name=clean_name, unit=unit or "шт", purchase_price_rub=0)
+    session.add(material)
+    session.flush()
+    session.add(CrmWarehouseStock(material_id=material.id, quantity=0))
+    return material
 
 
 def _order_material_lines(session: Session, order_id: int) -> list[CrmOrderMaterial]:
@@ -113,18 +147,23 @@ def _order_out(session: Session, order: CrmProductionOrder) -> CrmOrderOut:
             )
             for line in lines
         ],
+        created_at=_iso(order.created_at),
+        status_changed_at=_iso(order.status_changed_at),
     )
 
 
 def _add_order_lines(session: Session, order_id: int, materials: list) -> None:
     for line in materials:
-        material = session.get(CrmMaterial, line.material_id)
-        if not material:
-            raise HTTPException(status_code=404, detail=f"Материал {line.material_id} не найден")
+        material = _get_or_create_material(
+            session,
+            material_id=getattr(line, "material_id", None),
+            name=getattr(line, "material_name", None),
+            unit=getattr(line, "unit", None),
+        )
         session.add(
             CrmOrderMaterial(
                 order_id=order_id,
-                material_id=line.material_id,
+                material_id=material.id,
                 required_qty=line.required_qty,
             )
         )
@@ -235,7 +274,7 @@ def list_user_orders(user_id: str, session: Session = Depends(get_session)) -> l
     return [_order_out(session, order) for order in orders]
 
 
-@router.delete("/orders/{order_id}", dependencies=[Depends(ensure_catalog_writer)])
+@router.delete("/orders/{order_id}", dependencies=[Depends(ensure_can_delete)])
 @crm_db_guard
 def delete_order(
     order_id: int,
@@ -283,6 +322,18 @@ def create_order(payload: CrmOrderCreate, session: Session = Depends(get_session
 @router.post("/orders/submit-project", response_model=CrmOrderOut, status_code=201)
 @crm_db_guard
 def submit_project_order(payload: CrmSubmitProjectIn, session: Session = Depends(get_session)) -> CrmOrderOut:
+    now = datetime.now(timezone.utc)
+    material_lines = list(payload.materials)
+    if not material_lines and payload.cutting is not None:
+        material_lines = [
+            CrmOrderMaterialLineIn(
+                material_name="Лист ДСП 16мм",
+                unit="лист",
+                required_qty=payload.cutting.total_sheets,
+            )
+        ]
+    if not material_lines:
+        raise HTTPException(status_code=400, detail="Нельзя отправить проект без раскроя или списка материалов")
     order = CrmProductionOrder(
         title=payload.title,
         customer=payload.customer,
@@ -294,10 +345,12 @@ def submit_project_order(payload: CrmSubmitProjectIn, session: Session = Depends
         price_comfort=payload.pricing.comfort,
         price_premium=payload.pricing.premium,
         selected_tier=payload.selected_tier,
+        created_at=now,
+        status_changed_at=now,
     )
     session.add(order)
     session.flush()
-    _add_order_lines(session, order.id, payload.materials)
+    _add_order_lines(session, order.id, material_lines)
     session.flush()
     enqueue_order_email(session, _order_out(session, order), payload.customer_phone, payload.customer_email)
     session.commit()
@@ -316,6 +369,7 @@ def update_order_status(
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
     order.status = payload.status
+    order.status_changed_at = datetime.now(timezone.utc)
     session.commit()
     session.refresh(order)
     return _order_out(session, order)
@@ -595,82 +649,18 @@ def update_order_procurement(
     return order_procurement(order_id=order_id, session=session)
 
 
-@router.post("/seed-demo", dependencies=[Depends(ensure_catalog_writer)])
+@router.get("/calendar", response_model=list[CrmOrderOut])
 @crm_db_guard
-def seed_crm_demo(session: Session = Depends(get_session)) -> dict[str, int]:
-    """Demo materials, warehouse stock and a kitchen production order."""
-    demo_materials = [
-        ("Лист ДСП 16мм", "лист"),
-        ("Саморез 4×16", "шт"),
-        ("Петля Blum 110°", "шт"),
-        ("Кромка ПВХ 2мм", "м"),
-        ("Направляющая ящика 450", "шт"),
-    ]
-    demo_prices = {
-        "Лист ДСП 16мм": 300,
-        "Саморез 4×16": 0.35,
-        "Петля Blum 110°": 120,
-        "Кромка ПВХ 2мм": 18,
-        "Направляющая ящика 450": 260,
-    }
-    by_name: dict[str, CrmMaterial] = {}
-    for name, unit in demo_materials:
-        row = session.scalar(select(CrmMaterial).where(CrmMaterial.name == name))
-        if not row:
-            row = CrmMaterial(name=name, unit=unit, purchase_price_rub=demo_prices.get(name, 0))
-            session.add(row)
-            session.flush()
-        by_name[name] = row
+def calendar_orders(session: Session = Depends(get_session)) -> list[CrmOrderOut]:
+    orders = list(session.scalars(select(CrmProductionOrder).order_by(CrmProductionOrder.status_changed_at.desc())))
+    return [_order_out(session, order) for order in orders]
 
-    warehouse_seed = {
-        "Лист ДСП 16мм": 60,
-        "Саморез 4×16": 1350,
-        "Петля Blum 110°": 30,
-        "Кромка ПВХ 2мм": 120,
-        "Направляющая ящика 450": 8,
-    }
-    for name, qty in warehouse_seed.items():
-        mat = by_name[name]
-        stock = session.get(CrmWarehouseStock, mat.id)
-        if not stock:
-            stock = CrmWarehouseStock(material_id=mat.id, quantity=qty)
-            session.add(stock)
-        else:
-            stock.quantity = qty
 
-    existing = session.scalar(
-        select(CrmProductionOrder).where(CrmProductionOrder.title == "Кухня Nord — заказ #1042")
+@router.post("/seed-demo", dependencies=[Depends(ensure_can_delete)])
+@crm_db_guard
+def seed_crm_demo(session: Session = Depends(get_session)) -> dict[str, str]:
+    del session
+    raise HTTPException(
+        status_code=410,
+        detail="Демо-данные CRM отключены. Создайте материалы и заказы из реальных 3D-проектов.",
     )
-    if not existing:
-        order = CrmProductionOrder(
-            title="Кухня Nord — заказ #1042",
-            customer="Иванова М.",
-            status="черновой замер",
-            notes="Гарнитур 3.2м, фасады матовые",
-            price_standard=184900,
-            price_comfort=218000,
-            price_premium=265000,
-        )
-        session.add(order)
-        session.flush()
-        order_lines = [
-            ("Лист ДСП 16мм", 98),
-            ("Саморез 4×16", 3000),
-            ("Петля Blum 110°", 30),
-            ("Кромка ПВХ 2мм", 86),
-            ("Направляющая ящика 450", 12),
-        ]
-        for name, qty in order_lines:
-            session.add(
-                CrmOrderMaterial(
-                    order_id=order.id,
-                    material_id=by_name[name].id,
-                    required_qty=qty,
-                )
-            )
-
-    session.commit()
-    return {
-        "materials": len(list(session.scalars(select(CrmMaterial)))),
-        "orders": len(list(session.scalars(select(CrmProductionOrder)))),
-    }

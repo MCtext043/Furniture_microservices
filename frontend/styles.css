@@ -1119,3 +1119,76 @@ html.is-scene-immersive .planner-diagnostics {
   [data-theme="dark"] .planner-tabs { background: var(--color-surface); }
   #costPane { min-width: 0; }
 }
+
+.prod-cal {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 1.25rem;
+}
+.prod-cal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.prod-cal-nav { display: flex; gap: 0.4rem; }
+.prod-cal-weekdays, .prod-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.4rem;
+}
+.prod-cal-weekday {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--color-muted);
+  text-align: center;
+  padding-bottom: 0.35rem;
+}
+.prod-cal-cell {
+  min-height: 7.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-soft);
+  padding: 0.4rem;
+}
+.prod-cal-cell.is-empty { background: transparent; border-color: transparent; }
+.prod-cal-cell.is-today { border-color: var(--color-primary); box-shadow: inset 0 0 0 1px var(--color-primary); }
+.prod-cal-day { font-size: 0.78rem; font-weight: 800; margin-bottom: 0.3rem; }
+.prod-cal-events { display: flex; flex-direction: column; gap: 0.3rem; }
+.prod-cal-event, .prod-cal-agenda-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1rem;
+  width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: var(--gradient-primary);
+  color: #2b251d;
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+}
+.prod-cal-event strong, .prod-cal-agenda-item strong { font-size: 0.78rem; }
+.prod-cal-event span, .prod-cal-agenda-item .small { font-size: 0.7rem; }
+.prod-cal-status { font-size: 0.65rem; font-weight: 700; opacity: 0.8; }
+.prod-cal-agenda { display: none; margin-top: 1rem; }
+.prod-cal-agenda-day { margin-bottom: 1rem; }
+.prod-cal-agenda-day h3 { font-size: 1rem; margin-bottom: 0.5rem; }
+.prod-cal-agenda-item {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.45rem;
+  background: var(--color-surface-soft);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+@media (max-width: 767.98px) {
+  .prod-cal { padding: 0.9rem; }
+  .prod-cal-weekdays, .prod-cal-grid { display: none; }
+  .prod-cal-agenda { display: block; }
+}

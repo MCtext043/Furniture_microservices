@@ -15,6 +15,7 @@ from pathlib import Path
 import paramiko
 
 HOST = os.environ.get("DEPLOY_HOST", "45.11.26.79")
+PORT = int(os.environ.get("DEPLOY_PORT", "22"))
 USER = os.environ.get("DEPLOY_USER", "root")
 PASSWORD = os.environ.get("DEPLOY_PASSWORD", "")
 REMOTE_DIR = os.environ.get("DEPLOY_REMOTE_DIR", "/opt/furniture")
@@ -84,11 +85,21 @@ def main() -> int:
         log("Set DEPLOY_PASSWORD environment variable.")
         return 1
 
-    log(f"== Auto deploy -> {USER}@{HOST}:{REMOTE_DIR} ==")
+    log(f"== Auto deploy -> {USER}@{HOST}:{PORT} {REMOTE_DIR} ==")
 
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    ssh.connect(HOST, username=USER, password=PASSWORD, timeout=30)
+    ssh.connect(
+        HOST,
+        port=PORT,
+        username=USER,
+        password=PASSWORD,
+        timeout=40,
+        banner_timeout=40,
+        auth_timeout=40,
+        allow_agent=False,
+        look_for_keys=False,
+    )
 
     try:
         log("[diag] ports 80/443/8002")
@@ -105,9 +116,14 @@ def main() -> int:
 
         remote_sh = (ROOT / "deploy" / "remote-deploy.sh").read_text(encoding="utf-8")
         remote_sh = remote_sh.replace("__REMOTE_DIR__", REMOTE_DIR)
+        prefix = "export RESET_DB=0\n"
         if os.environ.get("FAST_DEPLOY") == "1":
-            remote_sh = "export FAST_DEPLOY=1\n" + remote_sh
+            prefix += "export FAST_DEPLOY=1\n"
             log("    FAST_DEPLOY=1 (gateway/frontend only)")
+        if os.environ.get("RESET_DB") == "1":
+            prefix = "export RESET_DB=1\n"
+            log("    RESET_DB=1 (wipes PostgreSQL)")
+        remote_sh = prefix + remote_sh
         with sftp.open("/tmp/furniture-deploy-remote.sh", "w") as f:
             f.write(remote_sh.replace("\r\n", "\n"))
 
@@ -120,8 +136,41 @@ def main() -> int:
             log("    KEEP_REMOTE_ENV=1 (server .env will not be overwritten)")
         sftp.close()
 
-        log("[3] remote deploy (install-server.sh)")
-        code = run_stream(ssh, "bash /tmp/furniture-deploy-remote.sh")
+        log("[3] remote deploy (install-server.sh, RESET_DB=0)")
+        if os.environ.get("DEPLOY_NOHUP") == "1":
+            run(ssh, "pkill -f furniture-deploy-remote.sh >/dev/null 2>&1 || true")
+            code, out, err = run(
+                ssh,
+                "nohup bash /tmp/furniture-deploy-remote.sh >/tmp/furniture-deploy.log 2>&1 & echo $!",
+            )
+            pid = (out or "").strip().splitlines()[-1] if out else ""
+            log(f"    background pid {pid}")
+            if not pid.isdigit():
+                log(err or "failed to start remote deploy")
+                return 1
+            deadline = time.time() + 3600
+            last_size = 0
+            while time.time() < deadline:
+                time.sleep(15)
+                st, status, _ = run(ssh, "ps -p %s >/dev/null 2>&1 && echo RUNNING || echo DONE" % pid)
+                st, tail, _ = run(ssh, "tail -n 12 /tmp/furniture-deploy.log")
+                safe_write((tail or "") + "\n")
+                alive = "RUNNING" in (status or "")
+                if alive:
+                    continue
+                st, body, _ = run(ssh, "grep -F 'Remote deploy script finished.' /tmp/furniture-deploy.log || true")
+                if "Remote deploy script finished." in (body or ""):
+                    code = 0
+                    break
+                log("Remote process ended before finish marker.")
+                st, exitline, _ = run(ssh, "tail -n 40 /tmp/furniture-deploy.log")
+                log(exitline)
+                return 1
+            else:
+                log("Remote deploy timed out.")
+                return 1
+        else:
+            code = run_stream(ssh, "bash /tmp/furniture-deploy-remote.sh")
         if code != 0:
             log("Deploy failed.")
             _, out, _ = run(ssh, f"cd {REMOTE_DIR} && docker compose --env-file .env -f docker-compose.server.yml ps -a 2>&1; docker compose --env-file .env -f docker-compose.server.yml logs --tail=30 caddy gateway-service 2>&1")
@@ -139,8 +188,9 @@ def main() -> int:
                 return code
 
         log("[4] health checks")
+        gateway_port = os.environ.get("GATEWAY_PORT", "8082")
         for url in (
-            "http://127.0.0.1:8002/health",
+            f"http://127.0.0.1:{gateway_port}/health",
             "https://127.0.0.1/health",
             f"https://{HOST}/health",
         ):

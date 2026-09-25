@@ -104,20 +104,7 @@ def main() -> int:
         client.close()
         return code
 
-    log("Verifying CRM seed-demo ...")
-    verify = (
-        "TOKEN=$(curl -sS -X POST http://127.0.0.1:${GATEWAY_PORT:-8002}/auth/token "
-        "-H 'Content-Type: application/json' "
-        "-d '{\"username\":\"admin\",\"password\":\"'\"${AUTH_BOOTSTRAP_PASSWORD:-IVAN123}\"'\"}' "
-        "| python3 -c \"import sys,json; print(json.load(sys.stdin).get('access_token',''))\") && "
-        "curl -sS -X POST http://127.0.0.1:${GATEWAY_PORT:-8002}/catalog/crm/seed-demo "
-        "-H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' -d '{}'"
-    )
-    run_remote(
-        client,
-        f"cd {REMOTE_DIR} && set -a && source .env && set +a && {verify}",
-        timeout=120,
-    )
+    log("CRM is production-ready without demo seed.")
     client.close()
     log("Done. Open http://45.11.26.79:8002/admin.html and press Ctrl+F5")
     return 0

@@ -142,6 +142,13 @@ services:
       AUTH_BOOTSTRAP_USERNAME: ${AUTH_BOOTSTRAP_USERNAME}
       AUTH_BOOTSTRAP_PASSWORD: ${AUTH_BOOTSTRAP_PASSWORD}
       AUTH_BOOTSTRAP_ROLES: ${AUTH_BOOTSTRAP_ROLES}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-smtp.yandex.ru}
+      SMTP_PORT: ${SMTP_PORT:-465}
+      SMTP_SECURITY: ${SMTP_SECURITY:-ssl}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -182,6 +189,7 @@ services:
       GATEWAY_PLANNER_URL: http://planner-service:8000
       GATEWAY_AUTH_URL: http://auth-service:8000
       GATEWAY_ASSETS_URL: http://assets-service:8000
+      GATEWAY_CORS_ORIGINS: ${GATEWAY_CORS_ORIGINS:-}
     depends_on:
       - catalog-service
       - cutting-service

@@ -44,8 +44,11 @@ const state = {
   rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0, scale: 1, wrapEl: null, chipEl: null },
   cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0, pointers: new Map(), pinchDistance: 0, pinching: false },
   lastCutResult: null,
+  cuttingQuoteCache: null,
   selectedCutJobId: null,
   crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active" },
+  calendar: { year: null, month: null },
+  staff: [],
   userOrders: [],
   userProjects: [],
   selectedTier: "comfort",
@@ -266,12 +269,22 @@ function setToken(value) {
   updateAccountButton();
 }
 
+const APP_TIME_ZONE = "Asia/Dubai";
+
 function hasRole(role) {
-  return state.roles.includes("admin") || state.roles.includes(role);
+  return state.roles.includes(role) || state.roles.includes("admin") || state.roles.includes("superadmin");
 }
 
 function isAdmin() {
-  return hasRole("admin");
+  return state.roles.includes("admin") || state.roles.includes("superadmin");
+}
+
+function isSuperAdmin() {
+  return state.roles.includes("superadmin") || state.roles.includes("*");
+}
+
+function canDeleteRecords() {
+  return isSuperAdmin();
 }
 
 function canManageCatalog() {
@@ -1268,6 +1281,7 @@ function renderCart() {
 
 function renderParts() {
   const host = document.getElementById("partsList");
+  if (!host) return;
   if (!state.cuttingParts.length) {
     host.innerHTML = `<div class="alert alert-light border small mb-0">Список деталей пуст. Добавьте хотя бы одну деталь.</div>`;
     return;
@@ -1531,7 +1545,8 @@ async function createRoom() {
 
 async function savePlannerProject() {
   const bom = buildBomFromObjects();
-  const cost = estimateProjectCost(bom);
+  const cutting = await quoteCuttingForBom(bom);
+  const cost = estimateProjectCost(bom, cutting);
   const tiers = estimateTierPrices(cost);
   
   // Получаем данные из новых полей
@@ -2745,7 +2760,18 @@ const LDSP_PRICE_M2 = 3200;
 const EDGE_PRICE_M = 180;
 const RETAIL_MULTIPLIER = 2.2;
 
-function estimateProjectCost(bom) {
+function edgeMetersFromBom(bom) {
+  let meters = 0;
+  for (const part of bom.parts || []) {
+    const mult = Number(part.cost_multiplier) || 1;
+    meters += (((part.width + part.height) * 2 * part.quantity) / 1000) * mult;
+  }
+  return meters;
+}
+
+function estimateProjectCost(bom, cutting = null) {
+  const sheetW = Number(cutting?.sheet_width) || Number(document.getElementById("sheetW")?.value) || 2800;
+  const sheetH = Number(cutting?.sheet_height) || Number(document.getElementById("sheetH")?.value) || 2070;
   let materialCost = 0;
   let edgeCost = 0;
   for (const part of bom.parts) {
@@ -2754,9 +2780,20 @@ function estimateProjectCost(bom) {
     materialCost += areaM2 * LDSP_PRICE_M2 * mult;
     edgeCost += (((part.width + part.height) * 2 * part.quantity) / 1000) * EDGE_PRICE_M * mult;
   }
+  const sheets = Number(cutting?.total_sheets) || 0;
+  if (sheets > 0) {
+    materialCost = sheets * ((sheetW * sheetH) / 1_000_000) * LDSP_PRICE_M2;
+  }
   const procurementCost = Math.round(materialCost + edgeCost);
   const total = Math.round(procurementCost * RETAIL_MULTIPLIER);
-  return { materialCost: Math.round(materialCost), edgeCost: Math.round(edgeCost), procurementCost, total };
+  return {
+    materialCost: Math.round(materialCost),
+    edgeCost: Math.round(edgeCost),
+    procurementCost,
+    total,
+    sheets,
+    fromCutting: sheets > 0,
+  };
 }
 
 function hardwareQualityFactor() {
@@ -2772,6 +2809,35 @@ function estimateTierPrices(cost) {
     comfort,
     premium: Math.round(comfort * 1.3),
   };
+}
+
+function cuttingPartsSignature(parts) {
+  return JSON.stringify(normalizePartsForCutting(parts));
+}
+
+let costQuoteTimer = 0;
+
+async function quoteCuttingForBom(bom) {
+  if (!bom?.parts?.length) return null;
+  const sheetW = Number(document.getElementById("sheetW")?.value) || 2800;
+  const sheetH = Number(document.getElementById("sheetH")?.value) || 2070;
+  const key = `${sheetW}x${sheetH}:${cuttingPartsSignature(bom.parts)}`;
+  if (state.cuttingQuoteCache?.key === key) return state.cuttingQuoteCache.data;
+  try {
+    const data = await api("POST", "/cutting/quote", {
+      sheet_width: sheetW,
+      sheet_height: sheetH,
+      parts: normalizePartsForCutting(bom.parts),
+    });
+    const packed = { ...data, sheet_width: sheetW, sheet_height: sheetH };
+    state.cuttingQuoteCache = { key, data: packed };
+    return packed;
+  } catch {
+    if (state.lastCutResult) {
+      return { ...state.lastCutResult, sheet_width: sheetW, sheet_height: sheetH };
+    }
+    return null;
+  }
 }
 
 function tierTitle(key) {
@@ -2895,15 +2961,27 @@ function renderCostEstimate(bom = null) {
     host.querySelector("[data-open-furniture]")?.addEventListener("click", () => document.getElementById("btnOpenObjectPicker")?.click());
     return;
   }
-  const cost = estimateProjectCost(data);
+  paintCostEstimate(host, data, state.cuttingQuoteCache?.data || state.lastCutResult);
+  window.clearTimeout(costQuoteTimer);
+  costQuoteTimer = window.setTimeout(async () => {
+    const cutting = await quoteCuttingForBom(data);
+    if (document.getElementById("costEstimate") === host) paintCostEstimate(host, data, cutting);
+  }, 280);
+}
+
+function paintCostEstimate(host, data, cutting) {
+  const cost = estimateProjectCost(data, cutting);
   const tiers = estimateTierPrices(cost);
+  const cuttingNote = cost.fromCutting
+    ? `Цена по раскрою: ${cost.sheets} лист(ов) ${cutting?.sheet_width || 2800}×${cutting?.sheet_height || 2070} мм`
+    : "Предварительно по площади деталей, затем уточняется раскроем";
   if (APP_MODE !== "admin") {
     const selectedTotal = tiers[state.selectedTier] || tiers.comfort;
     host.innerHTML = `
       <div class="estimate-card">
         <div class="estimate-kicker">Ориентировочная стоимость</div>
         <div class="estimate-total">от ${money(selectedTotal)}</div>
-        <div class="small text-muted mt-1 mb-2">Цена действительна 5 дней</div>
+        <div class="small text-muted mt-1 mb-2">Цена действительна 5 дней. ${escapeHtml(cuttingNote)}</div>
         <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
       </div>
       <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
@@ -2920,11 +2998,12 @@ function renderCostEstimate(bom = null) {
   }
   host.innerHTML = `
     <div class="row g-3">
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Листы по раскрою</div><div class="fw-semibold">${cost.fromCutting ? `${cost.sheets} шт` : "—"}</div></div></div>
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Материалы (ЛДСП)</div><div class="fw-semibold">${money(cost.materialCost)}</div></div></div>
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Кромка</div><div class="fw-semibold">${money(cost.edgeCost)}</div></div></div>
       <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Закупочная сумма</div><div class="fw-semibold">${money(cost.procurementCost)}</div></div></div>
-      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Комфорт</div><div class="fw-semibold">${money(tiers.comfort)}</div></div></div>
     </div>
+    <div class="small text-muted mt-2">${escapeHtml(cuttingNote)}</div>
     <div class="mt-3">${renderTierCards(tiers)}</div>
     ${renderHardwareConstructor()}
     <div class="mt-3 p-3 border rounded bg-white">
@@ -3244,7 +3323,7 @@ async function saveProductEditor() {
 async function deactivateProduct(productId) {
   if (!confirm("Скрыть товар из каталога?")) return;
   try {
-    await requestNoBody("DELETE", `/catalog/products/${productId}`, true);
+    await api("PATCH", `/catalog/products/${productId}`, { is_active: false }, true);
     toast("Товар скрыт");
     await loadCatalog();
     renderAdminCatalogTable();
@@ -3407,6 +3486,7 @@ async function loadCrm() {
     state.crm.warehouse = await api("GET", "/catalog/crm/warehouse", undefined, true);
     state.crm.orders = await api("GET", "/catalog/crm/orders", undefined, true);
     renderCrmPanel();
+    renderOrderCalendar();
   } catch (error) {
     const wh = document.getElementById("crmWarehouseTable");
     const orders = document.getElementById("crmOrdersPanel");
@@ -3420,7 +3500,7 @@ function renderCrmWarehouse() {
   const host = document.getElementById("crmWarehouseTable");
   if (!host) return;
   if (!state.crm.warehouse.length) {
-    host.innerHTML = `<div class="text-muted">Склад пуст. Нажмите «Загрузить демо CRM».</div>`;
+    host.innerHTML = `<div class="text-muted">Склад пуст. Остатки появятся после закупки по реальным заказам.</div>`;
     return;
   }
   host.innerHTML = `
@@ -3751,7 +3831,7 @@ function renderCrmOrderCard(order) {
         <button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>
         <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>
-        <button type="button" class="btn btn-sm btn-outline-danger" data-crm-delete="${order.id}" title="Удалить заказ">🗑 Удалить</button>
+        ${canDeleteRecords() ? `<button type="button" class="btn btn-sm btn-outline-danger" data-crm-delete="${order.id}" title="Удалить заказ">🗑 Удалить</button>` : ""}
       </div>
       <div id="crm-proc-${order.id}"></div>
       <div id="crm-receipts-${order.id}" class="mt-2"></div>
@@ -3898,6 +3978,7 @@ async function updateCrmOrderStatus(orderId, status) {
       state.crm.tab = "archive";
     }
     await loadCrm();
+    renderOrderCalendar();
     toast(CRM_STATUS_DONE_ALIASES.has(status) ? "Проект завершён и перемещён в архив" : `Статус заказа: ${status}`);
   } catch (error) {
     toast(`Не удалось обновить статус: ${formatApiError(error)}`, false);
@@ -4103,21 +4184,8 @@ async function renderCrmOrderPhotos(orderId) {
   }
 }
 
-async function buildCrmMaterialsFromBom(bom, tier = state.selectedTier || "standard") {
-  const materials = await api("GET", "/catalog/crm/materials", undefined, true);
-  if (!materials.length) throw new Error("Материалы CRM не настроены. Админ должен загрузить демо CRM.");
+function buildCrmMaterialsFromBom(bom, tier = state.selectedTier || "standard", cutting = null) {
   const profile = TIER_MATERIAL_PROFILES[tier] || TIER_MATERIAL_PROFILES.standard;
-  const findMaterial = (pattern, fallback) => {
-    const primary = materials.find((m) => m.name.toLowerCase().includes(pattern));
-    if (primary) return primary;
-    if (fallback) return materials.find((m) => m.name.toLowerCase().includes(fallback)) || null;
-    return null;
-  };
-  const ldsp = findMaterial(profile.patterns.panel, "дсп") || materials[0];
-  const edge = findMaterial(profile.patterns.edge, "кромка");
-  const screws = findMaterial(profile.patterns.screws, "саморез");
-  const hinges = findMaterial(profile.patterns.hinges, "петл");
-  const slides = findMaterial(profile.patterns.slides, "направляющ");
   let sheetArea = 0;
   let edgeMeters = 0;
   for (const part of bom.parts) {
@@ -4127,12 +4195,18 @@ async function buildCrmMaterialsFromBom(bom, tier = state.selectedTier || "stand
   const cabinetCount = state.objects3d.filter((o) => o.type === "cabinet" || o.type === "wardrobe").length;
   const drawerCabinets = state.objects3d.filter((o) => o.type === "cabinet").length;
   const qty = profile.qty;
-  const lines = [];
-  lines.push({ material_id: ldsp.id, required_qty: Math.max(1, Math.ceil((sheetArea / 4.9) * qty.panel)) });
-  if (edge) lines.push({ material_id: edge.id, required_qty: Math.max(1, Math.round(edgeMeters * qty.edge)) });
-  if (hinges) lines.push({ material_id: hinges.id, required_qty: Math.max(2, Math.round(cabinetCount * 4 * qty.hinges)) });
-  if (slides) lines.push({ material_id: slides.id, required_qty: Math.max(1, Math.round(drawerCabinets * 2 * qty.slides)) });
-  if (screws) lines.push({ material_id: screws.id, required_qty: Math.max(50, Math.round(bom.parts.length * 24 * qty.screws)) });
+  const sheets = Math.max(1, Number(cutting?.total_sheets) || Math.ceil((sheetArea / 4.9) * qty.panel));
+  const lines = [
+    { material_name: "Лист ДСП 16мм", unit: "лист", required_qty: sheets },
+    { material_name: "Кромка ПВХ 2мм", unit: "м", required_qty: Math.max(1, Math.round(edgeMeters * qty.edge)) },
+  ];
+  if (cabinetCount) {
+    lines.push({ material_name: "Петля мебельная", unit: "шт", required_qty: Math.max(2, Math.round(cabinetCount * 4 * qty.hinges)) });
+  }
+  if (drawerCabinets) {
+    lines.push({ material_name: "Направляющая ящика", unit: "шт", required_qty: Math.max(1, Math.round(drawerCabinets * 2 * qty.slides)) });
+  }
+  lines.push({ material_name: "Саморез 4×16", unit: "шт", required_qty: Math.max(50, Math.round(bom.parts.length * 24 * qty.screws)) });
   return lines;
 }
 
@@ -4189,7 +4263,8 @@ async function submitProjectToWork() {
   
   try {
     const bom = buildBomFromObjects();
-    const cost = estimateProjectCost(bom);
+    const cutting = await quoteCuttingForBom(bom);
+    const cost = estimateProjectCost(bom, cutting);
     const tiers = estimateTierPrices(cost);
     const project = await savePlannerProject();
     state.projectId = project.id;
@@ -4204,7 +4279,7 @@ async function submitProjectToWork() {
       customer_email: customerEmail,
     }, true);
     
-    const materials = await buildCrmMaterialsFromBom(bom, selectedTier);
+    const materials = buildCrmMaterialsFromBom(bom, selectedTier, cutting);
     const projectName = `Проект ${customerName}`;
     
     await api(
@@ -4220,6 +4295,9 @@ async function submitProjectToWork() {
         pricing: tiers,
         selected_tier: selectedTier,
         materials,
+        cutting: cutting
+          ? { total_sheets: cutting.total_sheets, sheet_width: cutting.sheet_width, sheet_height: cutting.sheet_height }
+          : undefined,
         notes: buildTierSubmissionNotes(selectedTier, bom, tiers),
       },
       true
@@ -4509,19 +4587,247 @@ async function renderAdminPlannerProjects() {
   }
 }
 
-async function seedCrmDemo() {
-  try {
-    await api("POST", "/catalog/crm/seed-demo", {}, true);
-    await loadCrm();
-    toast("Демо CRM загружено");
-  } catch (error) {
-    const msg = String(error?.message || error || "");
-    if (/internal server error/i.test(msg)) {
-      toast("CRM: ошибка сервера. После деплоя обновите backend и примените migrate (не -Fast).", false);
-      return;
-    }
-    toast(`CRM: ${msg}`, false);
+function appNowParts() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: APP_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (type) => Number(parts.find((part) => part.type === type)?.value);
+  return { year: get("year"), month: get("month"), day: get("day") };
+}
+
+function dateKeyInAppTz(iso) {
+  if (!iso) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(iso));
+}
+
+function formatAppDateTime(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("ru-RU", {
+    timeZone: APP_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function orderCalendarDate(order) {
+  return order.status_changed_at || order.created_at;
+}
+
+function ensureCalendarMonth() {
+  if (state.calendar.year && state.calendar.month) return;
+  const now = appNowParts();
+  state.calendar.year = now.year;
+  state.calendar.month = now.month;
+}
+
+function shiftCalendarMonth(delta) {
+  ensureCalendarMonth();
+  const date = new Date(Date.UTC(state.calendar.year, state.calendar.month - 1 + delta, 1));
+  state.calendar.year = date.getUTCFullYear();
+  state.calendar.month = date.getUTCMonth() + 1;
+  renderOrderCalendar();
+}
+
+function openCalendarOrder(orderId) {
+  const order = state.crm.orders.find((row) => row.id === orderId);
+  if (!order) {
+    toast("Заказ не найден", false);
+    return;
   }
+  const host = document.getElementById("calendarOrderBody");
+  if (host) host.innerHTML = renderCrmOrderCard(order);
+  const modalEl = document.getElementById("calendarOrderModal");
+  if (modalEl) {
+    if (host) bindCrmOrderPanel(host);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    return;
+  }
+  document.getElementById("crm")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector(`[data-order-card="${orderId}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function renderOrderCalendar() {
+  const host = document.getElementById("orderCalendar");
+  if (!host) return;
+  ensureCalendarMonth();
+  const year = state.calendar.year;
+  const month = state.calendar.month;
+  const first = new Date(Date.UTC(year, month - 1, 1));
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const weekday = (first.getUTCDay() + 6) % 7;
+  const monthLabel = first.toLocaleDateString("ru-RU", { month: "long", year: "numeric", timeZone: "UTC" });
+  const now = appNowParts();
+  const grouped = new Map();
+  for (const order of state.crm.orders) {
+    const key = dateKeyInAppTz(orderCalendarDate(order));
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(order);
+  }
+  const cells = [];
+  for (let i = 0; i < weekday; i += 1) cells.push(`<div class="prod-cal-cell is-empty"></div>`);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const key = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dayOrders = grouped.get(key) || [];
+    const isToday = now.year === year && now.month === month && now.day === day;
+    cells.push(`<div class="prod-cal-cell ${isToday ? "is-today" : ""}">
+      <div class="prod-cal-day">${day}</div>
+      <div class="prod-cal-events">
+        ${dayOrders.map((order) => `<button type="button" class="prod-cal-event" data-cal-order="${order.id}">
+          <span class="prod-cal-status">${escapeHtml(order.status)}</span>
+          <strong>${escapeHtml(order.title)}</strong>
+          <span>${escapeHtml(order.customer || "—")}</span>
+        </button>`).join("")}
+      </div>
+    </div>`);
+  }
+  const weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((d) => `<div class="prod-cal-weekday">${d}</div>`).join("");
+  const agenda = [...grouped.entries()]
+    .filter(([key]) => key.startsWith(`${year}-${String(month).padStart(2, "0")}`))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, orders]) => {
+      const [, , d] = key.split("-");
+      return `<section class="prod-cal-agenda-day">
+        <h3>${Number(d)} ${monthLabel}</h3>
+        ${orders.map((order) => `<button type="button" class="prod-cal-agenda-item" data-cal-order="${order.id}">
+          <span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(order.status)}</span>
+          <div>
+            <strong>${escapeHtml(order.title)}</strong>
+            <div class="small text-muted">${escapeHtml(order.customer || "—")} · ${formatAppDateTime(orderCalendarDate(order))}</div>
+          </div>
+        </button>`).join("")}
+      </section>`;
+    })
+    .join("");
+  host.innerHTML = `
+    <div class="prod-cal">
+      <div class="prod-cal-toolbar">
+        <div>
+          <div class="muted-title">Календарь заказов</div>
+          <h2 class="section-title h4 mb-0 text-capitalize">${escapeHtml(monthLabel)}</h2>
+          <p class="small text-muted mb-0">Время UTC+4. Заказ стоит на дате последнего изменения статуса.</p>
+        </div>
+        <div class="prod-cal-nav">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-cal-shift="-1">←</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-cal-today>Сегодня</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-cal-shift="1">→</button>
+        </div>
+      </div>
+      <div class="prod-cal-weekdays">${weekdays}</div>
+      <div class="prod-cal-grid">${cells.join("")}</div>
+      <div class="prod-cal-agenda">${agenda || `<div class="text-muted">В этом месяце заказов нет.</div>`}</div>
+    </div>`;
+  host.querySelector("[data-cal-today]")?.addEventListener("click", () => {
+    const current = appNowParts();
+    state.calendar.year = current.year;
+    state.calendar.month = current.month;
+    renderOrderCalendar();
+  });
+  host.querySelectorAll("[data-cal-shift]").forEach((btn) => {
+    btn.addEventListener("click", () => shiftCalendarMonth(Number(btn.dataset.calShift)));
+  });
+  host.querySelectorAll("[data-cal-order]").forEach((btn) => {
+    btn.addEventListener("click", () => openCalendarOrder(Number(btn.dataset.calOrder)));
+  });
+}
+
+async function loadStaffDirectory() {
+  const host = document.getElementById("staffDirectory");
+  const wrap = document.getElementById("staff-admin");
+  if (!wrap) return;
+  wrap.classList.toggle("d-none", !isSuperAdmin());
+  if (!host || !isSuperAdmin()) return;
+  try {
+    state.staff = await api("GET", "/auth/admins", undefined, true);
+    host.innerHTML = `
+      <div class="table-responsive">
+        <table class="table table-sm admin-table mb-0">
+          <thead><tr><th>Логин</th><th>Почта</th><th>Роли</th><th></th></tr></thead>
+          <tbody>
+            ${state.staff.map((user) => {
+              const superUser = (user.roles || []).includes("superadmin");
+              return `<tr>
+                <td>${escapeHtml(user.username)}</td>
+                <td>${escapeHtml(user.email || "—")}${user.email && !user.email_verified ? ' <span class="badge text-bg-warning">не подтверждена</span>' : ""}</td>
+                <td class="small">${superUser ? "Главный админ" : "Админ без удаления"}</td>
+                <td class="text-end text-nowrap">
+                  ${superUser ? "" : `<button class="btn btn-sm btn-outline-primary" data-staff-edit="${user.id}">Изменить</button>
+                    <button class="btn btn-sm btn-outline-danger" data-staff-del="${user.id}">Удалить</button>`}
+                </td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>`;
+    host.querySelectorAll("[data-staff-edit]").forEach((btn) => btn.addEventListener("click", () => editStaff(Number(btn.dataset.staffEdit))));
+    host.querySelectorAll("[data-staff-del]").forEach((btn) => btn.addEventListener("click", () => removeStaff(Number(btn.dataset.staffDel))));
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+async function createStaffFromForm() {
+  const username = document.getElementById("staffUsername")?.value.trim();
+  const password = document.getElementById("staffPassword")?.value;
+  const email = document.getElementById("staffEmail")?.value.trim();
+  if (!username || !password || password.length < 8) {
+    toast("Укажите логин и пароль от 8 символов", false);
+    return;
+  }
+  try {
+    await api("POST", "/auth/admins", { username, password, email: email || undefined }, true);
+    document.getElementById("staffUsername").value = "";
+    document.getElementById("staffPassword").value = "";
+    document.getElementById("staffEmail").value = "";
+    await loadStaffDirectory();
+    toast(email ? "Администратор создан. Письмо с подтверждением отправлено, если SMTP настроен." : "Администратор создан");
+  } catch (error) {
+    toast(`Не удалось создать администратора: ${formatApiError(error)}`, false);
+  }
+}
+
+async function editStaff(userId) {
+  const user = state.staff.find((row) => row.id === userId);
+  if (!user) return;
+  const username = window.prompt("Логин", user.username);
+  if (!username) return;
+  const password = window.prompt("Новый пароль (пусто — не менять)", "");
+  const email = window.prompt("Почта (пусто — без почты)", user.email || "");
+  const payload = { username };
+  if (password) payload.password = password;
+  if (email) payload.email = email;
+  try {
+    await api("PATCH", `/auth/admins/${userId}`, payload, true);
+    await loadStaffDirectory();
+    toast("Данные администратора обновлены");
+  } catch (error) {
+    toast(`Не удалось изменить администратора: ${formatApiError(error)}`, false);
+  }
+}
+
+async function removeStaff(userId) {
+  if (!window.confirm("Удалить этого администратора?")) return;
+  try {
+    await api("DELETE", `/auth/admins/${userId}`, undefined, true);
+    await loadStaffDirectory();
+    toast("Администратор удалён");
+  } catch (error) {
+    toast(`Не удалось удалить: ${formatApiError(error)}`, false);
+  }
+}
+
+async function seedCrmDemo() {
+  toast("Демо-данные CRM отключены. Заказы появляются из реальных 3D-проектов.", false);
 }
 
 async function bootAdminPanel() {
@@ -4533,10 +4839,14 @@ async function bootAdminPanel() {
   gate.classList.toggle("d-none", allowed);
   content.classList.toggle("d-none", !allowed);
   if (!allowed) return;
+  const clearJobs = document.getElementById("btnClearCuttingJobs");
+  if (clearJobs) clearJobs.classList.toggle("d-none", !canDeleteRecords());
   renderAdminCatalogTable();
   await renderCuttingJobs();
   await loadDeliverySettingsAdmin();
   await loadCrm();
+  renderOrderCalendar();
+  await loadStaffDirectory();
   await renderAdminPlannerProjects();
   if (state.projectId) {
     ensureRoom3D();
@@ -5366,8 +5676,7 @@ async function boot() {
   bindClick("btnAddProduct", openNewProductEditor);
   bindClick("btnSaveDeliverySettings", saveDeliverySettingsAdmin);
   bindClick("btnQuoteDelivery", quoteDelivery);
-  bindClick("btnSeedDemo", async () => { await seedDemoData(); await loadCatalog(); renderAdminCatalogTable(); toast("Демо-данные загружены"); });
-  bindClick("btnSeedCrm", seedCrmDemo);
+  bindClick("btnCreateStaff", createStaffFromForm);
   bindClick("btnRefreshJobs", renderCuttingJobs);
   bindClick("btnClearCuttingJobs", clearCuttingJobs);
 
@@ -5376,11 +5685,11 @@ async function boot() {
   document.addEventListener("pointercancel", endDrag);
 
   if (APP_MODE === "admin") {
-    state.cuttingParts = defaultCuttingParts.map((p) => ({ ...p }));
+    state.cuttingParts = [];
     renderParts();
     state.objects3d = [];
   } else {
-    createDemoObjects();
+    state.objects3d = [];
   }
   renderCart();
   applyPlannerModeUi();
@@ -5416,9 +5725,6 @@ async function boot() {
     if (APP_MODE === "admin") {
       await autoLogin();
       await bootAdminPanel();
-      if (canManageCatalog()) {
-        seedDemoData().catch((error) => console.warn("Demo seed:", error));
-      }
       setBackendStatus(true, token() ? "Панель администратора подключена" : "Войдите как admin");
     } else {
       if (token()) await refreshAuth();

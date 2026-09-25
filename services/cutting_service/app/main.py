@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from common.jwt_auth import ensure_cutting_runner
+from common.jwt_auth import ensure_can_delete, ensure_cutting_runner
 from common.messaging import publish_event
 
 from .db import get_session
@@ -25,8 +25,7 @@ def healthcheck() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.post("/optimize", response_model=CuttingResponse, dependencies=[Depends(ensure_cutting_runner)])
-def optimize(payload: CuttingRequest, session: Session = Depends(get_session)) -> CuttingResponse:
+def compute_cutting(payload: CuttingRequest) -> CuttingResponse:
     placements, unplaced_parts, total_sheets = optimize_sheet(payload.sheet_width, payload.sheet_height, payload.parts)
     requested_count = sum(part.quantity for part in payload.parts)
     used_area = sum(item.width * item.height for item in placements)
@@ -51,18 +50,8 @@ def optimize(payload: CuttingRequest, session: Session = Depends(get_session)) -
             }
         )
 
-    job = CuttingJob(
-        sheet_width=payload.sheet_width,
-        sheet_height=payload.sheet_height,
-        parts_count=requested_count,
-        placed_count=len(placements),
-        utilization_percent=int(utilization),
-    )
-    session.add(job)
-    session.flush()
-
-    response = CuttingResponse(
-        job_id=job.id,
+    return CuttingResponse(
+        job_id=None,
         placed_count=len(placements),
         requested_count=requested_count,
         utilization_percent=utilization,
@@ -73,6 +62,28 @@ def optimize(payload: CuttingRequest, session: Session = Depends(get_session)) -
         unplaced_parts=unplaced_parts,
         placements=placements,
     )
+
+
+@app.post("/quote", response_model=CuttingResponse)
+def quote(payload: CuttingRequest) -> CuttingResponse:
+    """Nesting quote for project pricing. Does not persist a production job."""
+    return compute_cutting(payload)
+
+
+@app.post("/optimize", response_model=CuttingResponse, dependencies=[Depends(ensure_cutting_runner)])
+def optimize(payload: CuttingRequest, session: Session = Depends(get_session)) -> CuttingResponse:
+    response = compute_cutting(payload)
+
+    job = CuttingJob(
+        sheet_width=payload.sheet_width,
+        sheet_height=payload.sheet_height,
+        parts_count=response.requested_count,
+        placed_count=response.placed_count,
+        utilization_percent=int(response.utilization_percent),
+    )
+    session.add(job)
+    session.flush()
+    response.job_id = job.id
 
     job.result_json = json.dumps(response.model_dump(mode="json"))
     session.commit()
@@ -124,7 +135,7 @@ def get_job(job_id: int, session: Session = Depends(get_session)) -> CuttingJobD
     return CuttingJobDetail(**_job_out(job).model_dump(), result=result)
 
 
-@app.delete("/jobs", dependencies=[Depends(ensure_cutting_runner)])
+@app.delete("/jobs", dependencies=[Depends(ensure_can_delete)])
 def clear_jobs(session: Session = Depends(get_session)) -> dict[str, int]:
     deleted = session.execute(delete(CuttingJob)).rowcount or 0
     session.commit()

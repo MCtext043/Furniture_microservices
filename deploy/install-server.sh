@@ -47,8 +47,9 @@ if [[ "${HTTPS_ENABLED:-0}" == "1" ]]; then
 else
   "${COMPOSE[@]}" stop caddy 2>/dev/null || true
   "${COMPOSE[@]}" rm -f caddy 2>/dev/null || true
-  # Public HTTP via gateway when HTTPS/Caddy is off
-  if grep -q '^GATEWAY_PORT_MAPPING=127.0.0.1:' .env 2>/dev/null; then
+  # Public HTTP via gateway when HTTPS/Caddy is off.
+  # Keep 127.0.0.1 when nginx (or another reverse proxy) already owns 80/443.
+  if [[ "${GATEWAY_BIND_LOCALHOST:-0}" != "1" ]] && grep -q '^GATEWAY_PORT_MAPPING=127.0.0.1:' .env 2>/dev/null; then
     sed -i 's/^GATEWAY_PORT_MAPPING=127.0.0.1:/GATEWAY_PORT_MAPPING=0.0.0.0:/' .env
   fi
 fi

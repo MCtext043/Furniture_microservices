@@ -1,4 +1,4 @@
-from common.pricing import estimate_tier_prices
+from common.pricing import estimate_from_cutting, estimate_tier_prices
 
 
 def test_tier_prices_increase_standard_to_premium():
@@ -21,3 +21,11 @@ def test_tier_keys_present():
         furniture_cost=0,
     )
     assert set(prices) == {"standard", "comfort", "premium"}
+
+
+def test_cutting_price_uses_whole_sheets_not_part_area():
+    one_sheet = estimate_from_cutting(total_sheets=1, edge_meters=10)
+    two_sheets = estimate_from_cutting(total_sheets=2, edge_meters=10)
+    assert two_sheets["material_cost"] == one_sheet["material_cost"] * 2
+    assert two_sheets["comfort"] > one_sheet["comfort"]
+    assert two_sheets["standard"] < two_sheets["comfort"] < two_sheets["premium"]

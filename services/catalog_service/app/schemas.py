@@ -160,7 +160,9 @@ class CrmWarehouseStockUpdate(BaseModel):
 
 
 class CrmOrderMaterialLineIn(BaseModel):
-    material_id: int
+    material_id: int | None = None
+    material_name: str | None = Field(default=None, min_length=2, max_length=120)
+    unit: str | None = Field(default=None, max_length=20)
     required_qty: float = Field(gt=0)
 
 
@@ -190,6 +192,8 @@ class CrmOrderOut(BaseModel):
     price_premium: float | None = None
     selected_tier: str = "standard"
     materials: list[CrmOrderMaterialLine]
+    created_at: str | None = None
+    status_changed_at: str | None = None
 
 
 class CrmOrderStatusUpdate(BaseModel):
@@ -230,6 +234,12 @@ class CrmPricingIn(BaseModel):
     premium: float = Field(ge=0)
 
 
+class CrmCuttingSummary(BaseModel):
+    total_sheets: int = Field(ge=1, le=500)
+    sheet_width: int | None = Field(default=None, gt=0)
+    sheet_height: int | None = Field(default=None, gt=0)
+
+
 class CrmSubmitProjectIn(BaseModel):
     planner_project_id: int
     title: str = Field(min_length=2, max_length=180)
@@ -239,7 +249,8 @@ class CrmSubmitProjectIn(BaseModel):
     user_id: str = Field(min_length=1, max_length=64)
     pricing: CrmPricingIn
     selected_tier: str = Field(default="standard", pattern=r"^(standard|comfort|premium)$")
-    materials: list[CrmOrderMaterialLineIn] = Field(min_length=1)
+    materials: list[CrmOrderMaterialLineIn] = Field(default_factory=list)
+    cutting: CrmCuttingSummary | None = None
     notes: str = ""
 
 

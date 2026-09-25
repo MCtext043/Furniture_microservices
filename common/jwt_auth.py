@@ -62,11 +62,35 @@ def ensure_authenticated_when_enforced(auth: AuthContext = Depends(get_auth_cont
     return auth
 
 
+def _role_set(claims: TokenClaims) -> set[str]:
+    return set(claims.roles)
+
+
+def is_superadmin(claims: TokenClaims) -> bool:
+    roles = _role_set(claims)
+    return "*" in roles or "superadmin" in roles
+
+
 def _has_privileged_role(claims: TokenClaims, required: tuple[str, ...]) -> bool:
-    roles = set(claims.roles)
-    if "*" in roles or "admin" in roles:
+    roles = _role_set(claims)
+    if "*" in roles or "superadmin" in roles or "admin" in roles:
         return True
-    return roles.intersection(set(required))
+    return bool(roles.intersection(set(required)))
+
+
+def ensure_superadmin(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    if not auth.enforced:
+        return auth
+    if auth.claims is None:
+        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
+    if not is_superadmin(auth.claims):
+        raise HTTPException(status_code=403, detail="Действие доступно только главному администратору")
+    return auth
+
+
+def ensure_can_delete(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    """Hard delete of records is reserved for the bootstrap superadmin."""
+    return ensure_superadmin(auth)
 
 
 def ensure_catalog_writer(auth: AuthContext = Depends(get_auth_context)) -> None:
