@@ -46,7 +46,7 @@ const state = {
   lastCutResult: null,
   cuttingQuoteCache: null,
   selectedCutJobId: null,
-  crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active" },
+  crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active", dictionaries: [], editingOrderId: null },
   calendar: { year: null, month: null },
   staff: [],
   userOrders: [],
@@ -3480,11 +3480,238 @@ function renderObjects3dList() {
   }));
 }
 
+
+const CRM_ADMIN_SCALAR_FIELDS = [
+  { key: "title", label: "Название заказа", type: "text", required: true },
+  { key: "customer_full_name", label: "ФИО", type: "text" },
+  { key: "signature_date", label: "Дата подписи", type: "date" },
+  { key: "delivery_date", label: "Дата сдачи", type: "date" },
+  { key: "price_admin", label: "Цена", type: "number" },
+  { key: "advance_paid", label: "Аванс внесенный", type: "number" },
+  { key: "balance_due", label: "Остаток", type: "number" },
+  { key: "email", label: "Почта", type: "email" },
+  { key: "phone", label: "Телефон", type: "text" },
+  { key: "install_address", label: "Адрес монтажа", type: "text" },
+  { key: "status", label: "Статус", type: "status" },
+  { key: "notes", label: "Заметки", type: "textarea" },
+];
+
+const CRM_DICT_FIELD_KEYS = [
+  "color_corpus", "color_facade_1", "color_facade_2", "color_facade_3",
+  "visible_parts", "guides", "hinges", "mirror", "countertop", "apron",
+  "gola_profile", "plinth", "false_panel", "light_inset", "light_overlay",
+  "euro_cut", "cutlery_tray", "vent_grille", "handles",
+];
+
+function crmDictLabel(fieldKey) {
+  const found = (state.crm.dictionaries || []).find((d) => d.field_key === fieldKey);
+  return found?.label || fieldKey;
+}
+
+function crmDictOptions(fieldKey) {
+  const found = (state.crm.dictionaries || []).find((d) => d.field_key === fieldKey);
+  return found?.options || [];
+}
+
+function buildCrmOrderEditorHtml(order) {
+  const o = order || {};
+  const scalar = CRM_ADMIN_SCALAR_FIELDS.map((field) => {
+    const val = o[field.key] ?? (field.key === "status" ? "черновой замер" : "");
+    if (field.type === "status") {
+      return `<div class="col-md-6"><label class="form-label small">${escapeHtml(field.label)}</label>
+        <select class="form-select" id="crmField_${field.key}">
+          ${crmStatusOptions(val).map((s) => `<option value="${escapeHtml(s)}" ${s === val ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}
+        </select></div>`;
+    }
+    if (field.type === "textarea") {
+      return `<div class="col-12"><label class="form-label small">${escapeHtml(field.label)}</label>
+        <textarea class="form-control" id="crmField_${field.key}" rows="2">${escapeHtml(val || "")}</textarea></div>`;
+    }
+    return `<div class="col-md-6"><label class="form-label small">${escapeHtml(field.label)}${field.required ? " *" : ""}</label>
+      <input class="form-control" id="crmField_${field.key}" type="${field.type}" value="${escapeHtml(val == null ? "" : String(val))}" /></div>`;
+  }).join("");
+  const dicts = CRM_DICT_FIELD_KEYS.map((key) => {
+    const options = crmDictOptions(key);
+    const current = o[key] || "";
+    const opts = [`<option value="">—</option>`]
+      .concat(options.map((opt) => `<option value="${escapeHtml(opt.value)}" ${opt.value === current ? "selected" : ""}>${escapeHtml(opt.value)}</option>`));
+    if (current && !options.some((opt) => opt.value === current)) {
+      opts.push(`<option value="${escapeHtml(current)}" selected>${escapeHtml(current)} (текущее)</option>`);
+    }
+    return `<div class="col-md-6"><label class="form-label small">${escapeHtml(crmDictLabel(key))}</label>
+      <select class="form-select" id="crmField_${key}">${opts.join("")}</select></div>`;
+  }).join("");
+  return scalar + dicts;
+}
+
+function readCrmOrderEditorPayload() {
+  const get = (key) => document.getElementById(`crmField_${key}`)?.value ?? "";
+  const num = (key) => {
+    const raw = get(key).trim();
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  const dateOrNull = (key) => {
+    const raw = get(key).trim();
+    return raw || null;
+  };
+  const title = get("title").trim();
+  if (title.length < 2) throw new Error("Укажите название заказа");
+  const payload = {
+    title,
+    customer: get("customer_full_name").trim(),
+    customer_full_name: get("customer_full_name").trim(),
+    signature_date: dateOrNull("signature_date"),
+    delivery_date: dateOrNull("delivery_date"),
+    price_admin: num("price_admin"),
+    advance_paid: num("advance_paid"),
+    balance_due: num("balance_due"),
+    email: get("email").trim(),
+    phone: get("phone").trim(),
+    install_address: get("install_address").trim(),
+    status: get("status"),
+    notes: get("notes"),
+  };
+  CRM_DICT_FIELD_KEYS.forEach((key) => { payload[key] = get(key).trim(); });
+  if (payload.price_admin != null && payload.advance_paid != null && payload.balance_due == null) {
+    payload.balance_due = payload.price_admin - payload.advance_paid;
+  }
+  return payload;
+}
+
+async function openCrmOrderEditor(orderId) {
+  if (!canManageCatalog()) return;
+  if (!state.crm.dictionaries?.length) {
+    try {
+      state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+    } catch (error) {
+      toast(formatApiError(error), false);
+      return;
+    }
+  }
+  let order = null;
+  if (orderId) {
+    order = state.crm.orders.find((o) => o.id === orderId) || null;
+    if (!order) {
+      try {
+        order = await api("GET", `/catalog/crm/orders/${orderId}`, undefined, true);
+      } catch (error) {
+        toast(formatApiError(error), false);
+        return;
+      }
+    }
+  }
+  state.crm.editingOrderId = order?.id || null;
+  const idInput = document.getElementById("crmEditOrderId");
+  const title = document.getElementById("crmOrderEditorTitle");
+  const fields = document.getElementById("crmOrderEditorFields");
+  if (idInput) idInput.value = order?.id ? String(order.id) : "";
+  if (title) title.textContent = order ? `Редактирование заказа #${order.id}` : "Новый заказ";
+  if (fields) fields.innerHTML = buildCrmOrderEditorHtml(order);
+  const modalEl = document.getElementById("crmOrderEditorModal");
+  if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+async function saveCrmOrderFromEditor() {
+  try {
+    const payload = readCrmOrderEditorPayload();
+    const id = document.getElementById("crmEditOrderId")?.value;
+    if (id) {
+      await api("PATCH", `/catalog/crm/orders/${id}`, payload, true);
+      toast("Заказ обновлён");
+    } else {
+      await api("POST", "/catalog/crm/orders", payload, true);
+      toast("Заказ создан");
+    }
+    const modalEl = document.getElementById("crmOrderEditorModal");
+    bootstrap.Modal.getInstance(modalEl)?.hide();
+    await loadCrm();
+  } catch (error) {
+    toast(error?.message || formatApiError(error), false);
+  }
+}
+
+function renderCrmDictionariesPanel() {
+  const host = document.getElementById("crmDictionariesPanel");
+  if (!host) return;
+  const canDelete = canDeleteRecords();
+  if (!state.crm.dictionaries?.length) {
+    host.innerHTML = `<div class="text-muted">Справочники пусты</div>`;
+    return;
+  }
+  host.innerHTML = state.crm.dictionaries.map((dict) => `
+    <div class="border rounded-3 p-3 mb-3" data-dict-key="${escapeHtml(dict.field_key)}">
+      <div class="fw-semibold mb-2">${escapeHtml(dict.label)}</div>
+      <div class="d-flex flex-wrap gap-2 mb-2">
+        ${(dict.options || []).map((opt) => `
+          <span class="badge text-bg-light border d-inline-flex align-items-center gap-1">
+            ${escapeHtml(opt.value)}
+            ${canDelete ? `<button type="button" class="btn-close" style="font-size:0.55rem" data-dict-delete="${opt.id}" aria-label="Удалить"></button>` : ""}
+          </span>
+        `).join("") || `<span class="text-muted">Нет значений</span>`}
+      </div>
+      <div class="input-group input-group-sm" style="max-width:420px">
+        <input class="form-control" placeholder="Новое значение" data-dict-input="${escapeHtml(dict.field_key)}" />
+        <button class="btn btn-outline-primary" type="button" data-dict-add="${escapeHtml(dict.field_key)}">Добавить</button>
+      </div>
+    </div>
+  `).join("");
+  host.querySelectorAll("[data-dict-add]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const key = button.dataset.dictAdd;
+      const input = host.querySelector(`[data-dict-input="${key}"]`);
+      const value = (input?.value || "").trim();
+      if (!value) return;
+      try {
+        await api("POST", "/catalog/crm/field-options", { field_key: key, value }, true);
+        if (input) input.value = "";
+        state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+        renderCrmDictionariesPanel();
+        toast("Значение добавлено");
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+  host.querySelectorAll("[data-dict-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!confirm("Удалить значение из справочника?")) return;
+      try {
+        await api("DELETE", `/catalog/crm/field-options/${button.dataset.dictDelete}`, undefined, true);
+        state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+        renderCrmDictionariesPanel();
+        toast("Значение удалено");
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+}
+
+async function openCrmDictionariesModal() {
+  if (!canManageCatalog()) return;
+  try {
+    state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+    renderCrmDictionariesPanel();
+    const modalEl = document.getElementById("crmDictionariesModal");
+    if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  } catch (error) {
+    toast(formatApiError(error), false);
+  }
+}
+
 async function loadCrm() {
   if (APP_MODE !== "admin" || !canManageCatalog()) return;
   try {
-    state.crm.warehouse = await api("GET", "/catalog/crm/warehouse", undefined, true);
-    state.crm.orders = await api("GET", "/catalog/crm/orders", undefined, true);
+    const [warehouse, orders, dictionaries] = await Promise.all([
+      api("GET", "/catalog/crm/warehouse", undefined, true),
+      api("GET", "/catalog/crm/orders", undefined, true),
+      api("GET", "/catalog/crm/field-dictionaries", undefined, true),
+    ]);
+    state.crm.warehouse = warehouse;
+    state.crm.orders = orders;
+    state.crm.dictionaries = dictionaries;
     renderCrmPanel();
     renderOrderCalendar();
   } catch (error) {
@@ -3799,13 +4026,22 @@ function crmOrdersForTab(tab = state.crm.tab) {
 }
 
 function renderCrmOrderCard(order) {
-  // Формируем контакты для отображения
+  const phone = order.phone || order.customer_phone || "";
+  const email = order.email || order.customer_email || "";
+  const fio = order.customer_full_name || order.customer || "—";
   const contacts = [];
-  if (order.customer_phone) contacts.push(`📞 ${order.customer_phone}`);
-  if (order.customer_email) contacts.push(`✉️ ${order.customer_email}`);
-  const contactsHtml = contacts.length 
-    ? `<div class="small text-muted mb-1">${contacts.join(' · ')}</div>` 
-    : '';
+  if (phone) contacts.push(`Тел: ${phone}`);
+  if (email) contacts.push(`Email: ${email}`);
+  if (order.delivery_date) contacts.push(`Сдача: ${order.delivery_date}`);
+  if (order.install_address) contacts.push(`Адрес: ${order.install_address}`);
+  const contactsHtml = contacts.length
+    ? `<div class="small text-muted mb-1">${contacts.map((c) => escapeHtml(c)).join(" · ")}</div>`
+    : "";
+  const moneyBits = [
+    order.price_admin != null ? `Цена ${money(order.price_admin)}` : null,
+    order.advance_paid != null ? `Аванс ${money(order.advance_paid)}` : null,
+    order.balance_due != null ? `Остаток ${money(order.balance_due)}` : null,
+  ].filter(Boolean).join(" · ");
 
   return `
     <div class="border rounded p-3 mb-3" data-order-card="${order.id}">
@@ -3815,9 +4051,10 @@ function renderCrmOrderCard(order) {
           <span class="badge ${crmStatusBadge(order.status)} ms-2">${escapeHtml(order.status)}</span>
           ${order.planner_project_id ? `<span class="badge text-bg-light ms-1">проект #${order.planner_project_id}</span>` : ""}
         </div>
-        <span class="text-muted small">${escapeHtml(order.customer || "—")}</span>
+        <span class="text-muted small">${escapeHtml(fio)}</span>
       </div>
       ${contactsHtml}
+      ${moneyBits ? `<div class="small mb-1">${escapeHtml(moneyBits)}</div>` : ""}
       ${order.notes ? `<div class="small text-muted mb-2">${escapeHtml(order.notes)}</div>` : ""}
       ${order.selected_tier ? `<div class="small mb-2"><span class="badge bg-info text-dark">Комплектация: ${escapeHtml(tierTitle(order.selected_tier))}</span> · <strong>${money(orderSelectedPrice(order))}</strong></div>` : ""}
       ${order.materials?.length ? `<div class="small mb-2"><strong>Материалы:</strong> ${order.materials.map((line) => `${escapeHtml(line.material_name)} — ${line.required_qty} ${escapeHtml(line.unit)}`).join("; ")}</div>` : ""}
@@ -3827,6 +4064,7 @@ function renderCrmOrderCard(order) {
           ${crmStatusOptions(order.status).map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
         </select>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>
+        <button type="button" class="btn btn-sm btn-outline-dark" data-crm-edit="${order.id}">Редактировать</button>
         <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
         <button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>
@@ -3851,6 +4089,10 @@ function bindCrmOrderPanel(host) {
       const select = host.querySelector(`[data-crm-status="${orderId}"]`);
       updateCrmOrderStatus(orderId, select?.value || "черновой замер");
     });
+  });
+
+  host.querySelectorAll("[data-crm-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => openCrmOrderEditor(Number(btn.dataset.crmEdit)));
   });
   
   host.querySelectorAll("[data-crm-photo]").forEach((btn) => {
@@ -4669,10 +4911,16 @@ function renderOrderCalendar() {
   const monthLabel = first.toLocaleDateString("ru-RU", { month: "long", year: "numeric", timeZone: "UTC" });
   const now = appNowParts();
   const grouped = new Map();
-  for (const order of state.crm.orders) {
-    const key = dateKeyInAppTz(orderCalendarDate(order));
+  const pushCal = (key, entry) => {
+    if (!key) return;
     if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key).push(order);
+    grouped.get(key).push(entry);
+  };
+  for (const order of state.crm.orders) {
+    pushCal(dateKeyInAppTz(orderCalendarDate(order)), { ...order, calendar_kind: "status" });
+    if (order.delivery_date) {
+      pushCal(String(order.delivery_date).slice(0, 10), { ...order, calendar_kind: "delivery" });
+    }
   }
   const cells = [];
   for (let i = 0; i < weekday; i += 1) cells.push(`<div class="prod-cal-cell is-empty"></div>`);
@@ -4683,11 +4931,18 @@ function renderOrderCalendar() {
     cells.push(`<div class="prod-cal-cell ${isToday ? "is-today" : ""}">
       <div class="prod-cal-day">${day}</div>
       <div class="prod-cal-events">
-        ${dayOrders.map((order) => `<button type="button" class="prod-cal-event" data-cal-order="${order.id}">
-          <span class="prod-cal-status">${escapeHtml(order.status)}</span>
+        ${dayOrders.map((order) => {
+          const isDelivery = order.calendar_kind === "delivery";
+          const label = isDelivery ? "Сдача" : escapeHtml(order.status);
+          const subtitle = isDelivery
+            ? (order.install_address || order.customer_full_name || order.customer || "—")
+            : (order.customer_full_name || order.customer || "—");
+          return `<button type="button" class="prod-cal-event" data-cal-order="${order.id}">
+          <span class="prod-cal-status">${label}</span>
           <strong>${escapeHtml(order.title)}</strong>
-          <span>${escapeHtml(order.customer || "—")}</span>
-        </button>`).join("")}
+          <span>${escapeHtml(subtitle)}</span>
+        </button>`;
+        }).join("")}
       </div>
     </div>`);
   }
@@ -4699,13 +4954,21 @@ function renderOrderCalendar() {
       const [, , d] = key.split("-");
       return `<section class="prod-cal-agenda-day">
         <h3>${Number(d)} ${monthLabel}</h3>
-        ${orders.map((order) => `<button type="button" class="prod-cal-agenda-item" data-cal-order="${order.id}">
-          <span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(order.status)}</span>
+        ${orders.map((order) => {
+          const isDelivery = order.calendar_kind === "delivery";
+          const badge = isDelivery ? "Сдача" : escapeHtml(order.status);
+          const badgeClass = isDelivery ? "text-bg-warning" : crmStatusBadge(order.status);
+          const sub = isDelivery
+            ? escapeHtml(order.install_address || order.customer_full_name || order.customer || "—")
+            : `${escapeHtml(order.customer_full_name || order.customer || "—")} · ${formatAppDateTime(orderCalendarDate(order))}`;
+          return `<button type="button" class="prod-cal-agenda-item" data-cal-order="${order.id}">
+          <span class="badge ${badgeClass}">${badge}</span>
           <div>
             <strong>${escapeHtml(order.title)}</strong>
-            <div class="small text-muted">${escapeHtml(order.customer || "—")} · ${formatAppDateTime(orderCalendarDate(order))}</div>
+            <div class="small text-muted">${sub}</div>
           </div>
-        </button>`).join("")}
+        </button>`;
+        }).join("")}
       </section>`;
     })
     .join("");
@@ -4715,7 +4978,7 @@ function renderOrderCalendar() {
         <div>
           <div class="muted-title">Календарь заказов</div>
           <h2 class="section-title h4 mb-0 text-capitalize">${escapeHtml(monthLabel)}</h2>
-          <p class="small text-muted mb-0">Время UTC+4. Заказ стоит на дате последнего изменения статуса.</p>
+          <p class="small text-muted mb-0">Время UTC+4. Статус — по дате смены статуса; сдача и адрес монтажа — по дате сдачи.</p>
         </div>
         <div class="prod-cal-nav">
           <button type="button" class="btn btn-outline-secondary btn-sm" data-cal-shift="-1">←</button>
@@ -5672,6 +5935,9 @@ async function boot() {
   bindClick("btnLogin", loginCustomer);
   bindClick("btnRegister", registerCustomer);
   bindClick("btnAdminLogin", loginCustomer);
+  bindClick("btnCrmNewOrder", () => openCrmOrderEditor(null));
+  bindClick("btnCrmDictionaries", openCrmDictionariesModal);
+  bindClick("btnCrmSaveOrder", saveCrmOrderFromEditor);
   bindClick("btnSaveProduct", saveProductEditor);
   bindClick("btnAddProduct", openNewProductEditor);
   bindClick("btnSaveDeliverySettings", saveDeliverySettingsAdmin);

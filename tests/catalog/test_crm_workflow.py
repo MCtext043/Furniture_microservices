@@ -237,3 +237,135 @@ def test_procurement_rename_and_add_line(catalog_client: TestClient):
     dsb = next(line for line in body["lines"] if line["material_name"] == "ДСП 16 мм белая")
     assert dsb["overspend_qty"] == 1
     assert dsb["overspend_rub"] == 1200
+
+
+def test_admin_creates_order_with_card_fields(catalog_client: TestClient):
+    response = catalog_client.post(
+        "/crm/orders",
+        json={
+            "title": "Кухня админ",
+            "customer_full_name": "Сидоров Иван",
+            "signature_date": "2026-03-01",
+            "delivery_date": "2026-04-15",
+            "price_admin": 250000,
+            "advance_paid": 100000,
+            "email": "sidorov@example.com",
+            "phone": "+79001112233",
+            "install_address": "ул. Ленина, 10",
+            "color_corpus": "Белый",
+            "handles": "Скоба",
+            "materials": [],
+        },
+    )
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["customer_full_name"] == "Сидоров Иван"
+    assert body["customer"] == "Сидоров Иван"
+    assert body["delivery_date"] == "2026-04-15"
+    assert body["price_admin"] == 250000
+    assert body["advance_paid"] == 100000
+    assert body["balance_due"] == 150000
+    assert body["install_address"] == "ул. Ленина, 10"
+    assert body["color_corpus"] == "Белый"
+    assert body["handles"] == "Скоба"
+    assert body["materials"] == []
+
+
+def test_admin_patches_client_order_fields(catalog_client: TestClient):
+    created = catalog_client.post(
+        "/crm/orders/submit-project",
+        json={
+            "planner_project_id": 99,
+            "title": "Клиентский заказ",
+            "customer": "Клиент К.",
+            "customer_phone": "+7999",
+            "customer_email": "c@ex.com",
+            "user_id": "u-client",
+            "pricing": {"standard": 10, "comfort": 20, "premium": 30},
+            "cutting": {"total_sheets": 1},
+        },
+    )
+    assert created.status_code == 201, created.text
+    order = created.json()
+    assert order["customer_full_name"] == "Клиент К."
+    assert order["phone"] == "+7999"
+    assert order["email"] == "c@ex.com"
+    assert order["delivery_date"] is None
+    assert order["color_corpus"] == ""
+    assert order["price_admin"] is None
+
+    patched = catalog_client.patch(
+        f"/crm/orders/{order['id']}",
+        json={
+            "delivery_date": "2026-05-20",
+            "install_address": "пр. Мира, 5",
+            "price_admin": 180000,
+            "advance_paid": 50000,
+            "color_facade_1": "Дуб",
+            "hinges": "Blum",
+        },
+    )
+    assert patched.status_code == 200, patched.text
+    body = patched.json()
+    assert body["delivery_date"] == "2026-05-20"
+    assert body["install_address"] == "пр. Мира, 5"
+    assert body["balance_due"] == 130000
+    assert body["color_facade_1"] == "Дуб"
+    assert body["hinges"] == "Blum"
+    assert body["phone"] == "+7999"
+
+
+def test_calendar_includes_delivery_date(catalog_client: TestClient):
+    created = catalog_client.post(
+        "/crm/orders",
+        json={
+            "title": "Сдача в календарь",
+            "customer_full_name": "Календарёв",
+            "delivery_date": "2026-06-01",
+            "install_address": "ул. Календарная, 1",
+        },
+    ).json()
+    calendar = catalog_client.get("/crm/calendar")
+    assert calendar.status_code == 200
+    items = calendar.json()
+    delivery = [i for i in items if i["id"] == created["id"] and i.get("calendar_kind") == "delivery"]
+    assert len(delivery) == 1
+    assert delivery[0]["install_address"] == "ул. Календарная, 1"
+    assert delivery[0]["status_changed_at"].startswith("2026-06-01")
+
+
+def test_field_dictionaries_defaults_and_add(catalog_client: TestClient):
+    listed = catalog_client.get("/crm/field-dictionaries")
+    assert listed.status_code == 200
+    dicts = listed.json()
+    keys = {d["field_key"] for d in dicts}
+    assert "color_corpus" in keys
+    assert "handles" in keys
+    corpus = next(d for d in dicts if d["field_key"] == "color_corpus")
+    assert len(corpus["options"]) >= 1
+
+    added = catalog_client.post(
+        "/crm/field-options",
+        json={"field_key": "handles", "value": "Кастомная ручка X"},
+    )
+    assert added.status_code == 201, added.text
+    again = catalog_client.get("/crm/field-dictionaries").json()
+    handles = next(d for d in again if d["field_key"] == "handles")
+    assert any(o["value"] == "Кастомная ручка X" for o in handles["options"])
+
+
+def test_get_order_returns_admin_fields(catalog_client: TestClient):
+    created = catalog_client.post(
+        "/crm/orders",
+        json={
+            "title": "Детали",
+            "customer_full_name": "Тест",
+            "countertop": "Камень",
+            "apron": "Стекло",
+        },
+    ).json()
+    got = catalog_client.get(f"/crm/orders/{created['id']}")
+    assert got.status_code == 200
+    body = got.json()
+    assert body["countertop"] == "Камень"
+    assert body["apron"] == "Стекло"

@@ -171,15 +171,82 @@ class CrmOrderMaterialLine(CrmOrderMaterialLineIn):
     unit: str
 
 
-class CrmOrderCreate(BaseModel):
+class CrmOrderAdminFields(BaseModel):
+    customer_full_name: str = Field(default="", max_length=180)
+    signature_date: str | None = Field(default=None, description="YYYY-MM-DD")
+    delivery_date: str | None = Field(default=None, description="YYYY-MM-DD")
+    price_admin: float | None = Field(default=None, ge=0)
+    advance_paid: float | None = Field(default=None, ge=0)
+    balance_due: float | None = Field(default=None)
+    email: str = Field(default="", max_length=254)
+    phone: str = Field(default="", max_length=80)
+    install_address: str = Field(default="", max_length=255)
+    color_corpus: str = Field(default="", max_length=120)
+    color_facade_1: str = Field(default="", max_length=120)
+    color_facade_2: str = Field(default="", max_length=120)
+    color_facade_3: str = Field(default="", max_length=120)
+    visible_parts: str = Field(default="", max_length=120)
+    guides: str = Field(default="", max_length=120)
+    hinges: str = Field(default="", max_length=120)
+    mirror: str = Field(default="", max_length=120)
+    countertop: str = Field(default="", max_length=120)
+    apron: str = Field(default="", max_length=120)
+    gola_profile: str = Field(default="", max_length=120)
+    plinth: str = Field(default="", max_length=120)
+    false_panel: str = Field(default="", max_length=120)
+    light_inset: str = Field(default="", max_length=120)
+    light_overlay: str = Field(default="", max_length=120)
+    euro_cut: str = Field(default="", max_length=120)
+    cutlery_tray: str = Field(default="", max_length=120)
+    vent_grille: str = Field(default="", max_length=120)
+    handles: str = Field(default="", max_length=120)
+
+
+class CrmOrderCreate(CrmOrderAdminFields):
     title: str = Field(min_length=2, max_length=180)
     customer: str = Field(default="", max_length=120)
     status: str = Field(default="черновой замер", max_length=32)
     notes: str = ""
-    materials: list[CrmOrderMaterialLineIn] = Field(min_length=1)
+    materials: list[CrmOrderMaterialLineIn] = Field(default_factory=list)
 
 
-class CrmOrderOut(BaseModel):
+class CrmOrderUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=2, max_length=180)
+    customer: str | None = Field(default=None, max_length=120)
+    status: str | None = Field(default=None, max_length=32)
+    notes: str | None = None
+    materials: list[CrmOrderMaterialLineIn] | None = None
+    customer_full_name: str | None = Field(default=None, max_length=180)
+    signature_date: str | None = None
+    delivery_date: str | None = None
+    price_admin: float | None = Field(default=None, ge=0)
+    advance_paid: float | None = Field(default=None, ge=0)
+    balance_due: float | None = None
+    email: str | None = Field(default=None, max_length=254)
+    phone: str | None = Field(default=None, max_length=80)
+    install_address: str | None = Field(default=None, max_length=255)
+    color_corpus: str | None = Field(default=None, max_length=120)
+    color_facade_1: str | None = Field(default=None, max_length=120)
+    color_facade_2: str | None = Field(default=None, max_length=120)
+    color_facade_3: str | None = Field(default=None, max_length=120)
+    visible_parts: str | None = Field(default=None, max_length=120)
+    guides: str | None = Field(default=None, max_length=120)
+    hinges: str | None = Field(default=None, max_length=120)
+    mirror: str | None = Field(default=None, max_length=120)
+    countertop: str | None = Field(default=None, max_length=120)
+    apron: str | None = Field(default=None, max_length=120)
+    gola_profile: str | None = Field(default=None, max_length=120)
+    plinth: str | None = Field(default=None, max_length=120)
+    false_panel: str | None = Field(default=None, max_length=120)
+    light_inset: str | None = Field(default=None, max_length=120)
+    light_overlay: str | None = Field(default=None, max_length=120)
+    euro_cut: str | None = Field(default=None, max_length=120)
+    cutlery_tray: str | None = Field(default=None, max_length=120)
+    vent_grille: str | None = Field(default=None, max_length=120)
+    handles: str | None = Field(default=None, max_length=120)
+
+
+class CrmOrderOut(CrmOrderAdminFields):
     id: int
     title: str
     customer: str
@@ -194,6 +261,34 @@ class CrmOrderOut(BaseModel):
     materials: list[CrmOrderMaterialLine]
     created_at: str | None = None
     status_changed_at: str | None = None
+    calendar_kind: str | None = None
+
+
+class CrmFieldOptionCreate(BaseModel):
+    field_key: str = Field(min_length=2, max_length=64)
+    value: str = Field(min_length=1, max_length=120)
+    sort_order: int = 0
+
+
+class CrmFieldOptionOut(BaseModel):
+    id: int
+    field_key: str
+    value: str
+    sort_order: int
+    is_active: bool
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CrmFieldOptionUpdate(BaseModel):
+    value: str | None = Field(default=None, min_length=1, max_length=120)
+    sort_order: int | None = None
+    is_active: bool | None = None
+
+
+class CrmFieldDictionaryOut(BaseModel):
+    field_key: str
+    label: str
+    options: list[CrmFieldOptionOut]
 
 
 class CrmOrderStatusUpdate(BaseModel):

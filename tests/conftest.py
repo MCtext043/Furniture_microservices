@@ -79,6 +79,7 @@ _TRUNCATE_CATALOG = text(
       crm_order_receipts,
       crm_order_procurements,
       crm_order_materials,
+      crm_field_options,
       crm_production_orders,
       crm_warehouse_stock,
       crm_materials,

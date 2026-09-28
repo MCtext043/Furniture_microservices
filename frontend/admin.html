@@ -115,7 +115,11 @@
           <div>
             <div class="muted-title">CRM</div>
             <h2 class="section-title mb-1">Заказы на производство</h2>
-            <p class="text-muted small mb-0">Сравнение потребности заказа с остатками на складе — что докупить.</p>
+            <p class="text-muted small mb-0">Админ может создавать и дозаполнять заказы клиентов. Удаление — только у суперадмина.</p>
+          </div>
+          <div class="d-flex flex-wrap gap-2">
+            <button type="button" class="btn btn-primary btn-sm" id="btnCrmNewOrder">+ Новый заказ</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnCrmDictionaries">Справочники полей</button>
           </div>
         </div>
         <div class="row g-4">
@@ -128,7 +132,6 @@
           <div class="col-lg-7">
             <div class="service-card p-4">
               <h3 class="h6 mb-3">Заказы</h3>
-              <!-- Контейнер для заказов -->
               <div id="crmOrdersPanel" class="small text-muted">Загрузка...</div>
             </div>
           </div>
@@ -251,6 +254,41 @@
         </div>
       </section>
     </main>
+  </div>
+
+
+  <div class="modal fade" id="crmOrderEditorModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header">
+          <h5 class="modal-title" id="crmOrderEditorTitle">Заказ</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="crmEditOrderId" value="" />
+          <div class="row g-3" id="crmOrderEditorFields"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-primary" id="btnCrmSaveOrder">Сохранить заказ</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="crmDictionariesModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header">
+          <h5 class="modal-title">Справочники полей заказа</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <p class="small text-muted">Добавляйте варианты для цветов, фурнитуры и комплектации — они появятся в форме заказа.</p>
+          <div id="crmDictionariesPanel" class="small text-muted">Загрузка...</div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="modal fade" id="calendarOrderModal" tabindex="-1" aria-hidden="true">

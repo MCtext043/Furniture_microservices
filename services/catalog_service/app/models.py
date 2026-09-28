@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -134,6 +134,48 @@ class CrmProductionOrder(Base):
     status_changed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    # Admin / production card fields (empty until admin fills)
+    customer_full_name: Mapped[str] = mapped_column(String(180), default="")
+    signature_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
+    price_admin: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    advance_paid: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    balance_due: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    email: Mapped[str] = mapped_column(String(254), default="")
+    phone: Mapped[str] = mapped_column(String(80), default="")
+    install_address: Mapped[str] = mapped_column(String(255), default="")
+    color_corpus: Mapped[str] = mapped_column(String(120), default="")
+    color_facade_1: Mapped[str] = mapped_column(String(120), default="")
+    color_facade_2: Mapped[str] = mapped_column(String(120), default="")
+    color_facade_3: Mapped[str] = mapped_column(String(120), default="")
+    visible_parts: Mapped[str] = mapped_column(String(120), default="")
+    guides: Mapped[str] = mapped_column(String(120), default="")
+    hinges: Mapped[str] = mapped_column(String(120), default="")
+    mirror: Mapped[str] = mapped_column(String(120), default="")
+    countertop: Mapped[str] = mapped_column(String(120), default="")
+    apron: Mapped[str] = mapped_column(String(120), default="")
+    gola_profile: Mapped[str] = mapped_column(String(120), default="")
+    plinth: Mapped[str] = mapped_column(String(120), default="")
+    false_panel: Mapped[str] = mapped_column(String(120), default="")
+    light_inset: Mapped[str] = mapped_column(String(120), default="")
+    light_overlay: Mapped[str] = mapped_column(String(120), default="")
+    euro_cut: Mapped[str] = mapped_column(String(120), default="")
+    cutlery_tray: Mapped[str] = mapped_column(String(120), default="")
+    vent_grille: Mapped[str] = mapped_column(String(120), default="")
+    handles: Mapped[str] = mapped_column(String(120), default="")
+
+
+class CrmFieldOption(Base):
+    """Editable dictionaries for admin order fields."""
+
+    __tablename__ = "crm_field_options"
+    __table_args__ = (UniqueConstraint("field_key", "value", name="uq_crm_field_options_key_value"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    field_key: Mapped[str] = mapped_column(String(64), index=True)
+    value: Mapped[str] = mapped_column(String(120))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class CrmOrderPhoto(Base):
