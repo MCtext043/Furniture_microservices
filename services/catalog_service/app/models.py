@@ -76,6 +76,30 @@ class CartItem(Base):
     quantity: Mapped[int] = mapped_column(Integer, default=1)
 
 
+class ShopSbpPayment(Base):
+    """СБП-платёж через НКО ЭЛПЛАТ (динамический QR)."""
+
+    __tablename__ = "shop_sbp_payments"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    user_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    customer_name: Mapped[str] = mapped_column(String(120), default="")
+    email: Mapped[str] = mapped_column(String(120), default="")
+    amount_rub: Mapped[float] = mapped_column(Numeric(12, 2))
+    amount_kopecks: Mapped[int] = mapped_column(Integer)
+    payment_purpose: Mapped[str] = mapped_column(String(140), default="")
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    qrc_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    qr_data: Mapped[str] = mapped_column(Text, default="")
+    ebl27: Mapped[str] = mapped_column(String(64), default="")
+    pay_phone: Mapped[str] = mapped_column(String(32), default="")
+    trx_status: Mapped[str] = mapped_column(String(32), default="")
+    callback_payload: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class WishlistItem(Base):
     __tablename__ = "catalog_wishlist_items"
     __table_args__ = (UniqueConstraint("user_id", "product_id", name="uq_wishlist_user_product"),)

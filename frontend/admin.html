@@ -291,6 +291,41 @@
     </div>
   </div>
 
+  <div class="modal fade" id="crmReceiptModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header">
+          <h5 class="modal-title" id="crmReceiptModalTitle">Загрузить чек</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="crmReceiptOrderId" value="" />
+          <div class="mb-3">
+            <label class="form-label" for="crmReceiptNote">Описание <span class="text-danger">*</span></label>
+            <input class="form-control" id="crmReceiptNote" type="text" maxlength="255" placeholder="Что купили" autocomplete="off" />
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="crmReceiptAmount">Общая цена, ₽ <span class="text-danger">*</span></label>
+            <input class="form-control" id="crmReceiptAmount" type="number" min="0" step="0.01" placeholder="0" />
+          </div>
+          <div class="mb-1">
+            <label class="form-label" for="crmReceiptFile">Фото чека <span class="text-danger">*</span></label>
+            <input class="form-control" id="crmReceiptFile" type="file" accept="image/*" capture="environment" />
+            <div class="form-text">Сфотографируйте или выберите снимок чека.</div>
+          </div>
+          <div id="crmReceiptPreview" class="mt-3 d-none text-center">
+            <img id="crmReceiptPreviewImg" alt="Превью чека" class="img-fluid rounded border" style="max-height:220px" />
+          </div>
+          <div id="crmReceiptError" class="text-danger small mt-2 d-none"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-warning" id="btnCrmReceiptSave">Сохранить чек</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal fade" id="calendarOrderModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
       <div class="modal-content border-0 rounded-4">

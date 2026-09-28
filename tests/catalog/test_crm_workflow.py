@@ -369,3 +369,41 @@ def test_get_order_returns_admin_fields(catalog_client: TestClient):
     body = got.json()
     assert body["countertop"] == "Камень"
     assert body["apron"] == "Стекло"
+
+
+def test_order_receipt_create_and_list(catalog_client: TestClient):
+    material_id = _seed_material(catalog_client, "Чек материал")
+    order = catalog_client.post(
+        "/crm/orders",
+        json={
+            "title": "Заказ с чеком",
+            "customer": "Покупатель",
+            "status": "закупка",
+            "materials": [{"material_id": material_id, "required_qty": 1}],
+        },
+    ).json()
+    empty = catalog_client.get(f"/crm/orders/{order['id']}/receipts")
+    assert empty.status_code == 200
+    assert empty.json() == []
+
+    created = catalog_client.post(
+        f"/crm/orders/{order['id']}/receipts",
+        json={
+            "object_key": f"receipts/{order['id']}/demo.jpg",
+            "note": "Петли Blum",
+            "amount_rub": 4500.5,
+            "uploaded_by": "admin",
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["note"] == "Петли Blum"
+    assert body["amount_rub"] == 4500.5
+    assert body["object_key"].endswith("demo.jpg")
+
+    listed = catalog_client.get(f"/crm/orders/{order['id']}/receipts")
+    assert listed.status_code == 200
+    items = listed.json()
+    assert len(items) == 1
+    assert items[0]["note"] == "Петли Blum"
+    assert items[0]["amount_rub"] == 4500.5

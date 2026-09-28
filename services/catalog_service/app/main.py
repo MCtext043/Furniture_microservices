@@ -56,13 +56,16 @@ app = FastAPI(
         {"name": "wishlist", "description": "Избранные товары пользователя"},
         {"name": "delivery", "description": "Доставка и настройки магазина"},
         {"name": "crm", "description": "CRM производства: заказы, склад, закупки"},
+        {"name": "payments", "description": "Оплата СБП через НКО ЭЛПЛАТ"},
     ],
 )
 
 
 from .crm_routes import router as crm_router
+from .payment_routes import router as payment_router
 
 app.include_router(crm_router)
+app.include_router(payment_router)
 
 
 def _get_or_create_shop_settings(session: Session) -> ShopSettings:

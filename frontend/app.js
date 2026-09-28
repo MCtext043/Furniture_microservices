@@ -1179,6 +1179,136 @@ async function quoteDelivery() {
   }
 }
 
+let sbpPollTimer = null;
+
+function stopSbpPoll() {
+  if (sbpPollTimer) {
+    clearInterval(sbpPollTimer);
+    sbpPollTimer = null;
+  }
+}
+
+function cartGrandTotal() {
+  const subtotal = cartSubtotal();
+  const delivery = state.deliveryQuote ? numOrZero(state.deliveryQuote.delivery_price) : 0;
+  return Math.round((subtotal + delivery) * 100) / 100;
+}
+
+function sbpQrImageUrl(qrData) {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&ecc=M&margin=12&data=${encodeURIComponent(qrData)}`;
+}
+
+function renderSbpPaySuccess(payment) {
+  const body = document.getElementById("sbpPayBody");
+  if (!body) return;
+  body.innerHTML = `
+    <div class="py-3">
+      <div class="display-4 text-success mb-2" aria-hidden="true">✓</div>
+      <h3 class="h5">Оплата прошла успешно</h3>
+      <p class="text-muted mb-1">Сумма: <strong>${money(payment.amount_rub)}</strong></p>
+      ${payment.ebl27 ? `<p class="small text-muted mb-0">Операция СБП: ${escapeHtml(payment.ebl27)}</p>` : ""}
+    </div>`;
+}
+
+function renderSbpPayPending(payment) {
+  const body = document.getElementById("sbpPayBody");
+  if (!body) return;
+  const qrData = payment.qr_data || payment.payment_url || "";
+  const isNarrow = window.matchMedia("(max-width: 768px)").matches;
+  body.innerHTML = `
+    <div class="d-flex justify-content-center align-items-center gap-2 mb-3">
+      <img src="assets/logo_sbp.png" alt="СБП" width="48" height="48" style="object-fit:contain" onerror="this.style.display='none'" />
+      <strong>Оплата через СБП</strong>
+    </div>
+    <p class="mb-2">Сумма к оплате: <strong>${money(payment.amount_rub)}</strong></p>
+    <p class="small text-muted">${escapeHtml(payment.payment_purpose || "")}</p>
+    <div class="mx-auto mb-3 p-2 bg-white rounded border d-inline-block" style="min-width:200px;min-height:200px">
+      ${qrData ? `<img src="${sbpQrImageUrl(qrData)}" width="300" height="300" alt="QR код СБП" class="img-fluid" style="max-width:300px;width:100%;height:auto" />` : `<span class="text-danger">QR не получен</span>`}
+    </div>
+    <p class="small text-start mb-2">Откройте мобильное приложение вашего банка, выберите «Оплатить по QR» и отсканируйте код.</p>
+    <p class="small text-muted text-start mb-3">Расчёты осуществляет НКО ЭЛПЛАТ. Контакт: *2717 (с мобильного бесплатно).</p>
+    ${
+      qrData
+        ? `<a class="btn w-100 mb-2" id="btnSbpOpenLink" href="${escapeHtml(qrData)}" target="_blank" rel="noopener"
+            style="background-color:#1d1346;color:#D0CFD8;display:inline-flex;align-items:center;justify-content:center;gap:10px">
+            <img src="assets/logo_sbp.png" alt="" height="28" onerror="this.style.display='none'" />
+            Оплатить
+          </a>`
+        : ""
+    }
+    ${isNarrow ? `<p class="small text-muted">На телефоне удобнее нажать «Оплатить» — откроется приложение банка.</p>` : ""}
+    <div class="small text-muted" id="sbpPayStatusHint">Ожидаем оплату…</div>
+    <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="btnSbpRefresh">Проверить статус</button>
+  `;
+  document.getElementById("btnSbpRefresh")?.addEventListener("click", () => refreshSbpPayment(payment.id, true));
+}
+
+async function refreshSbpPayment(paymentId, manual = false) {
+  try {
+    const payment = await api("POST", `/catalog/payments/sbp/${paymentId}/refresh`);
+    if (payment.status === "paid") {
+      stopSbpPoll();
+      renderSbpPaySuccess(payment);
+      toast("Оплата получена");
+      return payment;
+    }
+    if (payment.status === "failed") {
+      stopSbpPoll();
+      const hint = document.getElementById("sbpPayStatusHint");
+      if (hint) hint.textContent = "Платёж отклонён. Создайте новый QR.";
+      if (manual) toast("Платёж не прошёл", false);
+      return payment;
+    }
+    const hint = document.getElementById("sbpPayStatusHint");
+    if (hint) hint.textContent = manual ? "Пока не оплачено — можно подождать или оплатить по QR." : "Ожидаем оплату…";
+    return payment;
+  } catch (error) {
+    if (manual) toast(formatApiError(error), false);
+    return null;
+  }
+}
+
+async function startSbpCheckout() {
+  if (APP_MODE !== "user") return;
+  if (!state.cart.length) {
+    toast("Корзина пуста", false);
+    return;
+  }
+  const total = cartGrandTotal();
+  if (total < 1) {
+    toast("Минимальная сумма оплаты через СБП — 1 ₽", false);
+    return;
+  }
+  const body = document.getElementById("sbpPayBody");
+  const modalEl = document.getElementById("sbpPayModal");
+  if (!body || !modalEl) {
+    toast("Форма оплаты не найдена", false);
+    return;
+  }
+  stopSbpPoll();
+  body.innerHTML = `<div class="text-muted py-4">Создаём QR СБП…</div>`;
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  try {
+    const payment = await api("POST", "/catalog/payments/sbp", {
+      amount_rub: total,
+      payment_purpose: "Оплата заказа мебели Петров",
+      email: "",
+      user_id: cartUserId(),
+      customer_name: customerName() || "",
+    });
+    if (!payment.qr_data) {
+      body.innerHTML = `<div class="text-danger">Не удалось получить ссылку оплаты. Проверьте настройки Элплат.</div>`;
+      return;
+    }
+    renderSbpPayPending(payment);
+    sbpPollTimer = setInterval(() => refreshSbpPayment(payment.id, false), 4000);
+  } catch (error) {
+    body.innerHTML = `<div class="text-danger text-start">${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+document.getElementById("sbpPayModal")?.addEventListener("hidden.bs.modal", () => stopSbpPoll());
+
 async function loadDeliverySettingsAdmin() {
   if (APP_MODE !== "admin" || !canManageCatalog()) return;
   try {
@@ -4255,39 +4385,158 @@ async function getPhotoViewUrl(objectKey) {
 
 // Позволяет одному админу сфотографировать чек закупки, а другому — посмотреть,
 // что и на какую сумму уже куплено по заказу.
-async function uploadCrmOrderReceipt(orderId) {
-  const note = window.prompt("Что купили (необязательно)?", "") || "";
-  const amountRaw = window.prompt("Сумма по чеку, ₽ (необязательно)", "") || "";
+// Важно: не используем window.prompt + input.click() — после prompt браузер
+// часто блокирует выбор файла («чек через раз»).
+function openCrmReceiptModal(orderId) {
+  const order = state.crm.orders.find((row) => row.id === orderId);
+  const idInput = document.getElementById("crmReceiptOrderId");
+  const title = document.getElementById("crmReceiptModalTitle");
+  const note = document.getElementById("crmReceiptNote");
+  const amount = document.getElementById("crmReceiptAmount");
+  const file = document.getElementById("crmReceiptFile");
+  const preview = document.getElementById("crmReceiptPreview");
+  const previewImg = document.getElementById("crmReceiptPreviewImg");
+  const err = document.getElementById("crmReceiptError");
+  const saveBtn = document.getElementById("btnCrmReceiptSave");
+  if (!idInput || !file) {
+    toast("Форма загрузки чека не найдена — обновите страницу", false);
+    return;
+  }
+  idInput.value = String(orderId);
+  if (title) title.textContent = order ? `Чек · заказ #${order.id}` : `Чек · заказ #${orderId}`;
+  if (note) note.value = "";
+  if (amount) amount.value = "";
+  file.value = "";
+  if (preview) preview.classList.add("d-none");
+  if (previewImg) {
+    if (previewImg.dataset.objectUrl) URL.revokeObjectURL(previewImg.dataset.objectUrl);
+    previewImg.removeAttribute("src");
+    delete previewImg.dataset.objectUrl;
+  }
+  if (err) {
+    err.textContent = "";
+    err.classList.add("d-none");
+  }
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "Сохранить чек";
+  }
+  const modalEl = document.getElementById("crmReceiptModal");
+  if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  setTimeout(() => note?.focus(), 250);
+}
+
+function setCrmReceiptError(message) {
+  const err = document.getElementById("crmReceiptError");
+  if (!err) return;
+  if (!message) {
+    err.textContent = "";
+    err.classList.add("d-none");
+    return;
+  }
+  err.textContent = message;
+  err.classList.remove("d-none");
+}
+
+function previewCrmReceiptFile() {
+  const fileInput = document.getElementById("crmReceiptFile");
+  const preview = document.getElementById("crmReceiptPreview");
+  const previewImg = document.getElementById("crmReceiptPreviewImg");
+  if (!fileInput || !preview || !previewImg) return;
+  if (previewImg.dataset.objectUrl) {
+    URL.revokeObjectURL(previewImg.dataset.objectUrl);
+    delete previewImg.dataset.objectUrl;
+  }
+  const file = fileInput.files?.[0];
+  if (!file) {
+    preview.classList.add("d-none");
+    previewImg.removeAttribute("src");
+    return;
+  }
+  if (!String(file.type || "").startsWith("image/")) {
+    setCrmReceiptError("Нужен файл изображения (фото чека)");
+    fileInput.value = "";
+    preview.classList.add("d-none");
+    return;
+  }
+  setCrmReceiptError("");
+  const url = URL.createObjectURL(file);
+  previewImg.dataset.objectUrl = url;
+  previewImg.src = url;
+  preview.classList.remove("d-none");
+}
+
+async function saveCrmReceiptFromModal() {
+  const orderId = Number(document.getElementById("crmReceiptOrderId")?.value || 0);
+  const note = String(document.getElementById("crmReceiptNote")?.value || "").trim();
+  const amountRaw = String(document.getElementById("crmReceiptAmount")?.value || "").trim();
   const amount = numOrZero(amountRaw);
-  const input = document.createElement("input");
-  input.type = "file";
-  input.accept = "image/*";
-  input.capture = "environment";
-  input.onchange = async () => {
-    const file = input.files?.[0];
-    if (!file) return;
-    const objectKey = `receipts/${orderId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
-    try {
-      await uploadAssetFile(file, objectKey);
-      await api(
-        "POST",
-        `/catalog/crm/orders/${orderId}/receipts`,
-        {
-          object_key: objectKey,
-          note,
-          amount_rub: amount > 0 ? amount : null,
-          uploaded_by: customerName(),
-        },
-        true
-      );
-      toast("Чек загружен");
-      const host = document.getElementById(`crm-receipts-${orderId}`);
-      if (host?.dataset.open === "1") await renderCrmOrderReceipts(orderId);
-    } catch (error) {
-      toast(`Чек: ${formatApiError(error)}`, false);
+  const file = document.getElementById("crmReceiptFile")?.files?.[0];
+  const saveBtn = document.getElementById("btnCrmReceiptSave");
+  setCrmReceiptError("");
+  if (!orderId) {
+    setCrmReceiptError("Не выбран заказ");
+    return;
+  }
+  if (!note) {
+    setCrmReceiptError("Укажите описание");
+    document.getElementById("crmReceiptNote")?.focus();
+    return;
+  }
+  if (!amountRaw || amount <= 0) {
+    setCrmReceiptError("Укажите общую цену по чеку");
+    document.getElementById("crmReceiptAmount")?.focus();
+    return;
+  }
+  if (!file) {
+    setCrmReceiptError("Добавьте фото чека");
+    document.getElementById("crmReceiptFile")?.focus();
+    return;
+  }
+  if (!String(file.type || "").startsWith("image/")) {
+    setCrmReceiptError("Нужен файл изображения");
+    return;
+  }
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Загрузка...";
+  }
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^\w]+/g, "") || "jpg";
+  const objectKey = `receipts/${orderId}/${Date.now()}.${ext}`;
+  try {
+    await uploadAssetFile(file, objectKey);
+    await api(
+      "POST",
+      `/catalog/crm/orders/${orderId}/receipts`,
+      {
+        object_key: objectKey,
+        note,
+        amount_rub: amount,
+        uploaded_by: customerName() || "admin",
+      },
+      true
+    );
+    toast("Чек загружен");
+    const modalEl = document.getElementById("crmReceiptModal");
+    bootstrap.Modal.getInstance(modalEl)?.hide();
+    const host = document.getElementById(`crm-receipts-${orderId}`);
+    if (host) host.dataset.open = "1";
+    const viewBtn = document.querySelector(`[data-crm-receipt-view="${orderId}"]`);
+    if (viewBtn) viewBtn.textContent = "Скрыть чеки";
+    await renderCrmOrderReceipts(orderId);
+  } catch (error) {
+    setCrmReceiptError(formatApiError(error));
+    toast(`Чек: ${formatApiError(error)}`, false);
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Сохранить чек";
     }
-  };
-  input.click();
+  }
+}
+
+function uploadCrmOrderReceipt(orderId) {
+  openCrmReceiptModal(orderId);
 }
 
 async function toggleCrmOrderReceipts(orderId, btn) {
@@ -4321,7 +4570,7 @@ async function renderCrmOrderReceipts(orderId) {
         const when = receipt.created_at ? new Date(receipt.created_at).toLocaleString("ru-RU") : "";
         return `<div class="d-inline-block me-2 mb-2 text-center align-top" style="max-width:150px">
           <a href="${url}" target="_blank" rel="noopener">
-            <img src="${url}" alt="Чек" class="img-fluid rounded border" style="max-height:120px">
+            <img src="${url}" alt="Чек" class="img-fluid rounded border" style="max-height:120px" loading="lazy">
           </a>
           ${numOrZero(receipt.amount_rub) > 0 ? `<div class="small fw-semibold mt-1">${money(numOrZero(receipt.amount_rub))}</div>` : ""}
           ${receipt.note ? `<div class="small text-muted">${escapeHtml(receipt.note)}</div>` : ""}
@@ -4330,7 +4579,7 @@ async function renderCrmOrderReceipts(orderId) {
       })
       .join("");
     host.innerHTML = `<div class="border rounded p-2 bg-light">
-      <div class="d-flex justify-content-between align-items-center mb-1">
+      <div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
         <span class="small fw-semibold">Чеки закупки (${receipts.length})</span>
         ${totalAmount > 0 ? `<span class="small fw-semibold">Сумма по чекам: ${money(totalAmount)}</span>` : ""}
       </div>
@@ -5938,10 +6187,13 @@ async function boot() {
   bindClick("btnCrmNewOrder", () => openCrmOrderEditor(null));
   bindClick("btnCrmDictionaries", openCrmDictionariesModal);
   bindClick("btnCrmSaveOrder", saveCrmOrderFromEditor);
+  bindClick("btnCrmReceiptSave", saveCrmReceiptFromModal);
+  document.getElementById("crmReceiptFile")?.addEventListener("change", previewCrmReceiptFile);
   bindClick("btnSaveProduct", saveProductEditor);
   bindClick("btnAddProduct", openNewProductEditor);
   bindClick("btnSaveDeliverySettings", saveDeliverySettingsAdmin);
   bindClick("btnQuoteDelivery", quoteDelivery);
+  bindClick("btnPaySbp", startSbpCheckout);
   bindClick("btnCreateStaff", createStaffFromForm);
   bindClick("btnRefreshJobs", renderCuttingJobs);
   bindClick("btnClearCuttingJobs", clearCuttingJobs);

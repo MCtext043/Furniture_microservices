@@ -469,6 +469,25 @@
         <div class="summary-row"><span>Доставка</span><span id="cartDeliveryLine">—</span></div>
         <div class="helper-text" id="cartDeliveryExtra"></div>
         <div class="summary-row summary-total"><span>Итого</span><span id="cartTotal">0 ₽</span></div>
+        <button class="btn btn-primary w-100 mt-3" type="button" id="btnPaySbp">Оплатить через СБП</button>
+        <div class="helper-text mt-2 mb-0">Оплата через Систему быстрых платежей (НКО ЭЛПЛАТ).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="sbpPayModal" tabindex="-1" aria-labelledby="sbpPayModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header">
+          <div>
+            <div class="eyebrow">Система быстрых платежей</div>
+            <h2 class="modal-title h5" id="sbpPayModalTitle">Оплата заказа</h2>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body text-center" id="sbpPayBody">
+          <div class="text-muted">Готовим QR…</div>
+        </div>
       </div>
     </div>
   </div>

@@ -88,7 +88,8 @@ _TRUNCATE_CATALOG = text(
       catalog_wishlist_items,
       catalog_product_reviews,
       catalog_products,
-      catalog_categories
+      catalog_categories,
+      shop_sbp_payments
     RESTART IDENTITY CASCADE
     """
 )
