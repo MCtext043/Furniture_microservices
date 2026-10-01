@@ -34,12 +34,20 @@ class AdminCreate(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=8, max_length=128)
     email: str | None = Field(default=None, max_length=254, pattern=_EMAIL_PATTERN)
+    roles: list[str] | None = Field(
+        default=None,
+        description="Assignable permission codes; omit for default staff set without delete rights",
+    )
 
 
 class AdminUpdate(BaseModel):
     username: str | None = Field(default=None, min_length=3, max_length=64)
     password: str | None = Field(default=None, min_length=8, max_length=128)
     email: str | None = Field(default=None, max_length=254, pattern=_EMAIL_PATTERN)
+    roles: list[str] | None = Field(
+        default=None,
+        description="When set, replaces assignable permissions (admin base role always kept)",
+    )
 
 
 class JwtPayload(BaseModel):

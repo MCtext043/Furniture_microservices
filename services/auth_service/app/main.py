@@ -13,6 +13,12 @@ from sqlalchemy.orm import Session
 
 from common.http_security import SlidingWindowLimiter
 from common.jwt_auth import ALGORITHM, ensure_superadmin
+from common.staff_permissions import (
+    ASSIGNABLE_PERMISSIONS,
+    DEFAULT_STAFF_PERMISSION_CODES,
+    normalize_staff_roles,
+    permission_catalog,
+)
 
 from .db import get_session
 from .mail import send_staff_email, smtp_configured, verification_bodies
@@ -28,8 +34,14 @@ from .schemas import (
 )
 
 ACCESS_TTL_MINUTES = int(os.getenv("JWT_ACCESS_TTL_MINUTES", "60"))
-STAFF_ROLES = ["admin", "catalog:write", "planner:write", "cutting:run", "assets:write"]
-SUPER_ROLES = ["superadmin", *STAFF_ROLES]
+STAFF_ROLES = normalize_staff_roles(list(DEFAULT_STAFF_PERMISSION_CODES))
+SUPER_ROLES = [
+    "superadmin",
+    "admin",
+    *DEFAULT_STAFF_PERMISSION_CODES,
+    "crm:orders:delete",
+    "records:delete",
+]
 LOGIN_LIMITER = SlidingWindowLimiter(max_events=8, window_seconds=60)
 
 app = FastAPI(
@@ -47,15 +59,18 @@ def _secret() -> str:
 
 
 def _hash_password(raw: str) -> str:
-    from passlib.hash import bcrypt
+    import bcrypt
 
-    return bcrypt.hash(raw)
+    return bcrypt.hashpw(raw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 def _verify_password(raw: str, hashed: str) -> bool:
-    from passlib.hash import bcrypt
+    import bcrypt
 
-    return bcrypt.verify(raw, hashed)
+    try:
+        return bcrypt.checkpw(raw.encode("utf-8"), hashed.encode("utf-8"))
+    except ValueError:
+        return False
 
 
 def _hash_token(raw: str) -> str:
@@ -112,7 +127,7 @@ def bootstrap_admin(session: Session) -> None:
         return
     raw_roles_csv = os.getenv(
         "AUTH_BOOTSTRAP_ROLES",
-        "superadmin,admin,catalog:write,planner:write,cutting:run,assets:write",
+        ",".join(SUPER_ROLES),
     )
     roles_list = [r.strip() for r in raw_roles_csv.split(",") if r.strip()]
     if "superadmin" not in roles_list:
@@ -139,19 +154,18 @@ def bootstrap_admin(session: Session) -> None:
 
 
 def bootstrap_role_catalog(session: Session) -> None:
-    presets = (
+    presets = [
         ("superadmin", "Главный администратор"),
-        ("admin", "Administrator"),
-        ("user", "Default user"),
-        ("catalog:write", "Create/update catalog products"),
-        ("planner:write", "Manage room projects"),
-        ("cutting:run", "Run cutting optimization"),
-        ("assets:write", "Upload 3D models and images"),
-    )
+        ("admin", "Сотрудник (доступ в панель)"),
+        ("user", "Клиент"),
+        *[(p["code"], p["label"]) for p in ASSIGNABLE_PERMISSIONS],
+    ]
     for code, desc in presets:
         row = session.scalar(select(RoleDefinition).where(RoleDefinition.code == code))
         if row is None:
             session.add(RoleDefinition(code=code, description=desc))
+        else:
+            row.description = desc
     session.commit()
 
 
@@ -212,6 +226,12 @@ def list_roles(session: Session = Depends(get_session)) -> list[dict[str, str | 
     return [{"id": r.id, "code": r.code, "description": r.description} for r in rows]
 
 
+@app.get("/permission-catalog", dependencies=[Depends(ensure_superadmin)])
+def list_permission_catalog() -> list[dict[str, str]]:
+    """Assignable toggles for creating/editing staff (excludes superadmin)."""
+    return permission_catalog()
+
+
 def _issue_email_token(session: Session, user: User) -> str:
     raw = secrets.token_urlsafe(32)
     session.add(
@@ -262,7 +282,7 @@ def create_admin(payload: AdminCreate, session: Session = Depends(get_session)) 
     user = User(
         username=payload.username,
         password_hash=_hash_password(payload.password),
-        roles=list(STAFF_ROLES),
+        roles=normalize_staff_roles(payload.roles),
         email=payload.email,
         email_verified=not send_mail,
     )
@@ -299,6 +319,10 @@ def update_admin(user_id: int, payload: AdminUpdate, session: Session = Depends(
             _send_verification(session, user)
         except Exception as exc:
             raise HTTPException(status_code=502, detail="Почта обновлена, но письмо не отправлено.") from exc
+    if payload.roles is not None:
+        if "superadmin" in (user.roles or []) or user.username == _bootstrap_username():
+            raise HTTPException(status_code=403, detail="Права главного администратора менять нельзя")
+        user.roles = normalize_staff_roles(payload.roles)
     session.commit()
     session.refresh(user)
     return _user_out(user)

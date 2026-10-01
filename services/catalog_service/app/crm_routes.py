@@ -12,7 +12,14 @@ from sqlalchemy import delete, select
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session, joinedload
 
-from common.jwt_auth import ensure_can_delete, ensure_catalog_writer
+from common.jwt_auth import (
+    ensure_can_delete,
+    ensure_catalog_writer,
+    ensure_crm_dicts_writer,
+    ensure_crm_order_delete,
+    ensure_crm_order_writer,
+    ensure_crm_status,
+)
 
 from .db import get_session
 from .order_email import enqueue_order_email
@@ -360,7 +367,7 @@ def list_warehouse(session: Session = Depends(get_session)) -> list[CrmWarehouse
     ]
 
 
-@router.put("/warehouse/{material_id}", response_model=CrmWarehouseStockOut, dependencies=[Depends(ensure_catalog_writer)])
+@router.put("/warehouse/{material_id}", response_model=CrmWarehouseStockOut, dependencies=[Depends(ensure_crm_order_writer)])
 @crm_db_guard
 def update_warehouse_stock(
     material_id: int,
@@ -406,7 +413,7 @@ def list_user_orders(user_id: str, session: Session = Depends(get_session)) -> l
     return [_order_out(session, order) for order in orders]
 
 
-@router.delete("/orders/{order_id}", dependencies=[Depends(ensure_can_delete)])
+@router.delete("/orders/{order_id}", dependencies=[Depends(ensure_crm_order_delete)])
 @crm_db_guard
 def delete_order(
     order_id: int,
@@ -432,7 +439,7 @@ def delete_order(
 
 
 
-@router.post("/orders", response_model=CrmOrderOut, status_code=201, dependencies=[Depends(ensure_catalog_writer)])
+@router.post("/orders", response_model=CrmOrderOut, status_code=201, dependencies=[Depends(ensure_crm_order_writer)])
 @crm_db_guard
 def create_order(payload: CrmOrderCreate, session: Session = Depends(get_session)) -> CrmOrderOut:
     order = CrmProductionOrder(
@@ -464,7 +471,7 @@ def get_order(order_id: int, session: Session = Depends(get_session)) -> CrmOrde
     return _order_out(session, order)
 
 
-@router.patch("/orders/{order_id}", response_model=CrmOrderOut, dependencies=[Depends(ensure_catalog_writer)])
+@router.patch("/orders/{order_id}", response_model=CrmOrderOut, dependencies=[Depends(ensure_crm_order_writer)])
 @crm_db_guard
 def update_order(
     order_id: int,
@@ -539,7 +546,7 @@ def submit_project_order(payload: CrmSubmitProjectIn, session: Session = Depends
     return _order_out(session, order)
 
 
-@router.patch("/orders/{order_id}/status", response_model=CrmOrderOut, dependencies=[Depends(ensure_catalog_writer)])
+@router.patch("/orders/{order_id}/status", response_model=CrmOrderOut, dependencies=[Depends(ensure_crm_status)])
 @crm_db_guard
 def update_order_status(
     order_id: int,
@@ -560,7 +567,7 @@ def update_order_status(
     "/orders/{order_id}/photos",
     response_model=CrmOrderPhotoOut,
     status_code=201,
-    dependencies=[Depends(ensure_catalog_writer)],
+    dependencies=[Depends(ensure_crm_order_writer)],
 )
 @crm_db_guard
 def add_order_photo(
@@ -587,6 +594,20 @@ def add_order_photo(
         caption=photo.caption,
         created_at=photo.created_at.isoformat(),
     )
+
+
+@router.delete(
+    "/orders/{order_id}/photos/{photo_id}",
+    dependencies=[Depends(ensure_crm_order_writer)],
+)
+@crm_db_guard
+def delete_order_photo(order_id: int, photo_id: int, session: Session = Depends(get_session)) -> dict[str, str]:
+    photo = session.get(CrmOrderPhoto, photo_id)
+    if not photo or photo.order_id != order_id:
+        raise HTTPException(status_code=404, detail="Фото не найдено")
+    session.delete(photo)
+    session.commit()
+    return {"status": "deleted", "photo_id": str(photo_id)}
 
 
 @router.get("/orders/{order_id}/photos", response_model=list[CrmOrderPhotoOut])
@@ -616,7 +637,7 @@ def list_order_photos(order_id: int, session: Session = Depends(get_session)) ->
     "/orders/{order_id}/receipts",
     response_model=CrmOrderReceiptOut,
     status_code=201,
-    dependencies=[Depends(ensure_catalog_writer)],
+    dependencies=[Depends(ensure_crm_order_writer)],
 )
 @crm_db_guard
 def add_order_receipt(
@@ -748,7 +769,7 @@ def order_procurement(order_id: int, session: Session = Depends(get_session)) ->
 @router.put(
     "/orders/{order_id}/procurement",
     response_model=CrmOrderProcurementOut,
-    dependencies=[Depends(ensure_catalog_writer)],
+    dependencies=[Depends(ensure_crm_order_writer)],
 )
 @crm_db_guard
 def update_order_procurement(
@@ -864,7 +885,7 @@ def list_field_dictionaries(session: Session = Depends(get_session)) -> list[Crm
     "/field-options",
     response_model=CrmFieldOptionOut,
     status_code=201,
-    dependencies=[Depends(ensure_catalog_writer)],
+    dependencies=[Depends(ensure_crm_dicts_writer)],
 )
 @crm_db_guard
 def create_field_option(payload: CrmFieldOptionCreate, session: Session = Depends(get_session)) -> CrmFieldOptionOut:
@@ -899,7 +920,7 @@ def create_field_option(payload: CrmFieldOptionCreate, session: Session = Depend
 @router.patch(
     "/field-options/{option_id}",
     response_model=CrmFieldOptionOut,
-    dependencies=[Depends(ensure_catalog_writer)],
+    dependencies=[Depends(ensure_crm_dicts_writer)],
 )
 @crm_db_guard
 def update_field_option(

@@ -357,6 +357,10 @@ html { scroll-padding-top: 5.5rem; }
 .form-check-label { color: var(--color-brown); font-size: 0.76rem; }
 [data-theme="dark"] .form-check-label { color: #e8dcc4; }
 .form-check-input:checked { border-color: var(--color-primary); background-color: var(--color-primary); }
+.staff-perm-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .5rem 1.25rem; }
+.staff-perm-group { background: rgba(0,0,0,.03); border-radius: .5rem; padding: .75rem .9rem; }
+[data-theme="dark"] .staff-perm-group { background: rgba(255,255,255,.04); }
+.crm-photo-thumb:hover { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .form-control-color { width: 3rem; min-height: 38px !important; padding: 0.25rem !important; }
 .control-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 .control-actions .btn { flex: 1 1 auto; min-height: 40px; padding: 0.55rem 0.8rem; font-size: 0.75rem; }

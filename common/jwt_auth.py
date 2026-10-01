@@ -72,10 +72,21 @@ def is_superadmin(claims: TokenClaims) -> bool:
 
 
 def _has_privileged_role(claims: TokenClaims, required: tuple[str, ...]) -> bool:
+    """Superadmin bypasses; bare `admin` does not grant write/delete — need explicit roles."""
     roles = _role_set(claims)
-    if "*" in roles or "superadmin" in roles or "admin" in roles:
+    if "*" in roles or "superadmin" in roles:
         return True
     return bool(roles.intersection(set(required)))
+
+
+def _require_roles(auth: AuthContext, required: tuple[str, ...], detail: str) -> AuthContext:
+    if not auth.enforced:
+        return auth
+    if auth.claims is None:
+        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
+    if not _has_privileged_role(auth.claims, required):
+        raise HTTPException(status_code=403, detail=detail)
+    return auth
 
 
 def ensure_superadmin(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
@@ -89,68 +100,72 @@ def ensure_superadmin(auth: AuthContext = Depends(get_auth_context)) -> AuthCont
 
 
 def ensure_can_delete(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
-    """Hard delete of records is reserved for the bootstrap superadmin."""
-    return ensure_superadmin(auth)
+    """Hard delete: superadmin or explicit records:delete."""
+    return _require_roles(
+        auth,
+        ("records:delete",),
+        "Недостаточно прав для удаления записей",
+    )
 
 
 def ensure_catalog_writer(auth: AuthContext = Depends(get_auth_context)) -> None:
-    if not auth.enforced:
-        return
-    claims = auth.claims
-    if claims is None:
-        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
-    if not _has_privileged_role(claims, ("catalog:write",)):
-        raise HTTPException(status_code=403, detail="Недостаточно прав для изменения каталога")
+    _require_roles(auth, ("catalog:write",), "Недостаточно прав для изменения каталога")
+
+
+def ensure_crm_order_writer(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    """Create/edit CRM orders, procurement, photos, receipts. catalog:write kept for legacy staff."""
+    return _require_roles(
+        auth,
+        ("crm:orders:write", "catalog:write"),
+        "Недостаточно прав для редактирования заказов CRM",
+    )
+
+
+def ensure_crm_status(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    return _require_roles(
+        auth,
+        ("crm:orders:status", "catalog:write"),
+        "Недостаточно прав для смены статуса заказа",
+    )
+
+
+def ensure_crm_order_delete(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    return _require_roles(
+        auth,
+        ("crm:orders:delete", "records:delete"),
+        "Недостаточно прав для удаления заказов CRM",
+    )
+
+
+def ensure_crm_dicts_writer(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
+    return _require_roles(
+        auth,
+        ("crm:dicts:write", "catalog:write"),
+        "Недостаточно прав для справочников CRM",
+    )
 
 
 def ensure_shop_user(auth: AuthContext = Depends(get_auth_context)) -> None:
     """Cart and wishlist for any signed-in customer."""
-    if not auth.enforced:
-        return
-    claims = auth.claims
-    if claims is None:
-        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
-    if not _has_privileged_role(claims, ("user", "catalog:write")):
-        raise HTTPException(status_code=403, detail="Недостаточно прав для корзины и избранного")
+    _require_roles(auth, ("user", "catalog:write", "admin"), "Недостаточно прав для корзины и избранного")
 
 
 def ensure_planner_user(auth: AuthContext = Depends(get_auth_context)) -> AuthContext:
     """Room projects for customers and production staff."""
-    if not auth.enforced:
-        return auth
-    claims = auth.claims
-    if claims is None:
-        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
-    if not _has_privileged_role(claims, ("user", "planner:write")):
-        raise HTTPException(status_code=403, detail="Недостаточно прав для планировщика")
-    return auth
+    return _require_roles(
+        auth,
+        ("user", "planner:write", "admin"),
+        "Недостаточно прав для планировщика",
+    )
 
 
 def ensure_planner_writer(auth: AuthContext = Depends(get_auth_context)) -> None:
-    if not auth.enforced:
-        return
-    claims = auth.claims
-    if claims is None:
-        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
-    if not _has_privileged_role(claims, ("planner:write",)):
-        raise HTTPException(status_code=403, detail="Недостаточно прав для сохранения проекта")
+    _require_roles(auth, ("planner:write",), "Недостаточно прав для сохранения проекта")
 
 
 def ensure_cutting_runner(auth: AuthContext = Depends(get_auth_context)) -> None:
-    if not auth.enforced:
-        return
-    claims = auth.claims
-    if claims is None:
-        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
-    if not _has_privileged_role(claims, ("cutting:run",)):
-        raise HTTPException(status_code=403, detail="Недостаточно прав для расчёта раскроя")
+    _require_roles(auth, ("cutting:run",), "Недостаточно прав для расчёта раскроя")
 
 
 def ensure_assets_writer(auth: AuthContext = Depends(get_auth_context)) -> None:
-    if not auth.enforced:
-        return
-    claims = auth.claims
-    if claims is None:
-        raise HTTPException(status_code=401, detail="Войдите в аккаунт")
-    if not _has_privileged_role(claims, ("assets:write",)):
-        raise HTTPException(status_code=403, detail="Недостаточно прав для загрузки файлов")
+    _require_roles(auth, ("assets:write",), "Недостаточно прав для загрузки файлов")

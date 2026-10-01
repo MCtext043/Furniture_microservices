@@ -243,17 +243,55 @@
         <div class="service-card p-4">
           <div class="muted-title">Доступ</div>
           <h2 class="section-title h4 mb-3">Администраторы</h2>
-          <p class="text-muted small">Главный администратор из .env может создавать сотрудников. У них все права, кроме удаления записей.</p>
+          <p class="text-muted small">Главный администратор назначает сотрудникам права тумблерами. Удаление записей и заказов выключено по умолчанию.</p>
           <div class="row g-2 mb-3">
             <div class="col-md-4"><input class="form-control" id="staffUsername" placeholder="Логин" autocomplete="off" /></div>
             <div class="col-md-4"><input class="form-control" id="staffPassword" type="password" placeholder="Пароль от 8 символов" autocomplete="new-password" /></div>
             <div class="col-md-4"><input class="form-control" id="staffEmail" type="email" placeholder="Почта (необязательно)" /></div>
+          </div>
+          <div class="mb-3">
+            <div class="small fw-semibold mb-2">Права нового администратора</div>
+            <div id="staffCreatePermissions" class="staff-perm-grid small text-muted">Загрузка прав...</div>
           </div>
           <button class="btn btn-primary btn-sm mb-4" id="btnCreateStaff" type="button">Добавить администратора</button>
           <div id="staffDirectory" class="small text-muted">Загрузка...</div>
         </div>
       </section>
     </main>
+  </div>
+
+  <div class="modal fade" id="staffEditModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header">
+          <h5 class="modal-title">Изменить администратора</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" id="staffEditId" value="" />
+          <div class="row g-3 mb-3">
+            <div class="col-md-4">
+              <label class="form-label small">Логин</label>
+              <input class="form-control" id="staffEditUsername" autocomplete="off" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Новый пароль</label>
+              <input class="form-control" id="staffEditPassword" type="password" placeholder="пусто — не менять" autocomplete="new-password" />
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small">Почта</label>
+              <input class="form-control" id="staffEditEmail" type="email" placeholder="необязательно" />
+            </div>
+          </div>
+          <div class="small fw-semibold mb-2">Права</div>
+          <div id="staffEditPermissions" class="staff-perm-grid"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Отмена</button>
+          <button type="button" class="btn btn-primary" id="btnStaffEditSave">Сохранить</button>
+        </div>
+      </div>
+    </div>
   </div>
 
 

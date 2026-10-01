@@ -49,6 +49,7 @@ const state = {
   crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active", dictionaries: [], editingOrderId: null },
   calendar: { year: null, month: null },
   staff: [],
+  staffPermissionCatalog: [],
   userOrders: [],
   userProjects: [],
   selectedTier: "comfort",
@@ -272,11 +273,12 @@ function setToken(value) {
 const APP_TIME_ZONE = "Asia/Dubai";
 
 function hasRole(role) {
-  return state.roles.includes(role) || state.roles.includes("admin") || state.roles.includes("superadmin");
+  if (state.roles.includes("superadmin") || state.roles.includes("*")) return true;
+  return state.roles.includes(role);
 }
 
 function isAdmin() {
-  return state.roles.includes("admin") || state.roles.includes("superadmin");
+  return state.roles.includes("admin") || state.roles.includes("superadmin") || state.roles.includes("*");
 }
 
 function isSuperAdmin() {
@@ -284,15 +286,43 @@ function isSuperAdmin() {
 }
 
 function canDeleteRecords() {
-  return isSuperAdmin();
+  return hasRole("records:delete");
 }
 
 function canManageCatalog() {
-  return isAdmin() || hasRole("catalog:write");
+  return hasRole("catalog:write");
 }
 
 function canRunCutting() {
-  return isAdmin() || hasRole("cutting:run");
+  return hasRole("cutting:run");
+}
+
+function canEditCrmOrders() {
+  return hasRole("crm:orders:write") || hasRole("catalog:write");
+}
+
+function canChangeCrmStatus() {
+  return hasRole("crm:orders:status") || hasRole("catalog:write");
+}
+
+function canDeleteCrmOrders() {
+  return hasRole("crm:orders:delete") || canDeleteRecords();
+}
+
+function canEditCrmDicts() {
+  return hasRole("crm:dicts:write") || hasRole("catalog:write");
+}
+
+function canAccessAdminPanel() {
+  return isAdmin() && (
+    canManageCatalog()
+    || canRunCutting()
+    || canEditCrmOrders()
+    || canChangeCrmStatus()
+    || hasRole("planner:write")
+    || hasRole("assets:write")
+    || isSuperAdmin()
+  );
 }
 
 function cartUserId() {
@@ -3820,7 +3850,7 @@ function renderCrmDictionariesPanel() {
 }
 
 async function openCrmDictionariesModal() {
-  if (!canManageCatalog()) return;
+  if (!canEditCrmDicts()) return;
   try {
     state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
     renderCrmDictionariesPanel();
@@ -4190,16 +4220,16 @@ function renderCrmOrderCard(order) {
       ${order.materials?.length ? `<div class="small mb-2"><strong>Материалы:</strong> ${order.materials.map((line) => `${escapeHtml(line.material_name)} — ${line.required_qty} ${escapeHtml(line.unit)}`).join("; ")}</div>` : ""}
       ${order.price_standard ? `<div class="small text-muted mb-2">Все цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
       <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-        <select class="form-select form-select-sm" style="max-width:280px" data-crm-status="${order.id}">
+        ${canChangeCrmStatus() ? `<select class="form-select form-select-sm" style="max-width:280px" data-crm-status="${order.id}">
           ${crmStatusOptions(order.status).map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
         </select>
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>
-        <button type="button" class="btn btn-sm btn-outline-dark" data-crm-edit="${order.id}">Редактировать</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>` : `<span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(order.status)}</span>`}
+        ${canEditCrmOrders() ? `<button type="button" class="btn btn-sm btn-outline-dark" data-crm-edit="${order.id}">Редактировать</button>
         <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
         <button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>
-        <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>
-        ${canDeleteRecords() ? `<button type="button" class="btn btn-sm btn-outline-danger" data-crm-delete="${order.id}" title="Удалить заказ">🗑 Удалить</button>` : ""}
+        <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>` : `<button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>`}
+        ${canDeleteCrmOrders() ? `<button type="button" class="btn btn-sm btn-outline-danger" data-crm-delete="${order.id}" title="Удалить заказ">Удалить</button>` : ""}
       </div>
       <div id="crm-proc-${order.id}"></div>
       <div id="crm-receipts-${order.id}" class="mt-2"></div>
@@ -4660,16 +4690,39 @@ async function renderCrmOrderPhotos(orderId) {
       host.innerHTML = `<div class="small text-muted">Фото этапов пока нет.</div>`;
       return;
     }
+    const canDeletePhoto = canEditCrmOrders();
     const items = await Promise.all(
       photos.map(async (photo) => {
         const url = await getPhotoViewUrl(photo.object_key);
-        return `<div class="d-inline-block me-2 mb-2" style="max-width:140px">
-          ${url ? `<img src="${url}" alt="" class="img-fluid rounded border" style="max-height:100px">` : `<div class="border rounded p-2 small">${escapeHtml(photo.object_key)}</div>`}
+        const img = url
+          ? `<img src="${url}" alt="${escapeHtml(photo.caption || `Фото #${photo.id}`)}" class="img-fluid rounded border crm-photo-thumb" style="max-height:100px;cursor:zoom-in" data-lightbox-image loading="lazy">`
+          : `<div class="border rounded p-2 small">${escapeHtml(photo.object_key)}</div>`;
+        const del = canDeletePhoto
+          ? `<button type="button" class="btn btn-sm btn-outline-danger w-100 mt-1" data-crm-photo-del="${photo.id}" data-crm-photo-order="${orderId}">Удалить</button>`
+          : "";
+        return `<div class="d-inline-block me-2 mb-2 align-top" style="max-width:140px">
+          ${img}
           <div class="small text-muted">${escapeHtml(photo.caption || "")}</div>
+          ${del}
         </div>`;
       })
     );
     host.innerHTML = `<div class="small fw-semibold mb-1">Фото производства</div>${items.join("")}`;
+    host.querySelectorAll("[data-crm-photo-del]").forEach((btn) => {
+      btn.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const photoId = Number(btn.dataset.crmPhotoDel);
+        const oid = Number(btn.dataset.crmPhotoOrder);
+        if (!window.confirm("Удалить это фото?")) return;
+        try {
+          await api("DELETE", `/catalog/crm/orders/${oid}/photos/${photoId}`, undefined, true);
+          toast("Фото удалено");
+          await renderCrmOrderPhotos(oid);
+        } catch (error) {
+          toast(`Не удалось удалить фото: ${formatApiError(error)}`, false);
+        }
+      });
+    });
   } catch {
     host.innerHTML = "";
   }
@@ -5253,6 +5306,61 @@ function renderOrderCalendar() {
   });
 }
 
+const STAFF_DEFAULT_PERMISSIONS = [
+  "catalog:write",
+  "planner:write",
+  "cutting:run",
+  "assets:write",
+  "crm:orders:write",
+  "crm:orders:status",
+  "crm:dicts:write",
+];
+
+async function ensureStaffPermissionCatalog() {
+  if (state.staffPermissionCatalog?.length) return state.staffPermissionCatalog;
+  state.staffPermissionCatalog = await api("GET", "/auth/permission-catalog", undefined, true);
+  return state.staffPermissionCatalog;
+}
+
+function renderStaffPermissionToggles(hostId, selectedRoles, idPrefix) {
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  const catalog = state.staffPermissionCatalog || [];
+  const selected = new Set(selectedRoles || []);
+  const groups = {};
+  catalog.forEach((item) => {
+    if (!groups[item.group]) groups[item.group] = [];
+    groups[item.group].push(item);
+  });
+  host.innerHTML = Object.entries(groups).map(([group, items]) => `
+    <div class="staff-perm-group mb-3">
+      <div class="text-muted text-uppercase mb-2" style="font-size:.68rem;letter-spacing:.04em">${escapeHtml(group)}</div>
+      ${items.map((item) => `
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" role="switch"
+            id="${idPrefix}_${item.code.replace(/:/g, "_")}"
+            data-staff-perm="${escapeHtml(item.code)}"
+            ${selected.has(item.code) ? "checked" : ""}>
+          <label class="form-check-label" for="${idPrefix}_${item.code.replace(/:/g, "_")}">${escapeHtml(item.label)}</label>
+        </div>`).join("")}
+    </div>`).join("");
+}
+
+function collectStaffPermissions(hostId) {
+  const host = document.getElementById(hostId);
+  if (!host) return [];
+  return [...host.querySelectorAll("[data-staff-perm]:checked")].map((el) => el.dataset.staffPerm);
+}
+
+function formatStaffRolesSummary(roles) {
+  const list = roles || [];
+  if (list.includes("superadmin")) return "Главный админ";
+  const catalog = state.staffPermissionCatalog || [];
+  const labels = catalog.filter((p) => list.includes(p.code)).map((p) => p.label);
+  if (!labels.length) return "Только вход в панель";
+  return labels.join("; ");
+}
+
 async function loadStaffDirectory() {
   const host = document.getElementById("staffDirectory");
   const wrap = document.getElementById("staff-admin");
@@ -5260,18 +5368,20 @@ async function loadStaffDirectory() {
   wrap.classList.toggle("d-none", !isSuperAdmin());
   if (!host || !isSuperAdmin()) return;
   try {
+    await ensureStaffPermissionCatalog();
+    renderStaffPermissionToggles("staffCreatePermissions", STAFF_DEFAULT_PERMISSIONS, "staffCreate");
     state.staff = await api("GET", "/auth/admins", undefined, true);
     host.innerHTML = `
       <div class="table-responsive">
         <table class="table table-sm admin-table mb-0">
-          <thead><tr><th>Логин</th><th>Почта</th><th>Роли</th><th></th></tr></thead>
+          <thead><tr><th>Логин</th><th>Почта</th><th>Права</th><th></th></tr></thead>
           <tbody>
             ${state.staff.map((user) => {
               const superUser = (user.roles || []).includes("superadmin");
               return `<tr>
                 <td>${escapeHtml(user.username)}</td>
                 <td>${escapeHtml(user.email || "—")}${user.email && !user.email_verified ? ' <span class="badge text-bg-warning">не подтверждена</span>' : ""}</td>
-                <td class="small">${superUser ? "Главный админ" : "Админ без удаления"}</td>
+                <td class="small" style="max-width:360px">${escapeHtml(formatStaffRolesSummary(user.roles))}</td>
                 <td class="text-end text-nowrap">
                   ${superUser ? "" : `<button class="btn btn-sm btn-outline-primary" data-staff-edit="${user.id}">Изменить</button>
                     <button class="btn btn-sm btn-outline-danger" data-staff-del="${user.id}">Удалить</button>`}
@@ -5296,11 +5406,13 @@ async function createStaffFromForm() {
     toast("Укажите логин и пароль от 8 символов", false);
     return;
   }
+  const roles = collectStaffPermissions("staffCreatePermissions");
   try {
-    await api("POST", "/auth/admins", { username, password, email: email || undefined }, true);
+    await api("POST", "/auth/admins", { username, password, email: email || undefined, roles }, true);
     document.getElementById("staffUsername").value = "";
     document.getElementById("staffPassword").value = "";
     document.getElementById("staffEmail").value = "";
+    renderStaffPermissionToggles("staffCreatePermissions", STAFF_DEFAULT_PERMISSIONS, "staffCreate");
     await loadStaffDirectory();
     toast(email ? "Администратор создан. Письмо с подтверждением отправлено, если SMTP настроен." : "Администратор создан");
   } catch (error) {
@@ -5311,15 +5423,34 @@ async function createStaffFromForm() {
 async function editStaff(userId) {
   const user = state.staff.find((row) => row.id === userId);
   if (!user) return;
-  const username = window.prompt("Логин", user.username);
-  if (!username) return;
-  const password = window.prompt("Новый пароль (пусто — не менять)", "");
-  const email = window.prompt("Почта (пусто — без почты)", user.email || "");
-  const payload = { username };
+  await ensureStaffPermissionCatalog();
+  document.getElementById("staffEditId").value = String(user.id);
+  document.getElementById("staffEditUsername").value = user.username;
+  document.getElementById("staffEditPassword").value = "";
+  document.getElementById("staffEditEmail").value = user.email || "";
+  renderStaffPermissionToggles("staffEditPermissions", user.roles || [], "staffEdit");
+  const modalEl = document.getElementById("staffEditModal");
+  if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+async function saveStaffEdit() {
+  const userId = Number(document.getElementById("staffEditId")?.value);
+  const username = document.getElementById("staffEditUsername")?.value.trim();
+  const password = document.getElementById("staffEditPassword")?.value;
+  const email = document.getElementById("staffEditEmail")?.value.trim();
+  if (!userId || !username) {
+    toast("Укажите логин", false);
+    return;
+  }
+  const payload = {
+    username,
+    email: email || null,
+    roles: collectStaffPermissions("staffEditPermissions"),
+  };
   if (password) payload.password = password;
-  if (email) payload.email = email;
   try {
     await api("PATCH", `/auth/admins/${userId}`, payload, true);
+    bootstrap.Modal.getInstance(document.getElementById("staffEditModal"))?.hide();
     await loadStaffDirectory();
     toast("Данные администратора обновлены");
   } catch (error) {
@@ -5347,12 +5478,16 @@ async function bootAdminPanel() {
   const content = document.getElementById("adminContent");
   if (!gate || !content) return;
   await refreshAuth();
-  const allowed = canManageCatalog() || canRunCutting();
+  const allowed = canAccessAdminPanel();
   gate.classList.toggle("d-none", allowed);
   content.classList.toggle("d-none", !allowed);
   if (!allowed) return;
   const clearJobs = document.getElementById("btnClearCuttingJobs");
   if (clearJobs) clearJobs.classList.toggle("d-none", !canDeleteRecords());
+  document.getElementById("btnCrmNewOrder")?.classList.toggle("d-none", !canEditCrmOrders());
+  document.getElementById("btnCrmDictionaries")?.classList.toggle("d-none", !canEditCrmDicts());
+  document.getElementById("btnAddProduct")?.classList.toggle("d-none", !canManageCatalog());
+  document.getElementById("btnSaveDeliverySettings")?.classList.toggle("d-none", !canManageCatalog());
   renderAdminCatalogTable();
   await renderCuttingJobs();
   await loadDeliverySettingsAdmin();
@@ -6195,6 +6330,7 @@ async function boot() {
   bindClick("btnQuoteDelivery", quoteDelivery);
   bindClick("btnPaySbp", startSbpCheckout);
   bindClick("btnCreateStaff", createStaffFromForm);
+  bindClick("btnStaffEditSave", saveStaffEdit);
   bindClick("btnRefreshJobs", renderCuttingJobs);
   bindClick("btnClearCuttingJobs", clearCuttingJobs);
 
