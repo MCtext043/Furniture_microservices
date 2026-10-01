@@ -136,10 +136,7 @@ def bootstrap_admin(session: Session) -> None:
 
     existing = session.scalar(select(User).where(User.username == username))
     if existing:
-        existing.password_hash = password_hash
-        existing.roles = roles_list
-        existing.email_verified = True
-        session.commit()
+        # Do not reset password or roles of an admin that already exists.
         return
 
     session.add(
