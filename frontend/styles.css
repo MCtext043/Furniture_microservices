@@ -361,6 +361,8 @@ html { scroll-padding-top: 5.5rem; }
 .staff-perm-group { background: rgba(0,0,0,.03); border-radius: .5rem; padding: .75rem .9rem; }
 [data-theme="dark"] .staff-perm-group { background: rgba(255,255,255,.04); }
 .crm-photo-thumb:hover { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+#crmWarehouseTabs .nav-link { font-size: .82rem; }
+#crm-warehouse .form-label { margin-bottom: .2rem; }
 .form-control-color { width: 3rem; min-height: 38px !important; padding: 0.25rem !important; }
 .control-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 .control-actions .btn { flex: 1 1 auto; min-height: 40px; padding: 0.55rem 0.8rem; font-size: 0.75rem; }

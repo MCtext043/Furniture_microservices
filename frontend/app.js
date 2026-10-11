@@ -46,7 +46,7 @@ const state = {
   lastCutResult: null,
   cuttingQuoteCache: null,
   selectedCutJobId: null,
-  crm: { orders: [], warehouse: [], procurementByOrder: {}, tab: "active", dictionaries: [], editingOrderId: null },
+  crm: { orders: [], warehouse: [], movements: [], whTab: "stock", purchaseDraft: [], procurementByOrder: {}, tab: "active", dictionaries: [], editingOrderId: null },
   calendar: { year: null, month: null },
   staff: [],
   staffPermissionCatalog: [],
@@ -3862,16 +3862,18 @@ async function openCrmDictionariesModal() {
 }
 
 async function loadCrm() {
-  if (APP_MODE !== "admin" || !canManageCatalog()) return;
+  if (APP_MODE !== "admin" || (!canManageCatalog() && !canEditCrmOrders())) return;
   try {
-    const [warehouse, orders, dictionaries] = await Promise.all([
+    const [warehouse, orders, dictionaries, movements] = await Promise.all([
       api("GET", "/catalog/crm/warehouse", undefined, true),
       api("GET", "/catalog/crm/orders", undefined, true),
       api("GET", "/catalog/crm/field-dictionaries", undefined, true),
+      api("GET", "/catalog/crm/warehouse/movements", undefined, true).catch(() => []),
     ]);
     state.crm.warehouse = warehouse;
     state.crm.orders = orders;
     state.crm.dictionaries = dictionaries;
+    state.crm.movements = movements;
     renderCrmPanel();
     renderOrderCalendar();
   } catch (error) {
@@ -3883,23 +3885,291 @@ async function loadCrm() {
   }
 }
 
+const WH_ISSUE_STATUSES = new Set([
+  "технолог",
+  "распил-фасады-фурнитура",
+  "доставлено",
+  "собрано",
+  "готово",
+  "готова",
+]);
+
+function formatQty(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0";
+  return String(Math.round(n * 100) / 100);
+}
+
+function movementKindLabel(kind) {
+  if (kind === "purchase") return "Закупка";
+  if (kind === "consume") return "Списание";
+  return "Правка";
+}
+
 function renderCrmWarehouse() {
   const host = document.getElementById("crmWarehouseTable");
   if (!host) return;
-  if (!state.crm.warehouse.length) {
-    host.innerHTML = `<div class="text-muted">Склад пуст. Остатки появятся после закупки по реальным заказам.</div>`;
-    return;
+  document.querySelectorAll("[data-wh-tab]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.whTab === state.crm.whTab);
+  });
+  if (state.crm.whTab === "purchase") host.innerHTML = renderWarehousePurchase();
+  else if (state.crm.whTab === "issue") host.innerHTML = renderWarehouseIssue();
+  else host.innerHTML = renderWarehouseStock();
+  bindWarehousePanel(host);
+}
+
+function renderWarehouseStock() {
+  const canEdit = canEditCrmOrders();
+  const rows = state.crm.warehouse || [];
+  const body = rows.length
+    ? rows.map((row) => {
+        const low = Number(row.quantity) < 0;
+        return `<tr>
+          <td>${escapeHtml(row.material_name)}</td>
+          <td>${escapeHtml(row.unit)}</td>
+          <td>${money(row.purchase_price_rub || 0)}</td>
+          <td class="${low ? "text-danger fw-semibold" : ""}">${formatQty(row.quantity)} ${escapeHtml(row.unit)}</td>
+          ${canEdit ? `<td>
+            <div class="d-flex flex-wrap gap-1 align-items-center">
+              <input class="form-control form-control-sm" style="width:88px" type="number" min="0" step="0.01" value="${formatQty(row.quantity)}" data-wh-qty="${row.material_id}" />
+              <button type="button" class="btn btn-sm btn-outline-primary" data-wh-save="${row.material_id}">Записать</button>
+              <input class="form-control form-control-sm" style="width:76px" type="number" step="0.01" placeholder="±" data-wh-delta="${row.material_id}" />
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-wh-adjust="${row.material_id}">±</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" data-wh-del="${row.material_id}">Удалить</button>
+            </div>
+          </td>` : ""}
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="${canEdit ? 5 : 4}" class="text-muted">На складе пока нет материалов. Добавьте вид материала или проведите закупку.</td></tr>`;
+  const movements = (state.crm.movements || []).slice(0, 8);
+  const movementRows = movements.length
+    ? movements.map((row) => {
+        const sign = Number(row.delta) > 0 ? "+" : "";
+        return `<tr>
+          <td class="text-muted">${escapeHtml((row.created_at || "").slice(0, 16).replace("T", " "))}</td>
+          <td>${escapeHtml(movementKindLabel(row.kind))}</td>
+          <td>${escapeHtml(row.material_name)}</td>
+          <td class="${Number(row.delta) < 0 ? "text-danger" : "text-success"}">${sign}${formatQty(row.delta)} ${escapeHtml(row.unit)}</td>
+          <td>${formatQty(row.quantity_after)}</td>
+          <td class="text-muted">${escapeHtml(row.note || "")}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="6" class="text-muted">Движений ещё нет.</td></tr>`;
+  return `
+    ${canEdit ? `<form class="row g-2 align-items-end mb-3" id="whNewMaterialForm">
+      <div class="col-md-4"><label class="form-label small">Новый материал</label><input class="form-control form-control-sm" id="whNewName" placeholder="Например, Петля мебельная" required /></div>
+      <div class="col-md-2"><label class="form-label small">Ед.</label><input class="form-control form-control-sm" id="whNewUnit" value="шт" /></div>
+      <div class="col-md-2"><label class="form-label small">Цена, ₽</label><input class="form-control form-control-sm" id="whNewPrice" type="number" min="0" step="1" value="0" /></div>
+      <div class="col-md-2"><label class="form-label small">Стартовый остаток</label><input class="form-control form-control-sm" id="whNewQty" type="number" min="0" step="0.01" value="0" /></div>
+      <div class="col-md-2"><button class="btn btn-primary btn-sm w-100" type="submit">Добавить</button></div>
+    </form>` : ""}
+    <div class="table-responsive">
+      <table class="table table-sm admin-table align-middle mb-0">
+        <thead><tr><th>Материал</th><th>Ед.</th><th>Цена</th><th>Остаток</th>${canEdit ? "<th>Правка</th>" : ""}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    <div class="mt-4">
+      <div class="small fw-semibold mb-2">Последние движения</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Когда</th><th>Тип</th><th>Материал</th><th>Изменение</th><th>Стало</th><th>Комментарий</th></tr></thead>
+          <tbody>${movementRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderWarehousePurchase() {
+  if (!state.crm.purchaseDraft.length) {
+    state.crm.purchaseDraft = [{ material_id: "", quantity: 1, unit_price_rub: "" }];
   }
-  host.innerHTML = `
-    <table class="table table-sm mb-0">
-      <thead><tr><th>Материал</th><th>На складе</th></tr></thead>
-      <tbody>${state.crm.warehouse
-        .map(
-          (row) =>
-            `<tr><td>${escapeHtml(row.material_name)}</td><td><strong>${row.quantity}</strong> ${escapeHtml(row.unit)}</td></tr>`
-        )
-        .join("")}</tbody>
-    </table>`;
+  const options = [`<option value="">Новый материал</option>`]
+    .concat((state.crm.warehouse || []).map((row) => `<option value="${row.material_id}">${escapeHtml(row.material_name)} (${escapeHtml(row.unit)})</option>`))
+    .join("");
+  const lines = state.crm.purchaseDraft.map((line, index) => `
+    <div class="row g-2 align-items-end mb-2" data-wh-buy-line="${index}">
+      <div class="col-md-4">
+        <label class="form-label small">Материал</label>
+        <select class="form-select form-select-sm" data-wh-buy-id>${options.replace(`value="${line.material_id}"`, `value="${line.material_id}" selected`)}</select>
+        <input class="form-control form-control-sm mt-1 ${line.material_id ? "d-none" : ""}" data-wh-buy-name placeholder="Название нового" value="${escapeHtml(line.material_name || "")}" />
+      </div>
+      <div class="col-md-2"><label class="form-label small">Ед.</label><input class="form-control form-control-sm" data-wh-buy-unit value="${escapeHtml(line.unit || "шт")}" ${line.material_id ? "disabled" : ""} /></div>
+      <div class="col-md-2"><label class="form-label small">Кол-во</label><input class="form-control form-control-sm" type="number" min="0.01" step="0.01" data-wh-buy-qty value="${line.quantity}" /></div>
+      <div class="col-md-2"><label class="form-label small">Цена, ₽</label><input class="form-control form-control-sm" type="number" min="0" step="1" data-wh-buy-price value="${line.unit_price_rub}" /></div>
+      <div class="col-md-2"><button type="button" class="btn btn-sm btn-outline-danger w-100" data-wh-buy-remove="${index}">Убрать строку</button></div>
+    </div>`).join("");
+  return `
+    <p class="text-muted small">Укажите, что пришло на склад. Количество прибавится к остатку, цена материала обновится.</p>
+    <div id="whPurchaseLines">${lines}</div>
+    <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="whAddPurchaseLine">+ Строка</button>
+    <div class="row g-2 align-items-end">
+      <div class="col-md-8"><label class="form-label small">Комментарий</label><input class="form-control form-control-sm" id="whPurchaseNote" placeholder="Накладная, поставщик" /></div>
+      <div class="col-md-4"><button type="button" class="btn btn-primary btn-sm w-100" id="whSubmitPurchase">Провести закупку</button></div>
+    </div>`;
+}
+
+function renderWarehouseIssue() {
+  const orders = (state.crm.orders || []).filter((order) => (order.materials || []).length);
+  if (!orders.length) {
+    return `<div class="text-muted">В заказах пока нет затрат материалов. Когда заказ дойдёт до статуса «технолог», нужное количество спишется со склада.</div>`;
+  }
+  return `
+    <p class="text-muted small mb-3">Со статуса «технолог» склад списывает количество из колонки «нужно» у заказа. Если состав заказа меняется, списывается только разница. Ручная правка остатка на вкладке «Остатки» по-прежнему доступна.</p>
+    ${orders.map((order) => {
+      const active = WH_ISSUE_STATUSES.has(order.status);
+      const lines = (order.materials || []).map((line) => `
+        <tr>
+          <td>${escapeHtml(line.material_name)}</td>
+          <td>${formatQty(line.required_qty)} ${escapeHtml(line.unit || "")}</td>
+          <td>${formatQty(line.issued_qty || 0)} ${escapeHtml(line.unit || "")}</td>
+        </tr>`).join("");
+      return `<div class="border rounded-3 p-3 mb-3">
+        <div class="d-flex justify-content-between gap-2 mb-2">
+          <strong>${escapeHtml(order.title)}</strong>
+          <span class="badge ${active ? "text-bg-primary" : "text-bg-secondary"}">${escapeHtml(order.status)}${active ? " · списывается" : " · ещё не списывается"}</span>
+        </div>
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Материал</th><th>Нужно на заказ</th><th>Уже списано</th></tr></thead>
+          <tbody>${lines}</tbody>
+        </table>
+      </div>`;
+    }).join("")}`;
+}
+
+function readPurchaseDraft(host) {
+  return [...host.querySelectorAll("[data-wh-buy-line]")].map((row) => ({
+    material_id: row.querySelector("[data-wh-buy-id]")?.value || "",
+    material_name: row.querySelector("[data-wh-buy-name]")?.value.trim() || "",
+    unit: row.querySelector("[data-wh-buy-unit]")?.value.trim() || "шт",
+    quantity: Number(row.querySelector("[data-wh-buy-qty]")?.value || 0),
+    unit_price_rub: row.querySelector("[data-wh-buy-price]")?.value,
+  }));
+}
+
+function bindWarehousePanel(host) {
+  document.querySelectorAll("[data-wh-tab]").forEach((btn) => {
+    btn.onclick = () => {
+      state.crm.whTab = btn.dataset.whTab;
+      renderCrmWarehouse();
+    };
+  });
+  host.querySelector("#whNewMaterialForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = document.getElementById("whNewName")?.value.trim();
+    const unit = document.getElementById("whNewUnit")?.value.trim() || "шт";
+    const price = Number(document.getElementById("whNewPrice")?.value || 0);
+    const qty = Number(document.getElementById("whNewQty")?.value || 0);
+    if (!name) return;
+    try {
+      const created = await api("POST", "/catalog/crm/materials", { name, unit, purchase_price_rub: price }, true);
+      if (qty > 0) {
+        await api("PUT", `/catalog/crm/warehouse/${created.id}`, { quantity: qty }, true);
+      }
+      toast("Материал добавлен");
+      await loadCrm();
+    } catch (error) {
+      toast(formatApiError(error), false);
+    }
+  });
+  host.querySelectorAll("[data-wh-save]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.whSave;
+      const qty = Number(host.querySelector(`[data-wh-qty="${id}"]`)?.value);
+      if (!Number.isFinite(qty) || qty < 0) {
+        toast("Остаток не может быть отрицательным. Для списания используйте поле ±", false);
+        return;
+      }
+      try {
+        await api("PUT", `/catalog/crm/warehouse/${id}`, { quantity: qty }, true);
+        toast("Остаток записан");
+        await loadCrm();
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+  host.querySelectorAll("[data-wh-adjust]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.whAdjust;
+      const delta = Number(host.querySelector(`[data-wh-delta="${id}"]`)?.value);
+      if (!Number.isFinite(delta) || delta === 0) {
+        toast("Укажите, на сколько изменить остаток", false);
+        return;
+      }
+      try {
+        await api("POST", `/catalog/crm/warehouse/${id}/adjust`, { delta, note: "Ручная корректировка" }, true);
+        toast("Остаток изменён");
+        await loadCrm();
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+  host.querySelectorAll("[data-wh-del]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.whDel);
+      const row = state.crm.warehouse.find((item) => item.material_id === id);
+      if (!window.confirm(`Удалить материал «${row?.material_name || id}»? Это нельзя сделать, если он есть в заказах.`)) return;
+      try {
+        await api("DELETE", `/catalog/crm/materials/${id}`, undefined, true);
+        toast("Материал удалён");
+        await loadCrm();
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+  host.querySelector("#whAddPurchaseLine")?.addEventListener("click", () => {
+    state.crm.purchaseDraft = readPurchaseDraft(host);
+    state.crm.purchaseDraft.push({ material_id: "", material_name: "", unit: "шт", quantity: 1, unit_price_rub: "" });
+    renderCrmWarehouse();
+  });
+  host.querySelectorAll("[data-wh-buy-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const draft = readPurchaseDraft(host);
+      draft.splice(Number(btn.dataset.whBuyRemove), 1);
+      state.crm.purchaseDraft = draft.length ? draft : [{ material_id: "", quantity: 1, unit_price_rub: "" }];
+      renderCrmWarehouse();
+    });
+  });
+  host.querySelectorAll("[data-wh-buy-id]").forEach((select) => {
+    select.addEventListener("change", () => {
+      state.crm.purchaseDraft = readPurchaseDraft(host);
+      renderCrmWarehouse();
+    });
+  });
+  host.querySelector("#whSubmitPurchase")?.addEventListener("click", async () => {
+    const draft = readPurchaseDraft(host);
+    const note = document.getElementById("whPurchaseNote")?.value.trim() || "";
+    const lines = [];
+    for (const line of draft) {
+      if (!line.quantity || line.quantity <= 0) {
+        toast("В каждой строке укажите количество больше нуля", false);
+        return;
+      }
+      const payload = { quantity: line.quantity };
+      if (line.unit_price_rub !== "" && line.unit_price_rub != null) payload.unit_price_rub = Number(line.unit_price_rub);
+      if (line.material_id) payload.material_id = Number(line.material_id);
+      else {
+        if (!line.material_name) {
+          toast("Для нового материала укажите название", false);
+          return;
+        }
+        payload.material_name = line.material_name;
+        payload.unit = line.unit || "шт";
+      }
+      lines.push(payload);
+    }
+    try {
+      await api("POST", "/catalog/crm/warehouse/purchases", { note, lines }, true);
+      state.crm.purchaseDraft = [{ material_id: "", quantity: 1, unit_price_rub: "" }];
+      toast("Закупка проведена, остатки обновлены");
+      await loadCrm();
+    } catch (error) {
+      toast(formatApiError(error), false);
+    }
+  });
 }
 
 async function renderCrmOrderProcurement(orderId) {

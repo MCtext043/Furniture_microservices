@@ -35,6 +35,7 @@ from .models import (
     CrmOrderProcurement,
     CrmOrderReceipt,
     CrmProductionOrder,
+    CrmStockMovement,
     CrmWarehouseStock,
 )
 from .schemas import (
@@ -58,10 +59,23 @@ from .schemas import (
     CrmProcurementLine,
     CrmProcurementLineUpdateIn,
     CrmSubmitProjectIn,
+    CrmPurchaseCreate,
+    CrmStockAdjustIn,
+    CrmStockMovementOut,
     CrmWarehouseStockOut,
     CrmWarehouseStockUpdate,
     CrmOrderMaterialLineIn,
 )
+
+# Materials are written off once an order reaches the technologist and stays in production.
+ISSUE_STATUSES = frozenset({
+    "технолог",
+    "распил-фасады-фурнитура",
+    "доставлено",
+    "собрано",
+    "готово",
+    "готова",
+})
 
 router = APIRouter(prefix="/crm", tags=["crm"])
 
@@ -133,6 +147,92 @@ def _order_material_lines(session: Session, order_id: int) -> list[CrmOrderMater
 def _stock_map(session: Session) -> dict[int, float]:
     rows = session.scalars(select(CrmWarehouseStock)).all()
     return {row.material_id: float(row.quantity) for row in rows}
+
+
+def _stock_row(session: Session, material_id: int) -> CrmWarehouseStock:
+    row = session.get(CrmWarehouseStock, material_id)
+    if row:
+        return row
+    for pending in session.new:
+        if isinstance(pending, CrmWarehouseStock) and pending.material_id == material_id:
+            return pending
+    row = CrmWarehouseStock(material_id=material_id, quantity=0)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def _post_movement(
+    session: Session,
+    material_id: int,
+    delta: float,
+    kind: str,
+    *,
+    order_id: int | None = None,
+    note: str = "",
+) -> None:
+    if abs(delta) < 1e-9:
+        return
+    row = _stock_row(session, material_id)
+    row.quantity = float(row.quantity) + float(delta)
+    session.add(
+        CrmStockMovement(
+            material_id=material_id,
+            delta=delta,
+            quantity_after=float(row.quantity),
+            kind=kind,
+            order_id=order_id,
+            note=(note or "")[:255],
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+
+
+def _sync_order_issue(session: Session, order: CrmProductionOrder) -> None:
+    """Match warehouse write-off to the order's material cost. Idempotent via issued_qty."""
+    active = (order.status or "") in ISSUE_STATUSES
+    for line in _order_material_lines(session, order.id):
+        target = float(line.required_qty) if active else 0.0
+        issued = float(line.issued_qty or 0)
+        diff = target - issued
+        if abs(diff) < 1e-9:
+            continue
+        _post_movement(
+            session,
+            line.material_id,
+            -diff,
+            "consume",
+            order_id=order.id,
+            note=f"Заказ #{order.id}: {order.title}",
+        )
+        line.issued_qty = target
+
+
+def _release_order_issue(session: Session, order: CrmProductionOrder) -> None:
+    for line in _order_material_lines(session, order.id):
+        issued = float(line.issued_qty or 0)
+        if abs(issued) < 1e-9:
+            continue
+        _post_movement(
+            session,
+            line.material_id,
+            issued,
+            "consume",
+            order_id=order.id,
+            note=f"Возврат заказа #{order.id}",
+        )
+        line.issued_qty = 0
+    session.flush()
+
+
+def _warehouse_out(row: CrmWarehouseStock) -> CrmWarehouseStockOut:
+    return CrmWarehouseStockOut(
+        material_id=row.material_id,
+        material_name=row.material.name,
+        unit=row.material.unit,
+        quantity=float(row.quantity),
+        purchase_price_rub=float(row.material.purchase_price_rub or 0),
+    )
 
 
 def _procurement_lines(required: float, stock: float) -> tuple[float, float, float]:
@@ -281,6 +381,7 @@ def _order_out(
                 material_name=line.material.name,
                 unit=line.material.unit,
                 required_qty=float(line.required_qty),
+                issued_qty=float(line.issued_qty or 0),
             )
             for line in lines
         ],
@@ -291,19 +392,25 @@ def _order_out(
     )
 
 
+def _line_value(line, key: str, default=None):
+    if isinstance(line, dict):
+        return line.get(key, default)
+    return getattr(line, key, default)
+
+
 def _add_order_lines(session: Session, order_id: int, materials: list) -> None:
     for line in materials:
         material = _get_or_create_material(
             session,
-            material_id=getattr(line, "material_id", None),
-            name=getattr(line, "material_name", None),
-            unit=getattr(line, "unit", None),
+            material_id=_line_value(line, "material_id"),
+            name=_line_value(line, "material_name"),
+            unit=_line_value(line, "unit"),
         )
         session.add(
             CrmOrderMaterial(
                 order_id=order_id,
                 material_id=material.id,
-                required_qty=line.required_qty,
+                required_qty=_line_value(line, "required_qty"),
             )
         )
 
@@ -314,7 +421,7 @@ def list_materials(session: Session = Depends(get_session)) -> list[CrmMaterial]
     return list(session.scalars(select(CrmMaterial).order_by(CrmMaterial.name)))
 
 
-@router.post("/materials", response_model=CrmMaterialOut, status_code=201, dependencies=[Depends(ensure_catalog_writer)])
+@router.post("/materials", response_model=CrmMaterialOut, status_code=201, dependencies=[Depends(ensure_crm_order_writer)])
 @crm_db_guard
 def create_material(payload: CrmMaterialCreate, session: Session = Depends(get_session)) -> CrmMaterial:
     existing = session.scalar(select(CrmMaterial).where(CrmMaterial.name == payload.name))
@@ -329,7 +436,7 @@ def create_material(payload: CrmMaterialCreate, session: Session = Depends(get_s
     return material
 
 
-@router.patch("/materials/{material_id}", response_model=CrmMaterialOut, dependencies=[Depends(ensure_catalog_writer)])
+@router.patch("/materials/{material_id}", response_model=CrmMaterialOut, dependencies=[Depends(ensure_crm_order_writer)])
 @crm_db_guard
 def update_material(
     material_id: int,
@@ -350,21 +457,59 @@ def update_material(
     return material
 
 
+@router.delete("/materials/{material_id}", dependencies=[Depends(ensure_crm_order_writer)])
+@crm_db_guard
+def delete_material(material_id: int, session: Session = Depends(get_session)) -> dict[str, str]:
+    material = session.get(CrmMaterial, material_id)
+    if not material:
+        raise HTTPException(status_code=404, detail="Материал не найден")
+    used = session.scalar(select(CrmOrderMaterial.id).where(CrmOrderMaterial.material_id == material_id).limit(1))
+    if used:
+        raise HTTPException(status_code=409, detail="Материал указан в заказах и не может быть удалён")
+    session.execute(delete(CrmStockMovement).where(CrmStockMovement.material_id == material_id))
+    stock = session.get(CrmWarehouseStock, material_id)
+    if stock:
+        session.delete(stock)
+    session.delete(material)
+    session.commit()
+    return {"status": "deleted"}
+
+
 @router.get("/warehouse", response_model=list[CrmWarehouseStockOut])
 @crm_db_guard
 def list_warehouse(session: Session = Depends(get_session)) -> list[CrmWarehouseStockOut]:
     rows = session.scalars(
         select(CrmWarehouseStock).join(CrmMaterial).order_by(CrmMaterial.name)
     ).all()
-    return [
-        CrmWarehouseStockOut(
-            material_id=row.material_id,
-            material_name=row.material.name,
-            unit=row.material.unit,
-            quantity=float(row.quantity),
+    return [_warehouse_out(row) for row in rows]
+
+
+@router.get("/warehouse/movements", response_model=list[CrmStockMovementOut])
+@crm_db_guard
+def list_stock_movements(session: Session = Depends(get_session)) -> list[CrmStockMovementOut]:
+    rows = list(
+        session.scalars(
+            select(CrmStockMovement).order_by(CrmStockMovement.id.desc()).limit(40)
         )
-        for row in rows
-    ]
+    )
+    result: list[CrmStockMovementOut] = []
+    for row in rows:
+        material = session.get(CrmMaterial, row.material_id)
+        result.append(
+            CrmStockMovementOut(
+                id=row.id,
+                material_id=row.material_id,
+                material_name=material.name if material else "",
+                unit=material.unit if material else "",
+                delta=float(row.delta),
+                quantity_after=float(row.quantity_after),
+                kind=row.kind,
+                order_id=row.order_id,
+                note=row.note or "",
+                created_at=_iso(row.created_at) or "",
+            )
+        )
+    return result
 
 
 @router.put("/warehouse/{material_id}", response_model=CrmWarehouseStockOut, dependencies=[Depends(ensure_crm_order_writer)])
@@ -377,20 +522,80 @@ def update_warehouse_stock(
     material = session.get(CrmMaterial, material_id)
     if not material:
         raise HTTPException(status_code=404, detail="Материал не найден")
-    row = session.get(CrmWarehouseStock, material_id)
-    if not row:
-        row = CrmWarehouseStock(material_id=material_id, quantity=payload.quantity)
-        session.add(row)
-    else:
-        row.quantity = payload.quantity
+    row = _stock_row(session, material_id)
+    delta = float(payload.quantity) - float(row.quantity)
+    _post_movement(session, material_id, delta, "adjust", note="Ручная установка остатка")
     session.commit()
     session.refresh(row)
-    return CrmWarehouseStockOut(
-        material_id=row.material_id,
-        material_name=material.name,
-        unit=material.unit,
-        quantity=float(row.quantity),
-    )
+    return _warehouse_out(row)
+
+
+@router.post(
+    "/warehouse/{material_id}/adjust",
+    response_model=CrmWarehouseStockOut,
+    dependencies=[Depends(ensure_crm_order_writer)],
+)
+@crm_db_guard
+def adjust_warehouse_stock(
+    material_id: int,
+    payload: CrmStockAdjustIn,
+    session: Session = Depends(get_session),
+) -> CrmWarehouseStockOut:
+    material = session.get(CrmMaterial, material_id)
+    if not material:
+        raise HTTPException(status_code=404, detail="Материал не найден")
+    if abs(payload.delta) < 1e-9:
+        raise HTTPException(status_code=400, detail="Укажите количество, отличное от нуля")
+    _post_movement(session, material_id, payload.delta, "adjust", note=payload.note or "Ручная корректировка")
+    session.commit()
+    row = _stock_row(session, material_id)
+    return _warehouse_out(row)
+
+
+@router.post(
+    "/warehouse/purchases",
+    response_model=list[CrmWarehouseStockOut],
+    dependencies=[Depends(ensure_crm_order_writer)],
+)
+@crm_db_guard
+def create_purchase(payload: CrmPurchaseCreate, session: Session = Depends(get_session)) -> list[CrmWarehouseStockOut]:
+    touched: list[int] = []
+    for line in payload.lines:
+        material = _get_or_create_material(
+            session,
+            material_id=line.material_id,
+            name=line.material_name,
+            unit=line.unit,
+        )
+        if line.unit and not line.material_id:
+            material.unit = line.unit
+        if line.unit_price_rub is not None:
+            material.purchase_price_rub = line.unit_price_rub
+        note = payload.note.strip() or "Закупка"
+        if line.material_name:
+            note = f"{note}: {material.name}"
+        _post_movement(session, material.id, line.quantity, "purchase", note=note)
+        touched.append(material.id)
+    session.commit()
+    rows = session.scalars(
+        select(CrmWarehouseStock).join(CrmMaterial).where(CrmWarehouseStock.material_id.in_(touched))
+    ).all()
+    return [_warehouse_out(row) for row in rows]
+
+
+@router.post(
+    "/warehouse/reconcile",
+    response_model=list[CrmWarehouseStockOut],
+    dependencies=[Depends(ensure_crm_order_writer)],
+)
+@crm_db_guard
+def reconcile_warehouse(session: Session = Depends(get_session)) -> list[CrmWarehouseStockOut]:
+    """Write off (or return) stock so it matches material cost of production orders."""
+    orders = list(session.scalars(select(CrmProductionOrder)))
+    for order in orders:
+        _sync_order_issue(session, order)
+    session.commit()
+    return list_warehouse(session)
 
 
 @router.get("/orders", response_model=list[CrmOrderOut])
@@ -424,6 +629,12 @@ def delete_order(
     order = session.get(CrmProductionOrder, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
+    _release_order_issue(session, order)
+    session.execute(
+        CrmStockMovement.__table__.update()
+        .where(CrmStockMovement.order_id == order_id)
+        .values(order_id=None)
+    )
     
     # Каскадное удаление связанных данных
     session.execute(delete(CrmOrderPhoto).where(CrmOrderPhoto.order_id == order_id))
@@ -456,6 +667,7 @@ def create_order(payload: CrmOrderCreate, session: Session = Depends(get_session
     if payload.materials:
         _add_order_lines(session, order.id, payload.materials)
     session.flush()
+    _sync_order_issue(session, order)
     enqueue_order_email(session, _order_out(session, order), order.phone, order.email)
     session.commit()
     session.refresh(order)
@@ -496,9 +708,12 @@ def update_order(
     if order.customer_full_name and not order.customer:
         order.customer = order.customer_full_name
     if materials is not None:
+        _release_order_issue(session, order)
         session.execute(delete(CrmOrderMaterial).where(CrmOrderMaterial.order_id == order_id))
         if materials:
             _add_order_lines(session, order.id, materials)
+        session.flush()
+    _sync_order_issue(session, order)
     session.commit()
     session.refresh(order)
     return _order_out(session, order)
@@ -557,6 +772,7 @@ def update_order_status(
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
     order.status = payload.status
+    _sync_order_issue(session, order)
     order.status_changed_at = datetime.now(timezone.utc)
     session.commit()
     session.refresh(order)
@@ -846,6 +1062,8 @@ def update_order_procurement(
         if line.is_purchased is not None:
             row.is_purchased = line.is_purchased
 
+    session.flush()
+    _sync_order_issue(session, order)
     session.commit()
     # Return the updated computed view using the same logic as GET.
     return order_procurement(order_id=order_id, session=session)

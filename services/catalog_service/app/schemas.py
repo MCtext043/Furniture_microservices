@@ -153,10 +153,42 @@ class CrmWarehouseStockOut(BaseModel):
     material_name: str
     unit: str
     quantity: float
+    purchase_price_rub: float = 0
 
 
 class CrmWarehouseStockUpdate(BaseModel):
     quantity: float = Field(ge=0)
+
+
+class CrmStockAdjustIn(BaseModel):
+    delta: float
+    note: str = Field(default="", max_length=255)
+
+
+class CrmPurchaseLineIn(BaseModel):
+    material_id: int | None = None
+    material_name: str | None = Field(default=None, max_length=120)
+    unit: str | None = Field(default=None, max_length=20)
+    quantity: float = Field(gt=0)
+    unit_price_rub: float | None = Field(default=None, ge=0)
+
+
+class CrmPurchaseCreate(BaseModel):
+    note: str = Field(default="", max_length=255)
+    lines: list[CrmPurchaseLineIn] = Field(min_length=1)
+
+
+class CrmStockMovementOut(BaseModel):
+    id: int
+    material_id: int
+    material_name: str
+    unit: str
+    delta: float
+    quantity_after: float
+    kind: str
+    order_id: int | None = None
+    note: str
+    created_at: str
 
 
 class CrmOrderMaterialLineIn(BaseModel):
@@ -169,6 +201,7 @@ class CrmOrderMaterialLineIn(BaseModel):
 class CrmOrderMaterialLine(CrmOrderMaterialLineIn):
     material_name: str
     unit: str
+    issued_qty: float = 0
 
 
 class CrmOrderAdminFields(BaseModel):

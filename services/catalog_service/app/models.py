@@ -237,9 +237,31 @@ class CrmOrderMaterial(Base):
     order_id: Mapped[int] = mapped_column(ForeignKey("crm_production_orders.id"), index=True)
     material_id: Mapped[int] = mapped_column(ForeignKey("crm_materials.id"), index=True)
     required_qty: Mapped[float] = mapped_column(Numeric(12, 2))
+    issued_qty: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
 
     material: Mapped[CrmMaterial] = relationship()
     order: Mapped[CrmProductionOrder] = relationship()
+
+
+class CrmStockMovement(Base):
+    """Ledger line: purchase (+), order issue (−), manual adjustment."""
+
+    __tablename__ = "crm_stock_movements"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("crm_materials.id"), index=True)
+    delta: Mapped[float] = mapped_column(Numeric(12, 2))
+    quantity_after: Mapped[float] = mapped_column(Numeric(12, 2), default=0)
+    kind: Mapped[str] = mapped_column(String(16), index=True)
+    order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("crm_production_orders.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    note: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    material: Mapped[CrmMaterial] = relationship()
 
 
 class CrmOrderProcurement(Base):
