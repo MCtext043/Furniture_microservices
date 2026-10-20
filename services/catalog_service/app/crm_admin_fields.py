@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 # Fields that use editable option dictionaries in admin UI
 CRM_DICT_FIELDS: dict[str, str] = {
     "color_corpus": "Цвет корпуса",
@@ -61,3 +63,30 @@ DEFAULT_FIELD_OPTIONS: dict[str, list[str]] = {
     "vent_grille": ["Есть", "Нет"],
     "handles": ["Скоба", "Кнопка", "Профиль", "Без ручек"],
 }
+
+_RU_TO_LAT = str.maketrans({
+    "а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+    "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+    "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+    "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch",
+    "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya",
+})
+
+RESERVED_FIELD_KEYS = set(CRM_DICT_FIELDS) | set(CRM_ADMIN_SCALAR_FIELDS) | {
+    "title", "customer", "status", "notes", "materials", "stage_workdays", "custom_fields",
+}
+
+
+def slugify_field_key(label: str, taken: set[str]) -> str:
+    folded = label.strip().lower().translate(_RU_TO_LAT)
+    raw = re.sub(r"[^a-z0-9]+", "_", folded).strip("_")
+    if not raw or not raw[0].isalpha():
+        raw = f"field_{raw}".strip("_")
+    raw = (raw or "field")[:60]
+    key = raw
+    number = 2
+    while key in taken or key in RESERVED_FIELD_KEYS:
+        suffix = f"_{number}"
+        key = f"{raw[: 60 - len(suffix)]}{suffix}"
+        number += 1
+    return key

@@ -8,7 +8,7 @@ from typing import Callable, TypeVar
 from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session, joinedload
 
@@ -19,15 +19,19 @@ from common.jwt_auth import (
     ensure_crm_order_delete,
     ensure_crm_order_writer,
     ensure_crm_status,
+    ensure_superadmin,
 )
 
 from .db import get_session
 from .order_email import enqueue_order_email
+from .stage_reminders import lead_days, normalize_stage_workdays
 from .crm_admin_fields import (
     CRM_DICT_FIELDS,
     DEFAULT_FIELD_OPTIONS,
+    slugify_field_key,
 )
 from .models import (
+    CrmCustomField,
     CrmFieldOption,
     CrmMaterial,
     CrmOrderMaterial,
@@ -35,10 +39,13 @@ from .models import (
     CrmOrderProcurement,
     CrmOrderReceipt,
     CrmProductionOrder,
+    CrmStageReminder,
     CrmStockMovement,
     CrmWarehouseStock,
+    ShopSettings,
 )
 from .schemas import (
+    CrmCustomFieldCreate,
     CrmFieldDictionaryOut,
     CrmFieldOptionCreate,
     CrmFieldOptionOut,
@@ -65,6 +72,7 @@ from .schemas import (
     CrmWarehouseStockOut,
     CrmWarehouseStockUpdate,
     CrmOrderMaterialLineIn,
+    StageAlertSettings,
 )
 
 # Materials are written off once an order reaches the technologist and stays in production.
@@ -388,8 +396,31 @@ def _order_out(
         created_at=_iso(order.created_at),
         status_changed_at=_iso(order.status_changed_at),
         calendar_kind=calendar_kind,
+        stage_workdays={key: int(value) for key, value in (order.stage_workdays or {}).items()},
+        custom_fields={key: str(value) for key, value in (order.custom_fields or {}).items() if value},
         **_admin_fields_from_order(order),
     )
+
+
+def _normalize_custom_fields(session: Session, raw: dict | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    known = set(
+        session.scalars(select(CrmCustomField.field_key).where(CrmCustomField.is_active.is_(True)))
+    )
+    cleaned: dict[str, str] = {}
+    for key, value in raw.items():
+        if key in CRM_DICT_FIELDS:
+            raise HTTPException(status_code=400, detail="Встроенное поле заполняется отдельно")
+        if key not in known:
+            raise HTTPException(status_code=400, detail=f"Неизвестное поле: {key}")
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if len(text) > 120:
+            raise HTTPException(status_code=400, detail="Значение поля длиннее 120 символов")
+        cleaned[key] = text
+    return cleaned
 
 
 def _line_value(line, key: str, default=None):
@@ -641,13 +672,45 @@ def delete_order(
     session.execute(delete(CrmOrderReceipt).where(CrmOrderReceipt.order_id == order_id))
     session.execute(delete(CrmOrderMaterial).where(CrmOrderMaterial.order_id == order_id))
     session.execute(delete(CrmOrderProcurement).where(CrmOrderProcurement.order_id == order_id))
-    
+    session.execute(delete(CrmStageReminder).where(CrmStageReminder.order_id == order_id))
+
     # Удаляем сам заказ
     session.delete(order)
     session.commit()
     
     return {"status": "deleted", "order_id": str(order_id)}
 
+
+
+@router.get("/stage-alert-settings", response_model=StageAlertSettings)
+@crm_db_guard
+def get_stage_alert_settings(session: Session = Depends(get_session)) -> StageAlertSettings:
+    return StageAlertSettings(lead_days=lead_days(session))
+
+
+@router.put(
+    "/stage-alert-settings",
+    response_model=StageAlertSettings,
+    dependencies=[Depends(ensure_superadmin)],
+)
+@crm_db_guard
+def save_stage_alert_settings(
+    payload: StageAlertSettings,
+    session: Session = Depends(get_session),
+) -> StageAlertSettings:
+    row = session.scalar(select(ShopSettings).order_by(ShopSettings.id).limit(1))
+    if row is None:
+        row = ShopSettings(
+            free_delivery_threshold=3000,
+            delivery_price_per_km=45,
+            warehouse_address="",
+            stage_alert_lead_days=payload.lead_days,
+        )
+        session.add(row)
+    else:
+        row.stage_alert_lead_days = payload.lead_days
+    session.commit()
+    return StageAlertSettings(lead_days=int(row.stage_alert_lead_days))
 
 
 @router.post("/orders", response_model=CrmOrderOut, status_code=201, dependencies=[Depends(ensure_crm_order_writer)])
@@ -660,6 +723,8 @@ def create_order(payload: CrmOrderCreate, session: Session = Depends(get_session
         notes=payload.notes,
     )
     _apply_admin_fields(order, payload.model_dump())
+    order.stage_workdays = normalize_stage_workdays(payload.stage_workdays)
+    order.custom_fields = _normalize_custom_fields(session, payload.custom_fields)
     if not order.customer and order.customer_full_name:
         order.customer = order.customer_full_name
     session.add(order)
@@ -704,6 +769,16 @@ def update_order(
     if "status" in data and data["status"] is not None and data["status"] != order.status:
         order.status = data["status"]
         order.status_changed_at = datetime.now(timezone.utc)
+    if "custom_fields" in data:
+        order.custom_fields = _normalize_custom_fields(session, data.pop("custom_fields"))
+    if "stage_workdays" in data:
+        order.stage_workdays = normalize_stage_workdays(data.pop("stage_workdays"))
+        session.execute(
+            delete(CrmStageReminder).where(
+                CrmStageReminder.order_id == order.id,
+                CrmStageReminder.sent_at.is_(None),
+            )
+        )
     _apply_admin_fields(order, data)
     if order.customer_full_name and not order.customer:
         order.customer = order.customer_full_name
@@ -1095,8 +1170,75 @@ def list_field_dictionaries(session: Session = Depends(get_session)) -> list[Crm
             for opt in by_key.get(key, [])
             if opt.is_active
         ]
-        result.append(CrmFieldDictionaryOut(field_key=key, label=label, options=options))
+        result.append(CrmFieldDictionaryOut(field_key=key, label=label, options=options, builtin=True))
+    custom_rows = list(
+        session.scalars(
+            select(CrmCustomField)
+            .where(CrmCustomField.is_active.is_(True))
+            .order_by(CrmCustomField.sort_order, CrmCustomField.id)
+        )
+    )
+    for row in custom_rows:
+        options = [
+            CrmFieldOptionOut(
+                id=opt.id,
+                field_key=opt.field_key,
+                value=opt.value,
+                sort_order=opt.sort_order,
+                is_active=opt.is_active,
+            )
+            for opt in by_key.get(row.field_key, [])
+            if opt.is_active
+        ]
+        result.append(
+            CrmFieldDictionaryOut(field_key=row.field_key, label=row.label, options=options, builtin=False)
+        )
     return result
+
+
+@router.post(
+    "/field-dictionaries",
+    response_model=CrmFieldDictionaryOut,
+    status_code=201,
+    dependencies=[Depends(ensure_crm_dicts_writer)],
+)
+@crm_db_guard
+def create_field_dictionary(
+    payload: CrmCustomFieldCreate,
+    session: Session = Depends(get_session),
+) -> CrmFieldDictionaryOut:
+    label = payload.label.strip()
+    if len(label) < 2:
+        raise HTTPException(status_code=400, detail="Укажите название поля")
+    taken_labels = {item.casefold() for item in CRM_DICT_FIELDS.values()}
+    taken_labels.update(
+        item.casefold() for item in session.scalars(select(CrmCustomField.label))
+    )
+    if label.casefold() in taken_labels:
+        raise HTTPException(status_code=409, detail="Такое поле уже есть")
+    taken_keys = set(session.scalars(select(CrmCustomField.field_key)))
+    field_key = slugify_field_key(label, taken_keys)
+    sort_order = int(session.scalar(select(func.max(CrmCustomField.sort_order))) or 0) + 1
+    session.add(CrmCustomField(field_key=field_key, label=label, sort_order=sort_order, is_active=True))
+    session.commit()
+    return CrmFieldDictionaryOut(field_key=field_key, label=label, options=[], builtin=False)
+
+
+@router.delete(
+    "/field-dictionaries/{field_key}",
+    dependencies=[Depends(ensure_crm_dicts_writer)],
+)
+@crm_db_guard
+def delete_field_dictionary(field_key: str, session: Session = Depends(get_session)) -> dict[str, str]:
+    if field_key in CRM_DICT_FIELDS:
+        raise HTTPException(status_code=400, detail="Встроенное поле нельзя удалить")
+    row = session.scalar(select(CrmCustomField).where(CrmCustomField.field_key == field_key))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Поле не найдено")
+    session.execute(delete(CrmFieldOption).where(CrmFieldOption.field_key == field_key))
+    session.delete(row)
+    session.commit()
+    return {"status": "deleted", "field_key": field_key}
 
 
 @router.post(
@@ -1107,7 +1249,13 @@ def list_field_dictionaries(session: Session = Depends(get_session)) -> list[Crm
 )
 @crm_db_guard
 def create_field_option(payload: CrmFieldOptionCreate, session: Session = Depends(get_session)) -> CrmFieldOptionOut:
-    if payload.field_key not in CRM_DICT_FIELDS:
+    known_custom = session.scalar(
+        select(CrmCustomField.id).where(
+            CrmCustomField.field_key == payload.field_key,
+            CrmCustomField.is_active.is_(True),
+        )
+    )
+    if payload.field_key not in CRM_DICT_FIELDS and known_custom is None:
         raise HTTPException(status_code=400, detail=f"Неизвестный справочник: {payload.field_key}")
     existing = session.scalar(
         select(CrmFieldOption).where(

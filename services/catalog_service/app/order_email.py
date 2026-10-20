@@ -55,12 +55,12 @@ def enqueue_order_email(session, order, phone="", email=""):
     session.add(OrderEmail(order_id=order.id, subject=f"Петров — новый заказ №{order.id}", text_body=text, html_body=html, created_at=now, next_attempt_at=now))
 
 
-def send_email(row):
+def send_email(row, message_id=None):
     message = EmailMessage()
     message["From"] = os.getenv("SMTP_FROM") or os.environ["SMTP_USER"]
     message["To"] = RECIPIENT
     message["Subject"] = row.subject
-    message["Message-ID"] = f"<petrov-order-{row.order_id}@{message['From'].split('@')[-1]}>"
+    message["Message-ID"] = message_id or f"<petrov-order-{row.order_id}@{message['From'].split('@')[-1]}>"
     message.set_content(row.text_body)
     message.add_alternative(row.html_body, subtype="html")
     security = os.getenv("SMTP_SECURITY", "ssl")
@@ -96,10 +96,13 @@ def deliver_pending():
 
 
 def _worker(stop):
+    from .stage_reminders import deliver_stage_reminders, scan_due_stage_reminders
+
     while not stop.is_set():
         try:
-            if deliver_pending():
+            if deliver_pending() or deliver_stage_reminders():
                 continue
+            scan_due_stage_reminders()
         except Exception:
             log.exception("Order email outbox unavailable")
         stop.wait(10)

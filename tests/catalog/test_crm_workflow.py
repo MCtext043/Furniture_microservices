@@ -354,6 +354,50 @@ def test_field_dictionaries_defaults_and_add(catalog_client: TestClient):
     assert any(o["value"] == "Кастомная ручка X" for o in handles["options"])
 
 
+def test_custom_dictionary_field_can_be_added_and_saved_on_order(catalog_client: TestClient):
+    created = catalog_client.post("/crm/field-dictionaries", json={"label": "Карниз"})
+    assert created.status_code == 201, created.text
+    field = created.json()
+    assert field["builtin"] is False
+    assert field["label"] == "Карниз"
+    assert field["options"] == []
+    assert field["field_key"].isascii() and field["field_key"].islower()
+
+    option = catalog_client.post(
+        "/crm/field-options",
+        json={"field_key": field["field_key"], "value": "Скрытый"},
+    )
+    assert option.status_code == 201, option.text
+
+    listed = catalog_client.get("/crm/field-dictionaries").json()
+    saved = next(item for item in listed if item["field_key"] == field["field_key"])
+    assert saved["builtin"] is False
+    assert any(item["value"] == "Скрытый" for item in saved["options"])
+
+    order = catalog_client.post(
+        "/crm/orders",
+        json={"title": "Заказ с карнизом", "custom_fields": {field["field_key"]: "Скрытый"}},
+    )
+    assert order.status_code == 201, order.text
+    assert order.json()["custom_fields"][field["field_key"]] == "Скрытый"
+
+    cleared = catalog_client.patch(
+        f"/crm/orders/{order.json()['id']}",
+        json={"custom_fields": {field["field_key"]: ""}},
+    )
+    assert cleared.status_code == 200
+    assert field["field_key"] not in cleared.json()["custom_fields"]
+
+    duplicate = catalog_client.post("/crm/field-dictionaries", json={"label": "карниз"})
+    assert duplicate.status_code == 409
+    builtin = catalog_client.delete(f"/crm/field-dictionaries/handles")
+    assert builtin.status_code == 400
+    removed = catalog_client.delete(f"/crm/field-dictionaries/{field['field_key']}")
+    assert removed.status_code == 200
+    keys = {item["field_key"] for item in catalog_client.get("/crm/field-dictionaries").json()}
+    assert field["field_key"] not in keys
+
+
 def test_get_order_returns_admin_fields(catalog_client: TestClient):
     created = catalog_client.post(
         "/crm/orders",

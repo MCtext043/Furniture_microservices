@@ -3690,18 +3690,36 @@ function buildCrmOrderEditorHtml(order) {
     return `<div class="col-md-6"><label class="form-label small">${escapeHtml(field.label)}${field.required ? " *" : ""}</label>
       <input class="form-control" id="crmField_${field.key}" type="${field.type}" value="${escapeHtml(val == null ? "" : String(val))}" /></div>`;
   }).join("");
-  const dicts = CRM_DICT_FIELD_KEYS.map((key) => {
-    const options = crmDictOptions(key);
-    const current = o[key] || "";
+  const dicts = (state.crm.dictionaries || []).map((dict) => {
+    const key = dict.field_key;
+    const options = dict.options || [];
+    const current = dict.builtin ? (o[key] || "") : ((o.custom_fields || {})[key] || "");
     const opts = [`<option value="">—</option>`]
       .concat(options.map((opt) => `<option value="${escapeHtml(opt.value)}" ${opt.value === current ? "selected" : ""}>${escapeHtml(opt.value)}</option>`));
     if (current && !options.some((opt) => opt.value === current)) {
       opts.push(`<option value="${escapeHtml(current)}" selected>${escapeHtml(current)} (текущее)</option>`);
     }
-    return `<div class="col-md-6"><label class="form-label small">${escapeHtml(crmDictLabel(key))}</label>
+    return `<div class="col-md-6"><label class="form-label small">${escapeHtml(dict.label || crmDictLabel(key))}</label>
       <select class="form-select" id="crmField_${key}">${opts.join("")}</select></div>`;
   }).join("");
-  return scalar + dicts;
+  const stages = buildStageWorkdaysHtml(o);
+  return scalar + dicts + stages;
+}
+
+function buildStageWorkdaysHtml(order) {
+  const saved = order?.stage_workdays || {};
+  const fields = CRM_STATUSES.map((status) => {
+    const value = saved[status];
+    return `<div class="stage-days-cell">
+      <label class="form-label small" for="crmStageDays_${CRM_STATUSES.indexOf(status)}">${escapeHtml(status)}</label>
+      <input class="form-control" id="crmStageDays_${CRM_STATUSES.indexOf(status)}" type="number" min="1" max="366" step="1" inputmode="numeric" data-stage-days="${escapeHtml(status)}" value="${value == null || value === "" ? "" : escapeHtml(String(value))}" placeholder="—" />
+    </div>`;
+  }).join("");
+  return `<div class="col-12 mt-2">
+    <div class="fw-semibold">Срок каждого этапа, рабочие дни</div>
+    <p class="text-muted small mb-2">От даты создания заказа, по производственному календарю России. Выходные и праздники в срок не входят. Пустое поле — этот этап без напоминания.</p>
+    <div class="stage-days-grid">${fields}</div>
+  </div>`;
 }
 
 function readCrmOrderEditorPayload() {
@@ -3733,7 +3751,24 @@ function readCrmOrderEditorPayload() {
     status: get("status"),
     notes: get("notes"),
   };
-  CRM_DICT_FIELD_KEYS.forEach((key) => { payload[key] = get(key).trim(); });
+  const customFields = {};
+  (state.crm.dictionaries || []).forEach((dict) => {
+    const value = get(dict.field_key).trim();
+    if (dict.builtin) payload[dict.field_key] = value;
+    else customFields[dict.field_key] = value;
+  });
+  payload.custom_fields = customFields;
+  const stageWorkdays = {};
+  document.querySelectorAll("[data-stage-days]").forEach((input) => {
+    const raw = input.value.trim();
+    if (!raw) return;
+    const days = Number(raw);
+    if (!Number.isInteger(days) || days < 1 || days > 366) {
+      throw new Error(`Срок этапа «${input.dataset.stageDays}» — целое число рабочих дней от 1 до 366`);
+    }
+    stageWorkdays[input.dataset.stageDays] = days;
+  });
+  payload.stage_workdays = stageWorkdays;
   if (payload.price_admin != null && payload.advance_paid != null && payload.balance_due == null) {
     payload.balance_due = payload.price_admin - payload.advance_paid;
   }
@@ -3742,13 +3777,11 @@ function readCrmOrderEditorPayload() {
 
 async function openCrmOrderEditor(orderId) {
   if (!canManageCatalog()) return;
-  if (!state.crm.dictionaries?.length) {
-    try {
-      state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
-    } catch (error) {
-      toast(formatApiError(error), false);
-      return;
-    }
+  try {
+    state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+  } catch (error) {
+    toast(formatApiError(error), false);
+    return;
   }
   let order = null;
   if (orderId) {
@@ -3802,7 +3835,10 @@ function renderCrmDictionariesPanel() {
   }
   host.innerHTML = state.crm.dictionaries.map((dict) => `
     <div class="border rounded-3 p-3 mb-3" data-dict-key="${escapeHtml(dict.field_key)}">
-      <div class="fw-semibold mb-2">${escapeHtml(dict.label)}</div>
+      <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+        <div class="fw-semibold">${escapeHtml(dict.label)}</div>
+        ${dict.builtin ? "" : `<button type="button" class="btn btn-outline-danger btn-sm py-0" data-dict-remove-field="${escapeHtml(dict.field_key)}">Удалить поле</button>`}
+      </div>
       <div class="d-flex flex-wrap gap-2 mb-2">
         ${(dict.options || []).map((opt) => `
           <span class="badge text-bg-light border d-inline-flex align-items-center gap-1">
@@ -3834,6 +3870,19 @@ function renderCrmDictionariesPanel() {
       }
     });
   });
+  host.querySelectorAll("[data-dict-remove-field]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!confirm("Удалить это поле из справочника и из карточки заказа?")) return;
+      try {
+        await api("DELETE", `/catalog/crm/field-dictionaries/${encodeURIComponent(button.dataset.dictRemoveField)}`, undefined, true);
+        state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+        renderCrmDictionariesPanel();
+        toast("Поле удалено");
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
   host.querySelectorAll("[data-dict-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (!confirm("Удалить значение из справочника?")) return;
@@ -3849,6 +3898,24 @@ function renderCrmDictionariesPanel() {
   });
 }
 
+async function addCrmDictionaryField() {
+  const input = document.getElementById("crmNewFieldLabel");
+  const label = (input?.value || "").trim();
+  if (label.length < 2) {
+    toast("Укажите название поля", false);
+    return;
+  }
+  try {
+    await api("POST", "/catalog/crm/field-dictionaries", { label }, true);
+    if (input) input.value = "";
+    state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+    renderCrmDictionariesPanel();
+    toast("Поле добавлено. Оно появится в карточке заказа");
+  } catch (error) {
+    toast(formatApiError(error), false);
+  }
+}
+
 async function openCrmDictionariesModal() {
   if (!canEditCrmDicts()) return;
   try {
@@ -3856,6 +3923,31 @@ async function openCrmDictionariesModal() {
     renderCrmDictionariesPanel();
     const modalEl = document.getElementById("crmDictionariesModal");
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  } catch (error) {
+    toast(formatApiError(error), false);
+  }
+}
+
+async function loadStageAlertSettings() {
+  const card = document.getElementById("crmStageAlertCard");
+  if (!card) return;
+  card.classList.toggle("d-none", !isSuperAdmin());
+  if (!isSuperAdmin()) return;
+  const data = await api("GET", "/catalog/crm/stage-alert-settings", undefined, true);
+  const input = document.getElementById("crmStageAlertLead");
+  if (input && document.activeElement !== input) input.value = data.lead_days ?? 2;
+}
+
+async function saveStageAlertSettings() {
+  const input = document.getElementById("crmStageAlertLead");
+  const lead = Number(input?.value);
+  if (!Number.isInteger(lead) || lead < 0 || lead > 90) {
+    toast("Укажите число дней от 0 до 90", false);
+    return;
+  }
+  try {
+    await api("PUT", "/catalog/crm/stage-alert-settings", { lead_days: lead }, true);
+    toast("Срок напоминания сохранён");
   } catch (error) {
     toast(formatApiError(error), false);
   }
@@ -3876,6 +3968,7 @@ async function loadCrm() {
     state.crm.movements = movements;
     renderCrmPanel();
     renderOrderCalendar();
+    await loadStageAlertSettings();
   } catch (error) {
     const wh = document.getElementById("crmWarehouseTable");
     const orders = document.getElementById("crmOrdersPanel");
@@ -6591,7 +6684,15 @@ async function boot() {
   bindClick("btnAdminLogin", loginCustomer);
   bindClick("btnCrmNewOrder", () => openCrmOrderEditor(null));
   bindClick("btnCrmDictionaries", openCrmDictionariesModal);
+  bindClick("btnCrmAddField", addCrmDictionaryField);
+  document.getElementById("crmNewFieldLabel")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addCrmDictionaryField();
+    }
+  });
   bindClick("btnCrmSaveOrder", saveCrmOrderFromEditor);
+  bindClick("btnCrmStageAlertSave", saveStageAlertSettings);
   bindClick("btnCrmReceiptSave", saveCrmReceiptFromModal);
   document.getElementById("crmReceiptFile")?.addEventListener("change", previewCrmReceiptFile);
   bindClick("btnSaveProduct", saveProductEditor);

@@ -241,6 +241,8 @@ class CrmOrderCreate(CrmOrderAdminFields):
     status: str = Field(default="черновой замер", max_length=32)
     notes: str = ""
     materials: list[CrmOrderMaterialLineIn] = Field(default_factory=list)
+    stage_workdays: dict[str, int] = Field(default_factory=dict)
+    custom_fields: dict[str, str] = Field(default_factory=dict)
 
 
 class CrmOrderUpdate(BaseModel):
@@ -277,6 +279,12 @@ class CrmOrderUpdate(BaseModel):
     cutlery_tray: str | None = Field(default=None, max_length=120)
     vent_grille: str | None = Field(default=None, max_length=120)
     handles: str | None = Field(default=None, max_length=120)
+    stage_workdays: dict[str, int] | None = None
+    custom_fields: dict[str, str] | None = None
+
+
+class StageAlertSettings(BaseModel):
+    lead_days: int = Field(ge=0, le=90)
 
 
 class CrmOrderOut(CrmOrderAdminFields):
@@ -295,6 +303,8 @@ class CrmOrderOut(CrmOrderAdminFields):
     created_at: str | None = None
     status_changed_at: str | None = None
     calendar_kind: str | None = None
+    stage_workdays: dict[str, int] = Field(default_factory=dict)
+    custom_fields: dict[str, str] = Field(default_factory=dict)
 
 
 class CrmFieldOptionCreate(BaseModel):
@@ -318,10 +328,15 @@ class CrmFieldOptionUpdate(BaseModel):
     is_active: bool | None = None
 
 
+class CrmCustomFieldCreate(BaseModel):
+    label: str = Field(min_length=2, max_length=80)
+
+
 class CrmFieldDictionaryOut(BaseModel):
     field_key: str
     label: str
     options: list[CrmFieldOptionOut]
+    builtin: bool = True
 
 
 class CrmOrderStatusUpdate(BaseModel):

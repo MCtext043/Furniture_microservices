@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .db import Base
@@ -120,6 +120,7 @@ class ShopSettings(Base):
     warehouse_address: Mapped[str] = mapped_column(String(500), default="")
     warehouse_lat: Mapped[float | None] = mapped_column(nullable=True)
     warehouse_lon: Mapped[float | None] = mapped_column(nullable=True)
+    stage_alert_lead_days: Mapped[int] = mapped_column(Integer, default=2)
 
 
 class CrmMaterial(Base):
@@ -187,6 +188,41 @@ class CrmProductionOrder(Base):
     cutlery_tray: Mapped[str] = mapped_column(String(120), default="")
     vent_grille: Mapped[str] = mapped_column(String(120), default="")
     handles: Mapped[str] = mapped_column(String(120), default="")
+    stage_workdays: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    custom_fields: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+
+class CrmStageReminder(Base):
+    """One advance notice per order stage. Separate from the new-order outbox, which is unique per order."""
+
+    __tablename__ = "crm_stage_reminders"
+    __table_args__ = (UniqueConstraint("order_id", "stage", name="uq_crm_stage_reminder_order_stage"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("crm_production_orders.id", ondelete="CASCADE"), index=True)
+    stage: Mapped[str] = mapped_column(String(64))
+    deadline_on: Mapped[date] = mapped_column(Date)
+    subject: Mapped[str] = mapped_column(String(255))
+    text_body: Mapped[str] = mapped_column(Text)
+    html_body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+
+    order: Mapped[CrmProductionOrder] = relationship()
+
+
+class CrmCustomField(Base):
+    """Dictionary field added by an admin. Values live in CrmProductionOrder.custom_fields."""
+
+    __tablename__ = "crm_custom_fields"
+
+    id: Mapped[int] = mapped_column(primary_key=True, index=True)
+    field_key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    label: Mapped[str] = mapped_column(String(80))
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class CrmFieldOption(Base):

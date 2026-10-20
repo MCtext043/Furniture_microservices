@@ -363,6 +363,34 @@ html { scroll-padding-top: 5.5rem; }
 .crm-photo-thumb:hover { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 #crmWarehouseTabs .nav-link { font-size: .82rem; }
 #crm-warehouse .form-label { margin-bottom: .2rem; }
+
+.stage-days-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem 0.75rem;
+  align-items: stretch;
+}
+.stage-days-cell {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+}
+.stage-days-cell .form-label {
+  flex: 1 1 auto;
+  margin-bottom: 0.35rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.stage-days-cell .form-control {
+  width: 100%;
+}
+@media (max-width: 991.98px) {
+  .stage-days-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 479.98px) {
+  .stage-days-grid { grid-template-columns: 1fr; }
+}
 .form-control-color { width: 3rem; min-height: 38px !important; padding: 0.25rem !important; }
 .control-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 .control-actions .btn { flex: 1 1 auto; min-height: 40px; padding: 0.55rem 0.8rem; font-size: 0.75rem; }

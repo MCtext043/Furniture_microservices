@@ -75,12 +75,14 @@ _TRUNCATE_CATALOG = text(
     """
     TRUNCATE TABLE
       order_email_outbox,
+      crm_stage_reminders,
       crm_stock_movements,
       crm_order_photos,
       crm_order_receipts,
       crm_order_procurements,
       crm_order_materials,
       crm_field_options,
+      crm_custom_fields,
       crm_production_orders,
       crm_warehouse_stock,
       crm_materials,
