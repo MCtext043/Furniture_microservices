@@ -9,6 +9,7 @@ import { intersectsOriented } from "./interaction/CollisionController.js";
 import { registerBuiltInFurniture } from "./furniture/definitions/index.js";
 import { KitchenRun } from "./furniture/definitions/kitchen.js";
 import { ModelAssetLoader } from "./furniture/ModelAssetLoader.js";
+import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis, getRotatedFootprint } from "./interaction/Transform3D.js";
 
 test("FurnitureRegistry rejects duplicates and delegates behavior", () => {
   const registry = new FurnitureRegistry();
@@ -56,6 +57,13 @@ test("oriented collision uses SAT for arbitrary rotations", () => {
   assert.equal(intersectsOriented(a, { x: 300, z: 0, width: 80, depth: 30, rotationY: -20 }), false);
 });
 
+test("collision detection allows objects to be stacked at different elevations", () => {
+  const floor = { x: 0, y: 0, z: 0, width: 1000, depth: 600, height: 700, rotationY: 0 };
+  const wall = { x: 0, y: 900, z: 0, width: 1000, depth: 600, height: 500, rotationY: 0 };
+  assert.equal(intersectsOriented(floor, wall), false);
+  assert.equal(intersectsOriented(floor, { ...wall, y: 600 }), true);
+});
+
 test("kitchen modules build production parts and a continuous countertop", () => {
   const registry=registerBuiltInFurniture(new FurnitureRegistry()); const definition=registry.require("kitchen.base_cabinet");
   const placement={type:"kitchen.base_cabinet",configuration:{...definition.defaults}};
@@ -77,4 +85,45 @@ test("ModelAssetLoader caches by asset key and version", async () => {
   const loader=new ModelAssetLoader({fetchAsset:async()=>{requests++;return{ok:true,arrayBuffer:async()=>new ArrayBuffer(1)}},parse:async()=>source});
   assert.equal((await loader.load("models/chair.glb",2)).instance,true); await loader.load("models/chair.glb",2);
   assert.equal(requests,1); loader.clear();
+});
+
+test("3D translation keeps furniture fully inside the room on every axis", () => {
+  const room = { width: 4000, length: 3000, height: 2700 };
+  const item = { width: 1200, depth: 600, height: 2100, x: 2000, y: 0, z: 1500, rotationY: 90 };
+  const moved = applyTranslationDelta(item, { x: 5000, y: 4000, z: -5000 }, room);
+  const footprint = getRotatedFootprint(moved);
+  assert.equal(moved.x, room.width - footprint.width / 2);
+  assert.equal(moved.y, room.height - item.height);
+  assert.equal(moved.z, footprint.depth / 2);
+});
+
+test("3D translation supports axis and plane movement without changing untouched coordinates", () => {
+  const room = { width: 6000, length: 5000, height: 2800 };
+  const item = { width: 800, depth: 500, height: 700, x: 2000, y: 100, z: 2200, rotationY: 0 };
+  assert.deepEqual(
+    applyTranslationDelta(item, { x: 250, y: 0, z: 0 }, room),
+    { ...item, x: 2250 }
+  );
+  assert.deepEqual(
+    applyTranslationDelta(item, { x: 0, y: 350, z: -400 }, room),
+    { ...item, y: 450, z: 1800 }
+  );
+});
+
+test("axis gizmo converts a drag to exactly one world coordinate", () => {
+  const drag = { x: 175, y: -240, z: 320 };
+  assert.deepEqual(coordinateDeltaForAxis("x", drag), { x: 175, y: 0, z: 0 });
+  assert.deepEqual(coordinateDeltaForAxis("y", drag), { x: 0, y: -240, z: 0 });
+  assert.deepEqual(coordinateDeltaForAxis("z", drag), { x: 0, y: 0, z: 320 });
+});
+
+test("clampPlacementToRoom handles rotated footprints and invalid persisted values", () => {
+  const room = { width: 3000, length: 2500, height: 2400 };
+  const item = { width: 1000, depth: 400, height: 600, x: Number.NaN, y: -100, z: Infinity, rotationY: 90 };
+  assert.deepEqual(clampPlacementToRoom(item, room), {
+    ...item,
+    x: 200,
+    y: 0,
+    z: 500,
+  });
 });

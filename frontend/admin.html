@@ -245,12 +245,18 @@
             <div class="service-card p-4">
               <ul class="nav nav-pills mb-3">
                 <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#room3dPane" type="button">3D</button></li>
-                <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#room2dPane" type="button">План</button></li>
                 <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#bomPane" type="button">Детали</button></li>
               </ul>
               <div class="tab-content">
-                <div class="tab-pane fade show active" id="room3dPane"><div class="viewer-3d" id="room3d"></div></div>
-                <div class="tab-pane fade" id="room2dPane"><div class="room-plan" id="roomPlan"></div></div>
+                <div class="tab-pane fade show active" id="room3dPane">
+                  <div class="viewer-3d" id="room3d"></div>
+                  <div class="viewer-help" id="transformGizmoHint"><span>Выберите предмет и тяните стрелку X, Y или Z</span></div>
+                  <div class="object-transform-panel is-empty" id="selectedObjectTransform">
+                    <div class="object-transform-heading"><div><small>Выбранный предмет</small><strong id="selectedObjectTitle">Предмет не выбран</strong></div><span>Перетаскивайте стрелки <b>X / Y / Z</b></span></div>
+                    <div class="object-transform-grid"><label>X <small>мм</small><input class="form-control" id="selectedObjectX" type="number" step="10" disabled /></label><label>Y <small>мм</small><input class="form-control" id="selectedObjectY" type="number" step="10" disabled /></label><label>Z <small>мм</small><input class="form-control" id="selectedObjectZ" type="number" step="10" disabled /></label><label>Поворот <small>°</small><input class="form-control" id="selectedObjectRotation" type="number" step="1" disabled /></label></div>
+                    <div class="object-transform-actions"><button class="btn btn-quiet btn-sm" type="button" data-selected-object-action="rotate" data-delta="-15" disabled>↶ 15°</button><button class="btn btn-quiet btn-sm" type="button" data-selected-object-action="rotate" data-delta="15" disabled>↷ 15°</button><button class="btn btn-quiet btn-sm" type="button" data-selected-object-action="floor" disabled>На пол</button><span id="selectedObjectTransformStatus" role="status">Выберите предмет в сцене</span></div>
+                  </div>
+                </div>
                 <div class="tab-pane fade" id="bomPane"><div id="bomList" class="small"></div></div>
               </div>
             </div>
@@ -564,6 +570,6 @@
     });
   </script>
   
-  <script type="module" src="app.js?v=20261011-fields1"></script>
+  <script type="module" src="app.js?v=20261020-3d-legal-seo"></script>
 </body>
 </html>

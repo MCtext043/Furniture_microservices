@@ -198,6 +198,7 @@ services:
       GATEWAY_PLANNER_URL: http://planner-service:8000
       GATEWAY_AUTH_URL: http://auth-service:8000
       GATEWAY_ASSETS_URL: http://assets-service:8000
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-}
       GATEWAY_CORS_ORIGINS: ${GATEWAY_CORS_ORIGINS:-}
     depends_on:
       - catalog-service

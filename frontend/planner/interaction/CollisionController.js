@@ -11,6 +11,11 @@ function corners(rect, clearance = 0) {
 const projection = (points, axis) => points.reduce((range, p) => ({ min: Math.min(range.min, p.x*axis.x+p.z*axis.z), max: Math.max(range.max, p.x*axis.x+p.z*axis.z) }), { min: Infinity, max: -Infinity });
 
 export function intersectsOriented(a, b, clearance = 0) {
+  const aMinY = Number(a.y) || 0;
+  const bMinY = Number(b.y) || 0;
+  const aMaxY = aMinY + Math.max(Number(a.height) || 1, 1);
+  const bMaxY = bMinY + Math.max(Number(b.height) || 1, 1);
+  if (aMaxY + clearance / 2 <= bMinY - clearance / 2 || bMaxY + clearance / 2 <= aMinY - clearance / 2) return false;
   const ac = corners(a, clearance / 2); const bc = corners(b, clearance / 2);
   return [...axes(a), ...axes(b)].every((axis) => { const pa=projection(ac,axis); const pb=projection(bc,axis); return pa.max > pb.min && pb.max > pa.min; });
 }

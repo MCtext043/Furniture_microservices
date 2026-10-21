@@ -8,6 +8,7 @@ import { HistoryManager } from "/planner-modules/interaction/HistoryManager.js";
 import { findCollisions } from "/planner-modules/interaction/CollisionController.js";
 import { PlannerDiagnostics } from "/planner-modules/core/PlannerDiagnostics.js";
 import { ModelAssetLoader } from "/planner-modules/furniture/ModelAssetLoader.js";
+import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis } from "/planner-modules/interaction/Transform3D.js";
 
 const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
 const APP_MODE = window.APP_MODE || "user";
@@ -15,6 +16,7 @@ const LS_API = "furniture_gateway_url";
 const LS_TOKEN = "furniture_jwt";
 const LS_CUSTOMER = "furniture_customer_name";
 const LS_THEME = "woodcraft_theme";
+const LS_PRIVACY_PREFS = "petrov_privacy_preferences_v1";
 
 const state = {
   categories: [],
@@ -43,6 +45,7 @@ const state = {
   drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0, scale: 1, wrapEl: null, chipEl: null },
   rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0, scale: 1, wrapEl: null, chipEl: null },
   cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0, pointers: new Map(), pinchDistance: 0, pinching: false },
+  transform3d: { axis: null, active: false, pointerId: null, id: null, startPoint: null, startOrigin: null, startItem: null, historyBefore: null, moved: false },
   lastCutResult: null,
   cuttingQuoteCache: null,
   selectedCutJobId: null,
@@ -195,7 +198,7 @@ function applyPlannerSnapshot(snapshot) {
   state.objects3d = structuredClone(snapshot.objects3d);
   state.selected3dObjectId = snapshot.selected3dObjectId;
   if (state.three) rebuildRoomGeometry();
-  renderObjects3dList(); renderRoomTopView(); renderRoom3D(); renderBom();
+  renderObjects3dList(); renderRoomTopView(); renderRoom3D(); renderBom(); syncSelectedObjectControls();
 }
 
 const plannerHistory = new HistoryManager(applyPlannerSnapshot);
@@ -426,6 +429,65 @@ function toast(message, ok = true) {
   el.innerHTML = `<div class="d-flex"><div class="toast-body">${escapeHtml(message)}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Закрыть уведомление"></button></div>`;
   host.appendChild(el);
   setTimeout(() => el.remove(), 4500);
+}
+
+function requireFormConsent(inputId, message) {
+  const input = document.getElementById(inputId);
+  if (!input || input.checked) return true;
+  input.focus();
+  input.closest(".legal-consent-check")?.classList.add("is-invalid");
+  input.addEventListener("change", () => input.closest(".legal-consent-check")?.classList.remove("is-invalid"), { once: true });
+  toast(message, false);
+  return false;
+}
+
+function readPrivacyPreferences() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LS_PRIVACY_PREFS) || "null");
+    return value?.version === 1 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePrivacyPreferences({ functional = false, analytics = false } = {}) {
+  const value = { version: 1, necessary: true, functional: !!functional, analytics: !!analytics, updatedAt: new Date().toISOString() };
+  localStorage.setItem(LS_PRIVACY_PREFS, JSON.stringify(value));
+  document.cookie = `petrov_privacy_v1=${encodeURIComponent(JSON.stringify({ functional: value.functional, analytics: value.analytics }))}; Max-Age=31536000; Path=/; SameSite=Lax`;
+  const banner = document.getElementById("cookieConsent");
+  if (banner) banner.hidden = true;
+  window.dispatchEvent(new CustomEvent("petrov:privacy-preferences", { detail: value }));
+  return value;
+}
+
+function initCookieConsent() {
+  const banner = document.getElementById("cookieConsent");
+  const functional = document.getElementById("cookieFunctional");
+  const analytics = document.getElementById("cookieAnalytics");
+  const current = readPrivacyPreferences();
+  if (functional) functional.checked = !!current?.functional;
+  if (analytics) analytics.checked = !!current?.analytics;
+  if (banner) banner.hidden = !!current;
+  document.querySelectorAll("[data-cookie-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const allowAll = button.dataset.cookieChoice === "all";
+      savePrivacyPreferences({ functional: allowAll, analytics: allowAll });
+    });
+  });
+  document.getElementById("saveCookiePreferences")?.addEventListener("click", () => {
+    savePrivacyPreferences({ functional: !!functional?.checked, analytics: !!analytics?.checked });
+    const modal = document.getElementById("cookiePreferencesModal");
+    if (modal) bootstrap.Modal.getInstance(modal)?.hide();
+  });
+  document.querySelectorAll("[data-open-cookie-settings]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const preferences = readPrivacyPreferences();
+      if (functional) functional.checked = !!preferences?.functional;
+      if (analytics) analytics.checked = !!preferences?.analytics;
+      const modal = document.getElementById("cookiePreferencesModal");
+      if (modal) bootstrap.Modal.getOrCreateInstance(modal).show();
+    });
+  });
 }
 
 function extractErrorText(error) {
@@ -759,6 +821,7 @@ async function loginCustomer() {
 async function registerCustomer() {
   const username = document.getElementById("regUser").value.trim();
   const password = document.getElementById("regPass").value;
+  if (!requireFormConsent("registrationConsent", "Подтвердите согласие на обработку данных и условия использования")) return;
   if (!username || password.length < 8) {
     toast("Введите имя и пароль минимум 8 символов", false);
     return;
@@ -1300,6 +1363,7 @@ async function refreshSbpPayment(paymentId, manual = false) {
 
 async function startSbpCheckout() {
   if (APP_MODE !== "user") return;
+  if (!requireFormConsent("checkoutConsent", "Подтвердите условия продажи и согласие на обработку данных")) return;
   if (!state.cart.length) {
     toast("Корзина пуста", false);
     return;
@@ -1512,9 +1576,11 @@ function getObjectManufacturingSize(item) {
 }
 
 function clampObjectPosition(item, roomWidth, roomLength) {
-  const { planW, planD } = getObjectPlanSize(item);
-  item.x = Math.min(Math.max(item.x, planW / 2), roomWidth - planW / 2);
-  item.z = Math.min(Math.max(item.z, planD / 2), roomLength - planD / 2);
+  Object.assign(item, clampPlacementToRoom(item, {
+    width: roomWidth,
+    length: roomLength,
+    height: state.roomConfig.height,
+  }));
 }
 
 const SNAP_DISTANCE_MM = 70;
@@ -1683,6 +1749,7 @@ function resetPartsToDefault() {
 }
 
 async function createRoom() {
+  if (!requireFormConsent("projectConsent", "Подтвердите согласие на обработку данных")) return;
   if (!customerName()) {
     toast("Войдите, чтобы сохранить проект", false);
     bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
@@ -2075,8 +2142,10 @@ function initRoom3D() {
 
   const roomGroup = new THREE.Group();
   const furnitureGroup = new THREE.Group();
+  const transformGizmo = createTransformGizmo();
   scene.add(roomGroup);
   scene.add(furnitureGroup);
+  scene.add(transformGizmo);
   const dimensionManager = window.Dimension3D?.DimensionManager
     ? new window.Dimension3D.DimensionManager(camera, renderer)
     : null;
@@ -2089,7 +2158,7 @@ function initRoom3D() {
   };
   const resourceManager = new ResourceManager();
   const diagnostics = new PlannerDiagnostics(renderer);
-  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, dimensionManager, host, orbit, objectGroups: new Map(), resourceManager, diagnostics };
+  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, transformGizmo, dimensionManager, host, orbit, objectGroups: new Map(), resourceManager, diagnostics };
   state.three.renderScheduler = new RenderScheduler(() => {
     if (!state.three) return;
     dimensionManager?.update(camera, renderer);
@@ -2143,7 +2212,7 @@ function ensureRoom3D() {
     console.error("3D init failed:", error);
     const host = document.getElementById("room3d");
     if (host) {
-      host.innerHTML = `<div class="text-warning small p-3">3D не запустился: ${escapeHtml(formatApiError(error))}<div class="mt-2 text-muted">Попробуйте: закрыть другие вкладки с 3D, включить аппаратное ускорение в браузере, обновить страницу (Ctrl+F5). План сверху остаётся доступен.</div></div>`;
+      host.innerHTML = `<div class="text-warning small p-3">3D не запустился: ${escapeHtml(formatApiError(error))}<div class="mt-2 text-muted">Попробуйте закрыть другие вкладки с 3D, включить аппаратное ускорение в браузере и обновить страницу (Ctrl+F5).</div></div>`;
     }
   }
   if (document.getElementById("roomPlan")) renderRoomTopView();
@@ -2159,6 +2228,7 @@ function updateOrbitCamera() {
   camera.position.set(x, y, z);
   camera.lookAt(orbit.target);
   updateDynamicWallVisibility();
+  updateTransformGizmo();
 }
 
 function wallSideWithHysteresis(value, currentSide) {
@@ -2206,6 +2276,179 @@ function applyOrbitRadius(nextRadius) {
   requestRoom3DRender();
 }
 
+function pointerVector(event, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  return new THREE.Vector2(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -((event.clientY - rect.top) / rect.height) * 2 + 1
+  );
+}
+
+function furnitureAtPointer(event, canvas) {
+  if (!state.three) return null;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointerVector(event, canvas), state.three.camera);
+  const hit = raycaster.intersectObjects(state.three.furnitureGroup.children, true)[0];
+  let object = hit?.object || null;
+  while (object && object.parent !== state.three.furnitureGroup) object = object.parent;
+  return object?.userData?.objectId ? object : null;
+}
+
+function axisVector(axis) {
+  if (axis === "x") return new THREE.Vector3(1, 0, 0);
+  if (axis === "y") return new THREE.Vector3(0, 1, 0);
+  return new THREE.Vector3(0, 0, 1);
+}
+
+function createTransformGizmo() {
+  const gizmo = new THREE.Group();
+  gizmo.name = "FurnitureTransformGizmo";
+  gizmo.visible = false;
+  gizmo.renderOrder = 50;
+  const colors = { x: 0xe85d5d, y: 0x4db477, z: 0x4b83e5 };
+  Object.entries(colors).forEach(([axis, color]) => {
+    const handle = new THREE.Group();
+    handle.name = `TransformAxis:${axis}`;
+    handle.userData.transformAxis = axis;
+    if (axis === "x") handle.rotation.z = -Math.PI / 2;
+    if (axis === "z") handle.rotation.x = Math.PI / 2;
+    const material = new THREE.MeshBasicMaterial({ color, depthTest: false, depthWrite: false, transparent: true, opacity: 0.94 });
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.68, 12), material);
+    shaft.position.y = 0.34;
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.095, 0.24, 18), material);
+    head.position.y = 0.8;
+    const hitMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.001, depthTest: false, depthWrite: false });
+    const hitArea = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.05, 12), hitMaterial);
+    hitArea.position.y = 0.52;
+    [shaft, head, hitArea].forEach((mesh) => {
+      mesh.renderOrder = 50;
+      mesh.userData.transformAxis = axis;
+      handle.add(mesh);
+    });
+    gizmo.add(handle);
+  });
+  return gizmo;
+}
+
+function updateTransformGizmo() {
+  const gizmo = state.three?.transformGizmo;
+  const selected = state.objects3d.find((item) => item.id === state.selected3dObjectId);
+  const group = selected ? state.three?.objectGroups?.get(selected.id) : null;
+  if (!gizmo || !selected || !group) {
+    if (gizmo) gizmo.visible = false;
+    return;
+  }
+  const height = Math.max(Number(selected.height) || 0, 0);
+  gizmo.visible = true;
+  gizmo.position.set(group.position.x, group.position.y + Math.max(height * 0.52, 180), group.position.z);
+  const distance = state.three.camera.position.distanceTo(gizmo.position);
+  const size = Math.min(Math.max(distance * 0.06, 320), 900);
+  gizmo.scale.setScalar(size);
+}
+
+function gizmoAxisAtPointer(event, canvas) {
+  const gizmo = state.three?.transformGizmo;
+  if (!gizmo?.visible) return null;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointerVector(event, canvas), state.three.camera);
+  const hit = raycaster.intersectObjects(gizmo.children, true)[0];
+  let node = hit?.object || null;
+  while (node && !node.userData?.transformAxis) node = node.parent;
+  return node?.userData?.transformAxis || null;
+}
+
+function rayPointOnAxisDragPlane(event, canvas, axis, origin) {
+  if (!state.three || !origin) return null;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointerVector(event, canvas), state.three.camera);
+  const direction = axisVector(axis);
+  const cameraDirection = state.three.camera.getWorldDirection(new THREE.Vector3());
+  let normal = direction.clone().cross(cameraDirection).cross(direction);
+  if (normal.lengthSq() < 0.0001) {
+    normal = direction.clone().cross(axis === "y" ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0));
+  }
+  normal.normalize();
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, origin);
+  return raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+}
+
+function select3DObject(id) {
+  state.selected3dObjectId = id || null;
+  const group = id ? state.three?.objectGroups?.get(id) : null;
+  state.three?.dimensionManager?.clear();
+  if (group?.userData?.dimensions) state.three?.dimensionManager?.attach(group, group.userData.dimensions);
+  state.three?.dimensionManager?.setSelected(group || null);
+  updateTransformGizmo();
+  syncSelectedObjectControls();
+  renderObjects3dList();
+  requestRoom3DRender();
+}
+
+function begin3DTransform(event, canvas, axis) {
+  const item = state.objects3d.find((candidate) => candidate.id === state.selected3dObjectId);
+  if (!item) return false;
+  const origin = state.three?.transformGizmo?.position?.clone();
+  const startPoint = rayPointOnAxisDragPlane(event, canvas, axis, origin);
+  if (!startPoint) return false;
+  const transform = state.transform3d;
+  transform.axis = axis;
+  transform.active = true;
+  transform.pointerId = event.pointerId;
+  transform.id = item.id;
+  transform.startPoint = startPoint;
+  transform.startOrigin = origin;
+  transform.startItem = structuredClone(item);
+  transform.historyBefore = plannerSnapshot();
+  transform.moved = false;
+  try { canvas.setPointerCapture(event.pointerId); } catch { /* pointer capture is optional */ }
+  canvas.style.cursor = "grabbing";
+  document.getElementById("selectedObjectTransformStatus")?.classList.add("is-active");
+  return true;
+}
+
+function move3DTransform(event, canvas) {
+  const transform = state.transform3d;
+  if (!transform.active || transform.pointerId !== event.pointerId) return false;
+  const item = state.objects3d.find((candidate) => candidate.id === transform.id);
+  const point = rayPointOnAxisDragPlane(event, canvas, transform.axis, transform.startOrigin);
+  if (!item || !point || !transform.startPoint) return true;
+  const worldDelta = point.clone().sub(transform.startPoint);
+  const scalar = worldDelta.dot(axisVector(transform.axis));
+  const delta = coordinateDeltaForAxis(transform.axis, { [transform.axis]: scalar });
+  const next = applyTranslationDelta(transform.startItem, delta, state.roomConfig);
+  Object.assign(item, next);
+  transform.moved = transform.moved || Math.abs(delta.x) + Math.abs(delta.y) + Math.abs(delta.z) > 2;
+  updateFurnitureTransform(item);
+  syncSelectedObjectControls();
+  render3DTransformCollisionStatus(item);
+  event.preventDefault();
+  return true;
+}
+
+function end3DTransform(event, canvas) {
+  const transform = state.transform3d;
+  if (!transform.active || (event && transform.pointerId !== event.pointerId)) return false;
+  const before = transform.historyBefore;
+  const moved = transform.moved;
+  transform.active = false;
+  transform.pointerId = null;
+  transform.id = null;
+  transform.axis = null;
+  transform.startPoint = null;
+  transform.startOrigin = null;
+  transform.startItem = null;
+  transform.historyBefore = null;
+  transform.moved = false;
+  canvas.style.cursor = "grab";
+  document.getElementById("selectedObjectTransformStatus")?.classList.remove("is-active");
+  if (moved && before) plannerHistory.record(before, plannerSnapshot(), "move-3d");
+  if (moved) {
+    renderObjects3dList();
+    renderBom();
+  }
+  return true;
+}
+
 function init3DPointerControls(canvas) {
   canvas.style.cursor = "grab";
   canvas.style.touchAction = "none";
@@ -2229,6 +2472,18 @@ function init3DPointerControls(canvas) {
   };
 
   canvas.addEventListener("pointerdown", (event) => {
+    if (state.transform3d.active) return;
+    const gizmoAxis = gizmoAxisAtPointer(event, canvas);
+    if (gizmoAxis && begin3DTransform(event, canvas, gizmoAxis)) {
+      event.preventDefault();
+      return;
+    }
+    const picked = furnitureAtPointer(event, canvas);
+    if (picked) {
+      select3DObject(picked.userData.objectId);
+      event.preventDefault();
+      return;
+    }
     drag.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (event.pointerType !== "touch") {
       try { canvas.setPointerCapture(event.pointerId); } catch { /* ignore */ }
@@ -2253,6 +2508,11 @@ function init3DPointerControls(canvas) {
   });
 
   canvas.addEventListener("pointermove", (event) => {
+    if (move3DTransform(event, canvas)) return;
+    if (!drag.pointers.has(event.pointerId)) {
+      canvas.style.cursor = gizmoAxisAtPointer(event, canvas) ? "pointer" : "grab";
+      return;
+    }
     if (!drag.pointers.has(event.pointerId)) return;
     drag.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
     if (drag.pointers.size >= 2 && state.three) {
@@ -2280,6 +2540,7 @@ function init3DPointerControls(canvas) {
   });
 
   const stopDrag = (event) => {
+    if (end3DTransform(event, canvas)) return;
     const wasPinching = drag.pinching;
     if (event) drag.pointers.delete(event.pointerId);
     else drag.pointers.clear();
@@ -2325,30 +2586,8 @@ function init3DPointerControls(canvas) {
 
 function selectFurnitureAtPointer(event, canvas) {
   if (!state.three) return;
-  const { camera, furnitureGroup, dimensionManager } = state.three;
-  const rect = canvas.getBoundingClientRect();
-  const pointer = new THREE.Vector2(
-    ((event.clientX - rect.left) / rect.width) * 2 - 1,
-    -((event.clientY - rect.top) / rect.height) * 2 + 1
-  );
-  const raycaster = new THREE.Raycaster();
-  raycaster.setFromCamera(pointer, camera);
-  const hit = raycaster.intersectObjects(furnitureGroup.children, true)[0];
-  let object = hit?.object || null;
-  while (object && object.parent !== furnitureGroup) object = object.parent;
-  if (!object?.userData?.objectId) {
-    state.selected3dObjectId = null;
-    dimensionManager?.clear();
-    requestRoom3DRender();
-    return;
-  }
-  state.selected3dObjectId = object.userData.objectId;
-  dimensionManager?.clear();
-  if (object.userData.dimensions) dimensionManager?.attach(object, object.userData.dimensions);
-  dimensionManager?.setSelected(object);
-  renderRoomTopView();
-  renderObjects3dList();
-  requestRoom3DRender();
+  const object = furnitureAtPointer(event, canvas);
+  select3DObject(object?.userData?.objectId || null);
 }
 
 function resolveRoomSurfaceMaterial(textureKey, fallbackType, fallbackVariant, fallbackColor, widthMm, heightMm, orientation) {
@@ -2529,6 +2768,7 @@ function renderRoom3D() {
   dimensionManager?.clear();
   if (selectedGroup?.userData?.dimensions) dimensionManager?.attach(selectedGroup, selectedGroup.userData.dimensions);
   dimensionManager?.setSelected(selectedGroup);
+  updateTransformGizmo();
   requestRoom3DRender();
 }
 
@@ -2539,6 +2779,7 @@ function updateFurnitureTransform(item) {
   group.position.set(roomUnitToWorldX(item.x), Number(item.y) || 0, roomUnitToWorldZ(item.z));
   group.rotation.y = -((Number(item.rotationY) || 0) * Math.PI) / 180;
   group.updateMatrixWorld(true);
+  updateTransformGizmo();
   requestRoom3DRender();
 }
 
@@ -3616,12 +3857,98 @@ function removeObject3D(id) {
   toast(`Удалён: ${removed.name}`);
 }
 
+function render3DTransformCollisionStatus(item) {
+  const status = document.getElementById("selectedObjectTransformStatus");
+  if (!status) return;
+  if (!item) {
+    status.textContent = "Выберите предмет в сцене";
+    status.classList.remove("has-collision");
+    return;
+  }
+  const collisions = findCollisions(item, state.objects3d, 2);
+  status.classList.toggle("has-collision", collisions.length > 0);
+  status.textContent = collisions.length
+    ? `Пересечение: ${collisions.map((candidate) => candidate.name).join(", ")}`
+    : "Положение допустимо";
+}
+
+function syncSelectedObjectControls() {
+  const item = state.objects3d.find((candidate) => candidate.id === state.selected3dObjectId);
+  const panel = document.getElementById("selectedObjectTransform");
+  const title = document.getElementById("selectedObjectTitle");
+  const inputs = {
+    x: document.getElementById("selectedObjectX"),
+    y: document.getElementById("selectedObjectY"),
+    z: document.getElementById("selectedObjectZ"),
+    rotationY: document.getElementById("selectedObjectRotation"),
+  };
+  panel?.classList.toggle("is-empty", !item);
+  if (title) title.textContent = item ? item.name : "Предмет не выбран";
+  Object.values(inputs).forEach((input) => { if (input) input.disabled = !item; });
+  document.querySelectorAll("[data-selected-object-action]").forEach((button) => { button.disabled = !item; });
+  if (!item) {
+    Object.values(inputs).forEach((input) => { if (input) input.value = ""; });
+    render3DTransformCollisionStatus(null);
+    return;
+  }
+  if (inputs.x) inputs.x.value = String(Math.round(Number(item.x) || 0));
+  if (inputs.y) inputs.y.value = String(Math.round(Number(item.y) || 0));
+  if (inputs.z) inputs.z.value = String(Math.round(Number(item.z) || 0));
+  if (inputs.rotationY) inputs.rotationY.value = String(Math.round(normalizeAngle(item.rotationY) * 10) / 10);
+  render3DTransformCollisionStatus(item);
+}
+
+function updateSelectedObjectFromControls() {
+  const item = state.objects3d.find((candidate) => candidate.id === state.selected3dObjectId);
+  if (!item) return;
+  const before = plannerSnapshot();
+  const x = Number(document.getElementById("selectedObjectX")?.value);
+  const y = Number(document.getElementById("selectedObjectY")?.value);
+  const z = Number(document.getElementById("selectedObjectZ")?.value);
+  const rotation = Number(document.getElementById("selectedObjectRotation")?.value);
+  if (Number.isFinite(x)) item.x = x;
+  if (Number.isFinite(y)) item.y = y;
+  if (Number.isFinite(z)) item.z = z;
+  if (Number.isFinite(rotation)) item.rotationY = normalizeAngle(rotation);
+  clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
+  plannerHistory.record(before, plannerSnapshot(), "transform-3d-input");
+  updateFurnitureTransform(item);
+  syncSelectedObjectControls();
+  renderObjects3dList();
+  renderBom();
+}
+
+function init3DTransformControls() {
+  ["selectedObjectX", "selectedObjectY", "selectedObjectZ", "selectedObjectRotation"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", updateSelectedObjectFromControls);
+  });
+  document.querySelectorAll("[data-selected-object-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const item = state.objects3d.find((candidate) => candidate.id === state.selected3dObjectId);
+      if (!item) return;
+      const before = plannerSnapshot();
+      if (button.dataset.selectedObjectAction === "rotate") {
+        item.rotationY = normalizeAngle((Number(item.rotationY) || 0) + Number(button.dataset.delta || 0));
+        clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
+      }
+      if (button.dataset.selectedObjectAction === "floor") item.y = 0;
+      plannerHistory.record(before, plannerSnapshot(), button.dataset.selectedObjectAction || "transform-3d");
+      updateFurnitureTransform(item);
+      syncSelectedObjectControls();
+      renderObjects3dList();
+      renderBom();
+    });
+  });
+  syncSelectedObjectControls();
+}
+
 function renderObjects3dList() {
   const host = document.getElementById("objects3dList");
   if (!host || APP_MODE === "admin") return;
   updatePlannerProgress();
   if (!state.objects3d.length) {
     host.innerHTML = `<div class="text-muted">Объектов в комнате пока нет.</div>`;
+    syncSelectedObjectControls();
     return;
   }
   host.innerHTML = state.objects3d
@@ -3636,8 +3963,9 @@ function renderObjects3dList() {
     button.addEventListener("click", (event) => { event.stopPropagation(); removeObject3D(button.dataset.deleteObject); });
   });
   host.querySelectorAll("[data-select-object]").forEach((row) => row.addEventListener("click", () => {
-    state.selected3dObjectId = row.dataset.selectObject; renderObjects3dList(); renderRoomTopView(); renderRoom3D();
+    select3DObject(row.dataset.selectObject); renderRoom3D();
   }));
+  syncSelectedObjectControls();
 }
 
 
@@ -5144,6 +5472,7 @@ async function submitProjectToWork() {
   const customerName = document.getElementById("customerName")?.value?.trim();
   const customerPhone = document.getElementById("customerPhone")?.value?.trim();
   const customerEmail = document.getElementById("customerEmail")?.value?.trim();
+  if (!requireFormConsent("projectConsent", "Подтвердите согласие на обработку данных")) return;
   
   if (!customerName) {
     toast("Укажите ваше имя перед отправкой", false);
@@ -6310,42 +6639,17 @@ function initPlannerShortcuts() {
       clampObjectPosition(copy, state.roomConfig.width, state.roomConfig.length); state.objects3d.push(copy); state.selected3dObjectId = copy.id;
       plannerHistory.record(before, plannerSnapshot(), "duplicate"); applyPlannerSnapshot(plannerSnapshot()); return;
     }
-    if (event.key === "Escape") { state.selected3dObjectId = null; state.three?.dimensionManager?.clear(); renderRoomTopView(); renderObjects3dList(); requestRoom3DRender(); return; }
+    if (event.key === "Escape") { select3DObject(null); return; }
     if (event.key === "Delete" && selected) { event.preventDefault(); if (window.confirm(`Удалить «${selected.name}»?`)) removeObject3D(selected.id); return; }
-    if (selected && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) {
+    if (selected && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(event.key)) {
       event.preventDefault(); const before = plannerSnapshot(); const step = event.shiftKey ? 100 : 10;
       if (event.key === "ArrowLeft") selected.x -= step; if (event.key === "ArrowRight") selected.x += step;
       if (event.key === "ArrowUp") selected.z -= step; if (event.key === "ArrowDown") selected.z += step;
+      if (event.key === "PageUp") selected.y += step; if (event.key === "PageDown") selected.y -= step;
       clampObjectPosition(selected, state.roomConfig.width, state.roomConfig.length); plannerHistory.record(before, plannerSnapshot(), "nudge");
-      updateFurnitureTransform(selected); renderRoomTopView();
+      updateFurnitureTransform(selected); syncSelectedObjectControls();
     }
   });
-}
-
-function initRoomTopViewLayout() {
-  const host = document.getElementById("roomPlan");
-  if (!host) return;
-  let frame = 0;
-  const schedule = () => {
-    cancelAnimationFrame(frame);
-    frame = requestAnimationFrame(() => renderRoomTopView());
-  };
-  document.querySelectorAll('[data-bs-target="#room2dPane"]').forEach((tab) => {
-    tab.addEventListener("shown.bs.tab", schedule);
-    tab.addEventListener("click", () => setTimeout(schedule, 180));
-  });
-  if (window.ResizeObserver) {
-    window.__roomPlanResizeObserver?.disconnect?.();
-    const observed = host.parentElement || host;
-    let observedWidth = observed.clientWidth;
-    window.__roomPlanResizeObserver = new ResizeObserver(() => {
-      const nextWidth = observed.clientWidth;
-      if (!host.getClientRects().length || Math.abs(nextWidth - observedWidth) < 0.5) return;
-      observedWidth = nextWidth;
-      schedule();
-    });
-    window.__roomPlanResizeObserver.observe(observed);
-  }
 }
 
 function initProcessAnimation() {
@@ -6613,12 +6917,9 @@ function initRoomFinishControls() {
 
 async function boot() {
   applyTheme(document.documentElement.dataset.theme || "light");
+  initCookieConsent();
   bindClick("themeToggle", toggleTheme);
   bindClick("btnLogout", logoutCustomer);
-  document.querySelector("[data-open-plan]")?.addEventListener("click", (event) => {
-    event.preventDefault();
-    document.querySelector('[data-bs-target="#room2dPane"]')?.click();
-  });
   const apiBaseInput = document.getElementById("apiBase");
   if (apiBaseInput) apiBaseInput.value = localStorage.getItem(LS_API) || defaultApiBase();
   bindClick("saveApiBase", () => {
@@ -6650,8 +6951,8 @@ async function boot() {
   initProcessAnimation();
   initPlannerProgress();
   initPlannerShortcuts();
-  initRoomTopViewLayout();
   initPlannerFullscreen();
+  init3DTransformControls();
   initLightbox();
   initObjectPicker();
   initRoomFinishControls();

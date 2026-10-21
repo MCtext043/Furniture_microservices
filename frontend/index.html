@@ -6,22 +6,24 @@
   <link rel="icon" href="./frontend-assets/favicon-32.png?v=4" type="image/png" sizes="32x32">
   <link rel="apple-touch-icon" href="./frontend-assets/apple-touch-icon.png?v=4">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="Мебель Петров: каталог, 3D-планировщик комнаты и расчёт стоимости проекта. Соберите интерьер до покупки." />
+  <meta name="description" content="Петров мебель — мебель на заказ в Ижевске и Удмуртии. Спроектируйте комнату в 3D, выберите материалы и получите предварительный расчёт стоимости." />
+  <meta name="geo.region" content="RU-UD" />
+  <meta name="geo.placename" content="Ижевск" />
   <meta name="robots" content="index,follow" />
   <meta name="theme-color" content="#d4a23a" />
   <link rel="canonical" href="/" />
   <meta property="og:type" content="website" />
   <meta property="og:locale" content="ru_RU" />
   <meta property="og:site_name" content="Петров" />
-  <meta property="og:title" content="Петров — мебель и планировщик комнаты" />
-  <meta property="og:description" content="Подберите мебель, соберите комнату в 3D и получите ориентировочную стоимость проекта." />
+  <meta property="og:title" content="Петров мебель — мебель на заказ в Ижевске" />
+  <meta property="og:description" content="Мебель на заказ в Ижевске: 3D-планировщик, подбор материалов и предварительный расчёт проекта." />
   <meta property="og:image" content="./frontend-assets/favicon.svg?v=4" />
   <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="Петров — мебель и планировщик комнаты" />
-  <meta name="twitter:description" content="Каталог мебели и 3D-планировщик комнаты." />
-  <title>Петров — мебель и планировщик комнаты</title>
+  <meta name="twitter:title" content="Петров мебель — мебель на заказ в Ижевске" />
+  <meta name="twitter:description" content="Каталог мебели, изготовление на заказ и 3D-планировщик комнаты в Ижевске." />
+  <title>Петров мебель — мебель на заказ в Ижевске | 3D-планировщик</title>
   <script type="application/ld+json">
-    {"@context":"https://schema.org","@type":"FurnitureStore","name":"Петров","description":"Мебель на заказ и 3D-планировщик комнаты.","url":"/","sameAs":["https://vk.ru/mebelpetrov"],"image":"./frontend-assets/favicon.svg"}
+    {"@context":"https://schema.org","@type":"FurnitureStore","name":"Петров мебель","alternateName":"Петров","description":"Мебель на заказ в Ижевске и 3D-планировщик комнаты.","url":"/","image":"./frontend-assets/favicon.svg","sameAs":["https://vk.ru/mebelpetrov"],"address":{"@type":"PostalAddress","addressLocality":"Ижевск","addressRegion":"Удмуртская Республика","addressCountry":"RU"},"areaServed":[{"@type":"City","name":"Ижевск"},{"@type":"AdministrativeArea","name":"Удмуртская Республика"}],"email":"petrov_mebel@mail.ru","priceRange":"₽₽","knowsAbout":["мебель на заказ","кухни на заказ","шкафы на заказ","3D-проектирование мебели"]}
   </script>
   <script>document.documentElement.dataset.theme=localStorage.getItem("woodcraft_theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
   <script>
@@ -31,6 +33,15 @@
       if (canonical) canonical.setAttribute("href", origin + "/");
       var ogImage = document.querySelector('meta[property="og:image"]');
       if (ogImage) ogImage.setAttribute("content", origin + "/frontend-assets/favicon.svg?v=4");
+      var schema = document.querySelector('script[type="application/ld+json"]');
+      if (schema) {
+        try {
+          var data = JSON.parse(schema.textContent);
+          data.url = origin + "/";
+          data.image = origin + "/frontend-assets/favicon.svg?v=4";
+          schema.textContent = JSON.stringify(data);
+        } catch (_) {}
+      }
     })();
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -80,9 +91,9 @@
   <header class="hero" id="top">
     <div class="container hero-container">
       <div class="hero-copy reveal-item">
-        <div class="eyebrow">Мебель, которая подходит вашей комнате</div>
-        <h1>Соберите интерьер<br /><span>до покупки</span></h1>
-        <p class="hero-lead">Задайте размеры комнаты, расставьте мебель в 3D и получите ориентировочную стоимость проекта в одном понятном сценарии.</p>
+        <div class="eyebrow">Петров мебель · Ижевск и Удмуртия</div>
+        <h1>Мебель на заказ<br /><span>в Ижевске</span></h1>
+        <p class="hero-lead">Задайте размеры комнаты, расставьте мебель в 3D и получите ориентировочную стоимость проекта ещё до покупки.</p>
         <div class="hero-actions">
           <a href="#planner" class="btn btn-primary btn-lg">Начать планирование</a>
           <a href="#catalog" class="btn btn-link-arrow">Посмотреть каталог <span aria-hidden="true">→</span></a>
@@ -140,7 +151,7 @@
         <ol class="process-grid">
           <li class="process-step"><span>01</span><strong>Укажите размеры</strong><p>Введите ширину, длину и высоту комнаты.</p></li>
           <li class="process-step"><span>02</span><strong>Добавьте мебель</strong><p>Выберите тип, габариты и подходящий материал.</p></li>
-          <li class="process-step"><span>03</span><strong>Оцените результат</strong><p>Проверьте расстановку в 3D и на плане сверху.</p></li>
+          <li class="process-step"><span>03</span><strong>Оцените результат</strong><p>Выберите предмет и перемещайте его цветными стрелками прямо в 3D-сцене.</p></li>
           <li class="process-step"><span>04</span><strong>Сохраните проект</strong><p>Получите расчёт и отправьте решение в работу.</p></li>
         </ol>
       </div>
@@ -164,7 +175,7 @@
         <ol class="process-grid">
           <li class="process-step"><span>01</span><strong>Укажите размеры</strong><p>Введите ширину, длину и высоту комнаты.</p></li>
           <li class="process-step"><span>02</span><strong>Добавьте мебель</strong><p>Выберите тип, габариты и подходящий материал.</p></li>
-          <li class="process-step"><span>03</span><strong>Оцените результат</strong><p>Проверьте расстановку в 3D и на плане сверху.</p></li>
+          <li class="process-step"><span>03</span><strong>Оцените результат</strong><p>Выберите предмет и перемещайте его цветными стрелками прямо в 3D-сцене.</p></li>
           <li class="process-step"><span>04</span><strong>Сохраните проект</strong><p>Получите расчёт и отправьте решение в работу.</p></li>
         </ol>
       </div>
@@ -175,7 +186,7 @@
         <div class="section-heading planner-heading">
           <div class="eyebrow">3D-планировщик</div>
           <h2>Соберите комнату под себя</h2>
-          <p>Двигайтесь по шагам слева направо. Все изменения сразу появятся в сцене. <a href="#room2dPane" data-open-plan><strong>Редактировать в плане сверху</strong></a></p>
+          <p>Двигайтесь по шагам слева направо. Выберите предмет в сцене и тяните цветные стрелки X, Y или Z.</p>
         </div>
 
         <div class="planner-progress" id="plannerProgress" aria-label="Этапы создания проекта">
@@ -215,6 +226,10 @@
                     <option value="board_black">Тёмные панели</option>
                   </select>
                 </div>
+              </div>
+              <div class="form-check legal-consent-check">
+                <input class="form-check-input" type="checkbox" id="projectConsent" />
+                <label class="form-check-label" for="projectConsent">Я даю <a href="consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a> и принимаю <a href="terms.html" target="_blank" rel="noopener">условия использования</a>.</label>
               </div>
               <div class="custom-color-row">
                 <div class="form-check">
@@ -326,18 +341,31 @@
             </div>
             <ul class="nav nav-pills planner-tabs" role="tablist" aria-label="Режим просмотра проекта">
               <li class="nav-item" role="presentation"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#room3dPane" type="button" role="tab">3D-вид</button></li>
-              <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#room2dPane" type="button" role="tab">План сверху</button></li>
               <li class="nav-item d-none" id="bomTabNav" role="presentation"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#bomPane" type="button" role="tab">Детали</button></li>
               <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#costPane" type="button" role="tab">Стоимость</button></li>
             </ul>
             <div class="tab-content preview-content">
               <div class="tab-pane fade show active" id="room3dPane" role="tabpanel">
                 <div class="viewer-3d" id="room3d"><span class="viewer-badge">3D-планировщик</span></div>
-                <div class="viewer-help"><span>Перетаскивайте для вращения</span><span>На телефоне масштаб — двумя пальцами</span></div>
-              </div>
-              <div class="tab-pane fade" id="room2dPane" role="tabpanel">
-                <div class="top-plan-header"><div><strong>План сверху</strong><p>Перетаскивайте предметы. Кнопка ↻ поворачивает объект.</p></div></div>
-                <div class="room-plan" id="roomPlan"></div>
+                <div class="viewer-help" id="transformGizmoHint"><span>Выберите предмет, затем тяните цветную стрелку: X, Y или Z</span><span>Тяните фон для вращения · масштаб — двумя пальцами</span></div>
+                <div class="object-transform-panel is-empty" id="selectedObjectTransform">
+                  <div class="object-transform-heading">
+                    <div><small>Выбранный предмет</small><strong id="selectedObjectTitle">Предмет не выбран</strong></div>
+                    <span>Перетаскивайте стрелки <b>X / Y / Z</b> в 3D-сцене</span>
+                  </div>
+                  <div class="object-transform-grid">
+                    <label>X <small>мм</small><input class="form-control" id="selectedObjectX" type="number" step="10" disabled /></label>
+                    <label>Y <small>мм</small><input class="form-control" id="selectedObjectY" type="number" step="10" disabled /></label>
+                    <label>Z <small>мм</small><input class="form-control" id="selectedObjectZ" type="number" step="10" disabled /></label>
+                    <label>Поворот <small>°</small><input class="form-control" id="selectedObjectRotation" type="number" step="1" disabled /></label>
+                  </div>
+                  <div class="object-transform-actions">
+                    <button class="btn btn-quiet btn-sm" type="button" data-selected-object-action="rotate" data-delta="-15" disabled>↶ 15°</button>
+                    <button class="btn btn-quiet btn-sm" type="button" data-selected-object-action="rotate" data-delta="15" disabled>↷ 15°</button>
+                    <button class="btn btn-quiet btn-sm" type="button" data-selected-object-action="floor" disabled>На пол</button>
+                    <span id="selectedObjectTransformStatus" role="status">Выберите предмет в сцене</span>
+                  </div>
+                </div>
               </div>
               <div class="tab-pane fade" id="bomPane" role="tabpanel"><div id="bomList" class="detail-list"></div></div>
               <div class="tab-pane fade" id="costPane" role="tabpanel">
@@ -448,9 +476,9 @@
 
   <footer class="site-footer">
     <div class="container footer-grid">
-      <div><a class="navbar-brand" href="#top"><span class="brand-mark" aria-hidden="true">П</span><span>Петров</span></a><p>Подбор мебели и проектирование комнаты в одном сервисе.</p></div>
+      <div><a class="navbar-brand" href="#top"><span class="brand-mark" aria-hidden="true">П</span><span>Петров</span></a><p>Мебель на заказ и проектирование комнат в Ижевске и Удмуртии.</p><a href="mailto:petrov_mebel@mail.ru">petrov_mebel@mail.ru</a></div>
       <nav aria-label="Навигация в подвале"><a href="#catalog">Каталог</a><a href="#planner">Планировщик</a><a href="#howItWorks">Как это работает</a></nav>
-      <div class="footer-service"><span>Для сотрудников</span><a href="admin.html">Панель администратора</a><a href="privacy.html">Политика конфиденциальности</a><a href="cookies.html">Файлы cookie</a></div>
+      <div class="footer-service"><span>Правовая информация</span><a href="privacy.html">Политика конфиденциальности</a><a href="consent.html">Согласие на обработку данных</a><a href="terms.html">Условия использования и продажи</a><a href="cookies.html">Файлы cookie</a><button class="footer-link-button" type="button" data-open-cookie-settings>Настройки cookie</button><a href="admin.html" rel="nofollow">Для сотрудников</a></div>
     </div>
   </footer>
 
@@ -463,6 +491,10 @@
       <div id="cartItems" class="vstack gap-3 flex-grow-1" aria-live="polite"></div>
       <div class="cart-summary">
         <div class="form-field"><label for="deliveryAddress">Адрес доставки</label><textarea class="form-control" id="deliveryAddress" rows="2" placeholder="Город, улица, дом"></textarea></div>
+        <div class="form-check legal-consent-check">
+          <input class="form-check-input" type="checkbox" id="checkoutConsent" />
+          <label class="form-check-label" for="checkoutConsent">Я принимаю <a href="terms.html" target="_blank" rel="noopener">условия продажи</a> и даю <a href="consent.html" target="_blank" rel="noopener">согласие на обработку данных</a>.</label>
+        </div>
         <button class="btn btn-secondary w-100 mb-2" id="btnQuoteDelivery">Рассчитать доставку</button>
         <div class="helper-text" id="deliveryHint">Загружаем условия доставки...</div>
         <div class="summary-row"><span>Товары</span><span id="cartSubtotal">0 ₽</span></div>
@@ -517,6 +549,10 @@
             <div class="tab-pane fade" id="registerPane">
               <div class="form-field"><label for="regUser">Имя пользователя</label><input class="form-control" id="regUser" autocomplete="username" /></div>
               <div class="form-field"><label for="regPass">Пароль <span>не менее 8 символов</span></label><input type="password" class="form-control" id="regPass" autocomplete="new-password" /></div>
+              <div class="form-check legal-consent-check">
+                <input class="form-check-input" type="checkbox" id="registrationConsent" />
+                <label class="form-check-label" for="registrationConsent">Я принимаю <a href="terms.html" target="_blank" rel="noopener">условия использования</a> и даю <a href="consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a>.</label>
+              </div>
               <button class="btn btn-primary w-100" id="btnRegister">Создать аккаунт</button>
             </div>
             <div class="tab-pane fade" id="userProjectsPane"><div id="userProjectsPanel" class="empty-copy">Войдите, чтобы увидеть сохранённые проекты.</div></div>
@@ -760,12 +796,25 @@
     <button class="lightbox-nav lightbox-next" type="button" data-lightbox-next aria-label="Следующее изображение">›</button>
   </div>
 
+  <section class="cookie-consent" id="cookieConsent" hidden aria-label="Настройки файлов cookie" role="dialog" aria-live="polite">
+    <div><strong>Управление данными на устройстве</strong><p>Мы используем необходимые локальные данные для входа, корзины и работы планировщика. Необязательные функции включаются только с вашего согласия.</p><a href="cookies.html">Подробнее о cookie</a></div>
+    <div class="cookie-consent-actions"><button class="btn btn-quiet" type="button" data-cookie-choice="necessary">Только необходимые</button><button class="btn btn-quiet" type="button" data-bs-toggle="modal" data-bs-target="#cookiePreferencesModal">Настроить</button><button class="btn btn-primary" type="button" data-cookie-choice="all">Принять все</button></div>
+  </section>
+
+  <div class="modal fade" id="cookiePreferencesModal" tabindex="-1" aria-labelledby="cookiePreferencesTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><div><div class="eyebrow">Конфиденциальность</div><h2 class="modal-title h5" id="cookiePreferencesTitle">Настройки cookie</h2></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button></div><div class="modal-body">
+      <div class="cookie-setting"><div><strong>Необходимые</strong><p>Авторизация, корзина, безопасность и сохранение выбора. Отключить нельзя.</p></div><input class="form-check-input" type="checkbox" checked disabled aria-label="Необходимые cookie включены" /></div>
+      <div class="cookie-setting"><div><strong>Функциональные</strong><p>Запоминают тему и настройки интерфейса на этом устройстве.</p></div><input class="form-check-input" id="cookieFunctional" type="checkbox" /></div>
+      <div class="cookie-setting"><div><strong>Аналитические</strong><p>Помогают оценивать использование сайта. Сейчас аналитические системы не подключены.</p></div><input class="form-check-input" id="cookieAnalytics" type="checkbox" /></div>
+    </div><div class="modal-footer"><button class="btn btn-primary" type="button" id="saveCookiePreferences">Сохранить выбор</button></div></div></div>
+  </div>
+
   <div class="toast-container position-fixed bottom-0 end-0 p-3" aria-live="polite" aria-atomic="true"></div>
   <script>window.APP_MODE = "user";</script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="dimensions3d.js?v=20260721-cad-dimensions-v2"></script>
   <script src="textures3d.js?v=20260815-bathroom-v1"></script>
-  <script type="module" src="app.js?v=20261001-perms1"></script>
+  <script type="module" src="app.js?v=20261020-3d-legal-seo"></script>
 </body>
 </html>

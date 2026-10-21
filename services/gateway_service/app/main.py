@@ -9,6 +9,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from common.http_security import SecurityHeadersMiddleware, cors_allow_origins
@@ -110,9 +111,24 @@ for segment, target in BACKENDS.items():
     _register_proxy(segment, target)
 
 
+def _public_base(request: Request) -> str:
+    configured = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
+    return configured or str(request.base_url).rstrip("/")
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def landing_page(request: Request) -> HTMLResponse:
+    html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    base = _public_base(request)
+    html = html.replace('<link rel="canonical" href="/" />', f'<link rel="canonical" href="{base}/" />')
+    html = html.replace('"url":"/"', f'"url":"{base}/"')
+    html = html.replace('"image":"./frontend-assets/favicon.svg"', f'"image":"{base}/frontend-assets/favicon.svg?v=4"')
+    return HTMLResponse(html)
+
+
 @app.get("/robots.txt", include_in_schema=False)
 async def robots_txt(request: Request) -> Response:
-    base = str(request.base_url).rstrip("/")
+    base = _public_base(request)
     body = (
         "User-agent: *\n"
         "Allow: /\n"
@@ -129,8 +145,8 @@ async def robots_txt(request: Request) -> Response:
 
 @app.get("/sitemap.xml", include_in_schema=False)
 async def sitemap_xml(request: Request) -> Response:
-    base = str(request.base_url).rstrip("/")
-    urls = ("/", "/privacy.html", "/cookies.html")
+    base = _public_base(request)
+    urls = ("/", "/privacy.html", "/consent.html", "/terms.html", "/cookies.html")
     items = "".join(
         f"<url><loc>{base}{path}</loc><changefreq>weekly</changefreq></url>"
         for path in urls
