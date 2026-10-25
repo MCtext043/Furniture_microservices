@@ -19,6 +19,7 @@ export function migrateLegacyObject(item) {
       height: Number(item.configuration?.height ?? item.configuration_json?.height ?? item.height) || 800,
       drawerCount: Number(item.configuration?.drawerCount ?? item.configuration_json?.drawers ?? item.drawers) || 0,
       handleCount: Number(item.configuration?.handleCount ?? item.configuration_json?.handles ?? item.handles) || 0,
+      variant: item.configuration?.variant ?? item.configuration_json?.variant ?? item.variant ?? "",
       ...(item.configuration_json || {}), ...(item.configuration || {}),
     },
     transform: {
@@ -42,6 +43,7 @@ export function toLegacyObject(placement) {
     width: placement.configuration.width, depth: placement.configuration.depth, height: placement.configuration.height,
     drawers: placement.configuration.drawerCount ?? placement.configuration.drawers ?? 0,
     handles: placement.configuration.handleCount ?? placement.configuration.handles ?? 0,
+    variant: placement.configuration.variant || "",
     x: placement.transform.x, y: placement.transform.y, z: placement.transform.z, rotationY: placement.transform.rotationY,
     texture: placement.appearance.materialId || placement.appearance.texture || "wood_oak",
     customColor: placement.appearance.customColor || "",

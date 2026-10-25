@@ -48,7 +48,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Prata&display=swap" rel="stylesheet" />
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
-  <link href="styles.css?v=20261001-perms1" rel="stylesheet" />
+  <link href="styles.css?v=20261021-distinct-furniture" rel="stylesheet" />
 </head>
 <body>
   <a class="skip-link" href="#mainContent">Перейти к содержанию</a>
@@ -347,7 +347,7 @@
             <div class="tab-content preview-content">
               <div class="tab-pane fade show active" id="room3dPane" role="tabpanel">
                 <div class="viewer-3d" id="room3d"><span class="viewer-badge">3D-планировщик</span></div>
-                <div class="viewer-help" id="transformGizmoHint"><span>Выберите предмет, затем тяните цветную стрелку: X, Y или Z</span><span>Тяните фон для вращения · масштаб — двумя пальцами</span></div>
+                <div class="viewer-help" id="transformGizmoHint"><span>Выберите предмет и тяните стрелку X, Y или Z · магнитная привязка включена</span><span>Тяните фон для вращения · масштаб — двумя пальцами</span></div>
                 <div class="object-transform-panel is-empty" id="selectedObjectTransform">
                   <div class="object-transform-heading">
                     <div><small>Выбранный предмет</small><strong id="selectedObjectTitle">Предмет не выбран</strong></div>
@@ -672,6 +672,15 @@
             <symbol id="icon-washer" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="3.5" width="13" height="17" rx="1.2"/><path d="M8.4 6.4h.1M11 6.4h4.4"/><circle cx="12" cy="13.2" r="3.2"/></g></symbol>
             <symbol id="icon-mirror" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3.4" width="10" height="17.2" rx="5"/><path d="M9.4 7.2 14.2 5.8"/></g></symbol>
           </svg>
+          <div class="object-library-search">
+            <div class="search-field">
+              <label for="objectPickerSearch">Поиск по предметам</label>
+              <span class="search-icon" aria-hidden="true"></span>
+              <input class="form-control" id="objectPickerSearch" type="search" placeholder="Например, пенал, обувница или навесной шкаф" autocomplete="off" />
+              <button class="search-clear" type="button" data-clear-object-search aria-label="Очистить поиск">×</button>
+            </div>
+            <span id="objectPickerCount" class="object-library-count" aria-live="polite"></span>
+          </div>
           <div class="accordion" id="objectPickerAccordion">
             <div class="accordion-item">
               <h3 class="accordion-header">
@@ -814,7 +823,7 @@
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
   <script src="dimensions3d.js?v=20260721-cad-dimensions-v2"></script>
-  <script src="textures3d.js?v=20260815-bathroom-v1"></script>
-  <script type="module" src="app.js?v=20261020-3d-legal-seo"></script>
+  <script src="textures3d.js?v=20261021-distinct-furniture"></script>
+  <script type="module" src="app.js?v=20261021-distinct-furniture"></script>
 </body>
 </html>

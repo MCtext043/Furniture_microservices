@@ -783,6 +783,52 @@
     return finishFurnitureGroup(group, w, h, d);
   }
 
+  function decorateHardFurnitureVariant(group, item, w, h, d, materials) {
+    const variant = String(item.variant || "");
+    if (!variant || !group) return group;
+    group.userData.furnitureVariant = variant;
+    const frontZ = d / 2 + 14;
+    const dark = new THREE.MeshStandardMaterial({ color: 0x20252b, roughness: 0.24, metalness: 0.48 });
+    const glass = new THREE.MeshPhysicalMaterial({ color: 0xbdd8df, transparent: true, opacity: 0.32, roughness: 0.08, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
+
+    if (/glass|display|mirror/.test(variant)) {
+      addPanel(group, w * 0.72, h * 0.68, 8, variant.includes("mirror") ? materials.handles : glass, 0, h * 0.55, frontZ + 3, 2);
+    }
+    if (/oven/.test(variant)) {
+      addPanel(group, w * 0.74, Math.min(h * 0.34, 520), 20, dark, 0, h * 0.48, frontZ + 8, 5);
+      addHandleBar(group, 0, h * 0.64, frontZ + 22, false, materials.handles);
+    }
+    if (/sink/.test(variant)) {
+      const basin = new THREE.Mesh(prepareGeometry(new THREE.CylinderGeometry(Math.min(w, d) * 0.25, Math.min(w, d) * 0.21, 55, 28)), dark);
+      basin.scale.z = 0.72;
+      basin.position.set(0, h + 18, 0);
+      group.add(basin);
+    }
+    if (/bottle-pullout/.test(variant)) {
+      [-0.22, 0.22].forEach((y) => addPanel(group, w * 0.62, 12, 18, materials.handles, 0, h * (0.5 + y), frontZ + 22, 2));
+    }
+    if (/corner/.test(variant)) {
+      addPanel(group, 22, h * 0.72, 22, materials.handles, 0, h * 0.51, frontZ + 20, 2);
+    }
+    if (/wall-lift/.test(variant)) {
+      addHandleBar(group, 0, h * 0.16, frontZ + 22, false, materials.handles);
+    }
+    if (/hamper/.test(variant)) {
+      for (let index = 1; index <= 5; index += 1) {
+        addPanel(group, w * 0.72, 10, 10, materials.handles, 0, h * (0.18 + index * 0.11), frontZ + 22, 1);
+      }
+    }
+    if (/desk-storage/.test(variant)) {
+      const pedestalW = Math.min(w * 0.28, 460);
+      addPanel(group, pedestalW, h * 0.68, d * 0.72, materials.body, w * 0.28, h * 0.34, 0, 3);
+      [0.25, 0.47, 0.69].forEach((ratio) => addHandleBar(group, w * 0.28, h * ratio, d * 0.37, false, materials.handles));
+    }
+    if (/file/.test(variant)) {
+      [0.22, 0.42, 0.62, 0.82].forEach((ratio) => addPanel(group, w * 0.62, 7, 14, materials.handles, 0, h * ratio, frontZ + 22, 1));
+    }
+    return group;
+  }
+
   function bathroomMaterials(item) {
     const darkCeramic = item?.texture === "ceramic_black";
     const marble = item?.texture === "stone_marble";
@@ -1051,7 +1097,7 @@
       return buildApplianceGroup(item, w, h, d, materialSet);
     }
     if (["wardrobe", "wardrobe_sliding", "wardrobe_corner"].includes(item.type)) {
-      return buildWardrobeGroup(item, w, h, d, materialSet);
+      return decorateHardFurnitureVariant(buildWardrobeGroup(item, w, h, d, materialSet), item, w, h, d, materialSet);
     }
     if (item.type === "sofa" || item.type === "armchair") {
       return buildSofaGroup(item, w, h, d, materialSet);
@@ -1066,7 +1112,7 @@
       return buildBathroomGroup(item, w, h, d, materialSet);
     }
     if (item.type === "table") {
-      return buildTableGroup(item, w, h, d, materialSet);
+      return decorateHardFurnitureVariant(buildTableGroup(item, w, h, d, materialSet), item, w, h, d, materialSet);
     }
 
     const group = new THREE.Group();
@@ -1181,7 +1227,7 @@
       child.receiveShadow = true;
     });
 
-    return group;
+    return decorateHardFurnitureVariant(group, item, w, h, d, materialSet);
   }
 
   window.Texture3D = {

@@ -61,3 +61,69 @@ export function coordinateDeltaForAxis(axis, worldDelta) {
   if (axis === "y") return { x: 0, y: value, z: 0 };
   return { x: 0, y: 0, z: value };
 }
+
+function placementBounds(item) {
+  const footprint = getRotatedFootprint(item);
+  const x = finite(item?.x);
+  const y = finite(item?.y);
+  const z = finite(item?.z);
+  const height = Math.max(finite(item?.height), 0);
+  return {
+    x: { min: x - footprint.width / 2, max: x + footprint.width / 2 },
+    y: { min: y, max: y + height },
+    z: { min: z - footprint.depth / 2, max: z + footprint.depth / 2 },
+  };
+}
+
+function projectionsOverlap(a, b, movingAxis) {
+  return ["x", "y", "z"]
+    .filter((axis) => axis !== movingAxis)
+    .every((axis) => Math.min(a[axis].max, b[axis].max) - Math.max(a[axis].min, b[axis].min) > 1);
+}
+
+/**
+ * Snaps two adjacent faces together on one world axis. Candidate furniture is
+ * considered only when its projections overlap on both remaining axes, so a
+ * distant cabinet cannot pull the selected item sideways through the room.
+ */
+export function snapPlacement3D(item, placements, room, options = {}) {
+  const axis = ["x", "y", "z"].includes(options.axis) ? options.axis : "x";
+  const threshold = Math.max(finite(options.threshold, 70), 0);
+  const start = clampPlacementToRoom(item, room);
+  const moving = placementBounds(start);
+  const footprint = getRotatedFootprint(start);
+  const roomSize = axis === "x" ? finite(room?.width) : axis === "y" ? finite(room?.height) : finite(room?.length);
+  const size = axis === "x" ? footprint.width : axis === "y" ? Math.max(finite(start.height), 0) : footprint.depth;
+  const candidates = [
+    { shift: -moving[axis].min, target: "room-min", targetId: null },
+    { shift: roomSize - moving[axis].max, target: "room-max", targetId: null },
+  ];
+
+  for (const other of placements || []) {
+    if (!other || other.id === start.id) continue;
+    const otherBounds = placementBounds(other);
+    if (!projectionsOverlap(moving, otherBounds, axis)) continue;
+    candidates.push(
+      { shift: otherBounds[axis].max - moving[axis].min, target: "furniture-max", targetId: other.id },
+      { shift: otherBounds[axis].min - moving[axis].max, target: "furniture-min", targetId: other.id },
+    );
+  }
+
+  const best = candidates
+    .filter((candidate) => Math.abs(candidate.shift) <= threshold)
+    .sort((a, b) => Math.abs(a.shift) - Math.abs(b.shift))[0];
+  if (!best) return { placement: start, snapped: false, axis, shift: 0, target: null, targetId: null };
+
+  const snapped = { ...start, [axis]: finite(start[axis]) + best.shift };
+  // Floating point noise from rotated footprints should not leak into saved scenes.
+  snapped[axis] = Math.round(snapped[axis] * 1_000_000) / 1_000_000;
+  return {
+    placement: clampPlacementToRoom(snapped, room),
+    snapped: true,
+    axis,
+    shift: best.shift,
+    target: best.target,
+    targetId: best.targetId,
+    size,
+  };
+}

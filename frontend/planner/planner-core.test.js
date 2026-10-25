@@ -9,7 +9,8 @@ import { intersectsOriented } from "./interaction/CollisionController.js";
 import { registerBuiltInFurniture } from "./furniture/definitions/index.js";
 import { KitchenRun } from "./furniture/definitions/kitchen.js";
 import { ModelAssetLoader } from "./furniture/ModelAssetLoader.js";
-import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis, getRotatedFootprint } from "./interaction/Transform3D.js";
+import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis, getRotatedFootprint, snapPlacement3D } from "./interaction/Transform3D.js";
+import { HARD_FURNITURE_CATEGORIES, HARD_FURNITURE_LIBRARY } from "./catalog/HardFurnitureCatalog.js";
 
 test("FurnitureRegistry rejects duplicates and delegates behavior", () => {
   const registry = new FurnitureRegistry();
@@ -125,5 +126,54 @@ test("clampPlacementToRoom handles rotated footprints and invalid persisted valu
     x: 200,
     y: 0,
     z: 500,
+  });
+});
+
+test("magnetic placement snaps adjacent faces on X, Y and Z axes", () => {
+  const room = { width: 5000, length: 4000, height: 2800 };
+  const anchor = { id: "anchor", x: 2000, y: 0, z: 1800, width: 600, depth: 600, height: 850, rotationY: 0 };
+  const base = { id: "moving", x: 1335, y: 0, z: 1800, width: 600, depth: 600, height: 850, rotationY: 0 };
+
+  const alongX = snapPlacement3D(base, [anchor], room, { axis: "x", threshold: 80 });
+  assert.equal(alongX.placement.x, 1400);
+  assert.equal(alongX.snapped, true);
+
+  const above = snapPlacement3D({ ...base, x: 2000, y: 815 }, [anchor], room, { axis: "y", threshold: 80 });
+  assert.equal(above.placement.y, 850);
+
+  const alongZ = snapPlacement3D({ ...base, x: 2000, z: 1135 }, [anchor], room, { axis: "z", threshold: 80 });
+  assert.equal(alongZ.placement.z, 1200);
+});
+
+test("magnetic placement ignores furniture outside the other two projections", () => {
+  const room = { width: 5000, length: 4000, height: 2800 };
+  const moving = { id: "moving", x: 1335, y: 0, z: 400, width: 600, depth: 600, height: 850, rotationY: 0 };
+  const farOnZ = { id: "anchor", x: 2000, y: 0, z: 2500, width: 600, depth: 600, height: 850, rotationY: 0 };
+  const result = snapPlacement3D(moving, [farOnZ], room, { axis: "x", threshold: 80 });
+  assert.equal(result.placement.x, moving.x);
+  assert.equal(result.snapped, false);
+});
+
+test("magnetic placement snaps to room boundaries on every axis", () => {
+  const room = { width: 5000, length: 4000, height: 2800 };
+  const item = { id: "moving", x: 335, y: 35, z: 3650, width: 600, depth: 600, height: 850, rotationY: 0 };
+  assert.equal(snapPlacement3D(item, [], room, { axis: "x", threshold: 80 }).placement.x, 300);
+  assert.equal(snapPlacement3D(item, [], room, { axis: "y", threshold: 80 }).placement.y, 0);
+  assert.equal(snapPlacement3D(item, [], room, { axis: "z", threshold: 80 }).placement.z, 3700);
+});
+
+test("hard furniture library contains real kinds inside the original picker categories", () => {
+  const originalCategories = new Set(["living", "kitchen", "wardrobe", "bathroom", "bedroom", "office"]);
+  assert.deepEqual(new Set(HARD_FURNITURE_CATEGORIES.map(([id]) => id)), originalCategories);
+  assert.ok(HARD_FURNITURE_LIBRARY.length >= 45);
+  assert.ok(new Set(HARD_FURNITURE_LIBRARY.map((item) => item.id)).size === HARD_FURNITURE_LIBRARY.length);
+  assert.equal(new Set(HARD_FURNITURE_LIBRARY.map((item) => item.name)).size, HARD_FURNITURE_LIBRARY.length);
+  assert.equal(new Set(HARD_FURNITURE_LIBRARY.map((item) => item.variant)).size, HARD_FURNITURE_LIBRARY.length);
+  assert.ok(HARD_FURNITURE_LIBRARY.every((item) => originalCategories.has(item.category)));
+  assert.ok(HARD_FURNITURE_LIBRARY.every((item) => !/\d+\s*мм$/i.test(item.name)), "Sizes must not masquerade as furniture kinds");
+  const supported = new Set(registerBuiltInFurniture(new FurnitureRegistry()).list().map((definition) => definition.type));
+  HARD_FURNITURE_LIBRARY.forEach((item) => {
+    assert.ok(supported.has(item.type), `Unsupported planner type: ${item.type}`);
+    assert.ok(item.width > 0 && item.depth > 0 && item.height > 0);
   });
 });

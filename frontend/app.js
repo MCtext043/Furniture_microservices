@@ -8,7 +8,8 @@ import { HistoryManager } from "/planner-modules/interaction/HistoryManager.js";
 import { findCollisions } from "/planner-modules/interaction/CollisionController.js";
 import { PlannerDiagnostics } from "/planner-modules/core/PlannerDiagnostics.js";
 import { ModelAssetLoader } from "/planner-modules/furniture/ModelAssetLoader.js";
-import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis } from "/planner-modules/interaction/Transform3D.js";
+import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis, snapPlacement3D } from "/planner-modules/interaction/Transform3D.js";
+import { HARD_FURNITURE_CATEGORIES, HARD_FURNITURE_LIBRARY } from "/planner-modules/catalog/HardFurnitureCatalog.js";
 
 const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
 const APP_MODE = window.APP_MODE || "user";
@@ -41,7 +42,7 @@ const state = {
     wallColor: "#FAF7F2",
   },
   objects3d: [],
-  objectEditor: { section: "living", elevation: 0, drawers: null, handles: null },
+  objectEditor: { section: "living", elevation: 0, drawers: null, handles: null, variant: "" },
   drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0, scale: 1, wrapEl: null, chipEl: null },
   rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0, scale: 1, wrapEl: null, chipEl: null },
   cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0, pointers: new Map(), pinchDistance: 0, pinching: false },
@@ -2416,11 +2417,15 @@ function move3DTransform(event, canvas) {
   const scalar = worldDelta.dot(axisVector(transform.axis));
   const delta = coordinateDeltaForAxis(transform.axis, { [transform.axis]: scalar });
   const next = applyTranslationDelta(transform.startItem, delta, state.roomConfig);
-  Object.assign(item, next);
+  const snap = snapPlacement3D(next, state.objects3d, state.roomConfig, {
+    axis: transform.axis,
+    threshold: SNAP_DISTANCE_MM,
+  });
+  Object.assign(item, snap.placement);
   transform.moved = transform.moved || Math.abs(delta.x) + Math.abs(delta.y) + Math.abs(delta.z) > 2;
   updateFurnitureTransform(item);
   syncSelectedObjectControls();
-  render3DTransformCollisionStatus(item);
+  render3DTransformCollisionStatus(item, snap);
   event.preventDefault();
   return true;
 }
@@ -2666,7 +2671,7 @@ function rebuildRoomGeometry() {
 function furnitureRenderSignature(item) {
   return JSON.stringify([
     item.type, item.texture, item.customColor, item.width, item.depth, item.height,
-    item.drawers, item.handles, item.countertopType, item.milling, item.rendererMode, item.modelAssetKey, item.modelVersion,
+    item.drawers, item.handles, item.variant, item.countertopType, item.milling, item.rendererMode, item.modelAssetKey, item.modelVersion,
   ]);
 }
 
@@ -3056,6 +3061,7 @@ function addObject3DFromForm() {
     milling,
     drawers: state.objectEditor?.drawers ?? defaults.drawers,
     handles: state.objectEditor?.handles ?? defaults.handles,
+    variant: state.objectEditor?.variant || "",
     name,
     width,
     depth,
@@ -3857,19 +3863,30 @@ function removeObject3D(id) {
   toast(`Удалён: ${removed.name}`);
 }
 
-function render3DTransformCollisionStatus(item) {
+function render3DTransformCollisionStatus(item, snap = null) {
   const status = document.getElementById("selectedObjectTransformStatus");
   if (!status) return;
   if (!item) {
     status.textContent = "Выберите предмет в сцене";
-    status.classList.remove("has-collision");
+    status.classList.remove("has-collision", "is-snapped");
     return;
   }
   const collisions = findCollisions(item, state.objects3d, 2);
   status.classList.toggle("has-collision", collisions.length > 0);
-  status.textContent = collisions.length
-    ? `Пересечение: ${collisions.map((candidate) => candidate.name).join(", ")}`
-    : "Положение допустимо";
+  status.classList.toggle("is-snapped", !collisions.length && Boolean(snap?.snapped));
+  if (collisions.length) {
+    status.textContent = `Пересечение: ${collisions.map((candidate) => candidate.name).join(", ")}`;
+    return;
+  }
+  if (snap?.snapped) {
+    const targetItem = snap.targetId ? state.objects3d.find((candidate) => candidate.id === snap.targetId) : null;
+    const roomTarget = snap.axis === "y"
+      ? (snap.target === "room-min" ? "полу" : "потолку")
+      : "стене";
+    status.textContent = `Магнит ${snap.axis.toUpperCase()}: прикреплено к ${targetItem?.name || roomTarget}`;
+    return;
+  }
+  status.textContent = "Положение допустимо · магнит включён";
 }
 
 function syncSelectedObjectControls() {
@@ -6807,6 +6824,85 @@ function syncObjectEditorControls() {
   }
 }
 
+function hardFurnitureIcon(type) {
+  if (type === "table") return "icon-desk";
+  if (type === "shelf") return "icon-shelf";
+  if (type === "wardrobe_sliding") return "icon-wardrobe-sliding";
+  if (type === "wardrobe_corner") return "icon-wardrobe-corner";
+  if (type === "wardrobe") return "icon-wardrobe";
+  return "icon-cabinet";
+}
+
+function renderHardFurnitureLibrary(accordion) {
+  if (!accordion || accordion.querySelector("[data-hard-furniture-category]")) return;
+  const targetByCategory = {
+    living: "#objectPickerLiving",
+    kitchen: "#objectPickerKitchen",
+    wardrobe: "#objectPickerWardrobe",
+    bathroom: "#objectPickerBathroom",
+    bedroom: "#objectPickerBedroom",
+    office: "#objectPickerOffice",
+  };
+  HARD_FURNITURE_CATEGORIES.forEach(([category]) => {
+    const items = HARD_FURNITURE_LIBRARY.filter((item) => item.category === category);
+    if (!items.length) return;
+    const body = accordion.querySelector(`${targetByCategory[category]} .accordion-body`);
+    if (!body) return;
+    const section = document.createElement("section");
+    section.className = "hard-furniture-extension";
+    section.dataset.hardFurnitureCategory = category;
+    section.innerHTML = `
+          <div class="object-library-section-title"><span>Дополнительные виды корпусной мебели</span><span class="object-library-category-count">${items.length}</span></div>
+          <div class="list-group object-library-list">
+            ${items.map((item) => {
+              const attributes = [
+                ["data-pick-object", ""], ["data-library-item", item.id], ["data-section", item.category],
+                ["data-type", item.type], ["data-name", item.name], ["data-w", item.width],
+                ["data-d", item.depth], ["data-h", item.height], ["data-texture", item.texture], ["data-variant", item.variant],
+              ];
+              [["data-y", item.y], ["data-drawers", item.drawers], ["data-handles", item.handles], ["data-countertop", item.countertop]]
+                .forEach(([name, value]) => { if (value !== undefined && value !== null) attributes.push([name, value]); });
+              const attrs = attributes.map(([name, value]) => value === "" ? name : `${name}="${escapeHtml(value)}"`).join(" ");
+              return `<button type="button" class="list-group-item list-group-item-action object-picker-item" ${attrs} data-search="${escapeHtml(item.name)}"><span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#${hardFurnitureIcon(item.type)}"></use></svg></span><span><strong>${escapeHtml(item.name)}</strong><small>${item.width}×${item.depth}×${item.height} мм${item.y ? ` · высота ${item.y} мм` : ""}</small></span></button>`;
+            }).join("")}
+          </div>`;
+    body.appendChild(section);
+  });
+}
+
+function initObjectPickerSearch(modalEl, accordion) {
+  const input = modalEl.querySelector("#objectPickerSearch");
+  const count = modalEl.querySelector("#objectPickerCount");
+  if (!input || input.dataset.bound === "true") return;
+  input.dataset.bound = "true";
+  const update = () => {
+    const query = normalizeSearch(input.value);
+    const buttons = [...accordion.querySelectorAll("[data-pick-object]")];
+    let visible = 0;
+    buttons.forEach((button) => {
+      const haystack = normalizeSearch(button.dataset.search || button.textContent);
+      const match = !query || haystack.includes(query);
+      button.hidden = !match;
+      if (match) visible += 1;
+    });
+    accordion.querySelectorAll(".accordion-item").forEach((section) => {
+      const hasMatch = [...section.querySelectorAll("[data-pick-object]")].some((button) => !button.hidden);
+      section.hidden = !hasMatch;
+      const collapse = section.querySelector(".accordion-collapse");
+      if (query && hasMatch) collapse?.classList.add("show");
+    });
+    if (count) count.textContent = query ? `Найдено: ${visible}` : `${HARD_FURNITURE_LIBRARY.length} новых видов`;
+  };
+  input.addEventListener("input", update);
+  modalEl.querySelector("[data-clear-object-search]")?.addEventListener("click", () => {
+    input.value = "";
+    update();
+    input.focus();
+  });
+  modalEl.addEventListener("shown.bs.modal", () => { if (!input.value) update(); }, { passive: true });
+  update();
+}
+
 function initObjectPicker() {
   const modalEl = document.getElementById("objectPickerModal");
   if (!modalEl) return;
@@ -6815,6 +6911,8 @@ function initObjectPicker() {
   if (extraCategories?.content && accordion && !accordion.querySelector("#objectPickerWardrobe")) {
     accordion.appendChild(extraCategories.content.cloneNode(true));
   }
+  renderHardFurnitureLibrary(accordion);
+  initObjectPickerSearch(modalEl, accordion);
   modalEl.addEventListener("click", (event) => {
     const btn = event.target.closest?.("[data-pick-object]");
     if (!btn) return;
@@ -6837,11 +6935,13 @@ function initObjectPicker() {
     const elevation = Number(btn.dataset.y) || 0;
     const drawers = btn.dataset.drawers === undefined ? null : Number(btn.dataset.drawers);
     const handles = btn.dataset.handles === undefined ? null : Number(btn.dataset.handles);
+    const variant = btn.dataset.variant || "";
 
     state.objectEditor.section = section;
     state.objectEditor.elevation = elevation;
     state.objectEditor.drawers = drawers;
     state.objectEditor.handles = handles;
+    state.objectEditor.variant = variant;
     if (typeEl) typeEl.value = type;
     if (nameEl) nameEl.value = name;
     if (wEl && w) wEl.value = w;
