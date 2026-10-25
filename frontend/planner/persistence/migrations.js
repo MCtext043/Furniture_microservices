@@ -8,7 +8,7 @@ const definitionByLegacyType = {
 export function migrateLegacyObject(item) {
   const type = item.type || item.furniture_type || "cabinet";
   return {
-    id: String(item.id || item.client_id || crypto.randomUUID()),
+    id: String(item.client_id || item.id || crypto.randomUUID()),
     definitionId: item.definitionId || item.definition_id || definitionByLegacyType[type] || `${type}.v1`,
     definitionVersion: Number(item.definitionVersion || item.definition_version) || 1,
     type,
@@ -20,6 +20,9 @@ export function migrateLegacyObject(item) {
       drawerCount: Number(item.configuration?.drawerCount ?? item.configuration_json?.drawers ?? item.drawers) || 0,
       handleCount: Number(item.configuration?.handleCount ?? item.configuration_json?.handles ?? item.handles) || 0,
       variant: item.configuration?.variant ?? item.configuration_json?.variant ?? item.variant ?? "",
+      section: item.configuration?.section ?? item.configuration_json?.section ?? item.section ?? "living",
+      countertopType: item.configuration?.countertopType ?? item.configuration_json?.countertopType ?? item.countertopType ?? "",
+      milling: item.configuration?.milling ?? item.configuration_json?.milling ?? item.milling ?? false,
       ...(item.configuration_json || {}), ...(item.configuration || {}),
     },
     transform: {
@@ -44,6 +47,9 @@ export function toLegacyObject(placement) {
     drawers: placement.configuration.drawerCount ?? placement.configuration.drawers ?? 0,
     handles: placement.configuration.handleCount ?? placement.configuration.handles ?? 0,
     variant: placement.configuration.variant || "",
+    section: placement.configuration.section || "living",
+    countertopType: placement.configuration.countertopType || "",
+    milling: Boolean(placement.configuration.milling),
     x: placement.transform.x, y: placement.transform.y, z: placement.transform.z, rotationY: placement.transform.rotationY,
     texture: placement.appearance.materialId || placement.appearance.texture || "wood_oak",
     customColor: placement.appearance.customColor || "",

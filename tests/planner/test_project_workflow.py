@@ -26,6 +26,27 @@ def test_create_project_with_room_and_pricing(planner_client: TestClient):
     assert body["status"] == "draft"
 
 
+def test_project_keeps_contact_details_for_saved_quote(planner_client: TestClient):
+    created = planner_client.post(
+        "/projects",
+        json={
+            "name": "Кухня Петровых",
+            "location": "Ижевск",
+            "customer_name": "Анна Петрова",
+            "customer_phone": "+7 900 000-00-00",
+            "customer_email": "anna@example.test",
+        },
+    )
+    assert created.status_code == 201
+    assert created.json()["customer_name"] == "Анна Петрова"
+    assert created.json()["customer_phone"] == "+7 900 000-00-00"
+    updated = planner_client.patch(
+        f"/projects/{created.json()['id']}", json={"customer_phone": "+7 900 111-11-11"}
+    )
+    assert updated.status_code == 200
+    assert updated.json()["customer_phone"] == "+7 900 111-11-11"
+
+
 def test_update_project_selected_tier(planner_client: TestClient):
     project = planner_client.post("/projects", json={"name": "Кухня", "location": ""}).json()
     response = planner_client.patch(

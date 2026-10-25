@@ -1202,6 +1202,18 @@ html.is-scene-immersive .planner-diagnostics {
 .cost-panel { min-width: 0; width: 100%; }
 .cost-panel .row { --bs-gutter-x: 0.85rem; }
 .hardware-slider-scale { gap: 0.5rem; }
+.planner-estimate { margin-top:clamp(1rem,2.5vw,2rem); padding:clamp(1rem,2.5vw,2rem); border:1px solid rgba(255,255,255,.12); border-radius:var(--radius-lg); background:rgba(255,255,255,.055); }
+.planner-estimate-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:1rem; margin-bottom:1rem; }
+.planner-estimate-heading .eyebrow { color:#e6ba57; font-size:.68rem; font-weight:800; letter-spacing:.11em; text-transform:uppercase; }
+.planner-estimate-heading h2 { margin:.2rem 0 .45rem; color:#fff; font-size:clamp(1.35rem,3vw,2rem); }
+.planner-estimate-heading p { max-width:680px; margin:0; color:#cfc3b9; font-size:.82rem; line-height:1.5; }
+.planner-estimate .cost-panel { min-height:0; padding:0; border:0; background:transparent; }
+.planner-estimate .estimate-card,.planner-estimate .hardware-constructor { background:var(--color-surface); }
+.planner-estimate .tier-select-card { height:100%; padding:1.1rem; border-color:var(--color-border)!important; border-radius:var(--radius-md); background:var(--color-surface)!important; color:var(--color-text); }
+.planner-estimate .tier-select-card.border-primary { border-color:var(--color-primary)!important; box-shadow:0 0 0 2px color-mix(in srgb,var(--color-primary) 24%,transparent)!important; }
+.planner-estimate .tier-select-card:focus-visible { outline:3px solid var(--color-secondary); outline-offset:3px; }
+.estimate-disclaimer { margin:1rem 0 0; color:#cfc3b9; font-size:.72rem; line-height:1.5; }
+.cost-panel[aria-busy="true"] { opacity:.72; }
 @media (max-width: 991.98px) {
   .planner-tabs {
     position: sticky;
@@ -1212,6 +1224,12 @@ html.is-scene-immersive .planner-diagnostics {
   }
   [data-theme="dark"] .planner-tabs { background: var(--color-surface); }
   #costPane { min-width: 0; }
+}
+@media (max-width: 575.98px) {
+  .planner-estimate { margin-inline:-.15rem; border-radius:var(--radius-md); }
+  .planner-estimate-heading { align-items:stretch; flex-direction:column; }
+  .planner-estimate-heading .btn { width:100%; }
+  .planner-estimate .row > [class*="col-"] { width:100%; }
 }
 
 .prod-cal {

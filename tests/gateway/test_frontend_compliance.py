@@ -1,4 +1,5 @@
 from pathlib import Path
+from html.parser import HTMLParser
 
 from fastapi.testclient import TestClient
 
@@ -35,6 +36,39 @@ def test_top_plan_is_removed_and_3d_controls_are_present():
     assert 'id="selectedObjectX"' in html
     assert 'id="selectedObjectY"' in html
     assert 'id="selectedObjectZ"' in html
+
+
+def test_estimate_is_a_visible_section_below_the_planner_not_a_tab():
+    html = read_frontend("index.html")
+    assert 'data-bs-target="#costPane"' not in html
+    assert '<section class="planner-estimate" id="costPane"' in html
+    assert 'aria-labelledby="projectCostTitle"' in html
+    assert html.index('id="costPane"') > html.index('id="room3d"')
+    assert 'id="btnEstimateCost"' in html
+
+
+def test_public_html_has_unique_live_ids_and_local_assets_resolve():
+    class PageParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.ids = []
+            self.assets = []
+
+        def handle_starttag(self, tag, attrs):
+            attrs = dict(attrs)
+            if attrs.get("id"):
+                self.ids.append(attrs["id"])
+            value = attrs.get("src") if tag in ("script", "img") else attrs.get("href") if tag == "link" else None
+            if value and not value.startswith(("http", "data:", "#")):
+                self.assets.append(value)
+
+    with TestClient(app) as client:
+        for page in ("index.html", "admin.html", "privacy.html", "consent.html", "terms.html", "cookies.html"):
+            parser = PageParser()
+            parser.feed(read_frontend(page))
+            assert len(parser.ids) == len(set(parser.ids)), page
+            for asset in parser.assets:
+                assert client.get("/" + asset.lstrip("./")).status_code == 200, (page, asset)
 
 
 def test_legal_documents_cookie_controls_and_form_consents_exist():

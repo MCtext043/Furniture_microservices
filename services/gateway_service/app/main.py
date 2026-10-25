@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -113,14 +114,26 @@ for segment, target in BACKENDS.items():
 
 def _public_base(request: Request) -> str:
     configured = os.getenv("PUBLIC_APP_URL", "").strip().rstrip("/")
-    return configured or str(request.base_url).rstrip("/")
+    request_base = str(request.base_url).rstrip("/")
+    # A real Host header is the best canonical source.  The configured URL is
+    # retained for local Docker access, where the browser sees 127.0.0.1.
+    if request.url.hostname not in {"localhost", "127.0.0.1"}:
+        return request_base
+    return configured or request_base
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def landing_page(request: Request) -> HTMLResponse:
     html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
     base = _public_base(request)
-    html = html.replace('<link rel="canonical" href="/" />', f'<link rel="canonical" href="{base}/" />')
+    # Keep a crawlable canonical URL in the HTML response; the client-side SEO
+    # helper is too late for crawlers that do not execute JavaScript.
+    html = re.sub(
+        r'(<link\s+rel="canonical"\s+href=")[^"]*("\s*/?>)',
+        rf'\g<1>{base}/\g<2>',
+        html,
+        count=1,
+    )
     html = html.replace('"url":"/"', f'"url":"{base}/"')
     html = html.replace('"image":"./frontend-assets/favicon.svg"', f'"image":"{base}/frontend-assets/favicon.svg?v=4"')
     return HTMLResponse(html)

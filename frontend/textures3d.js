@@ -1171,7 +1171,8 @@
       }
     }
 
-    const drawerCount = Number(item.drawers) || (item.type === "cabinet" ? 2 : 0);
+    const configuredDrawers = Number(item.drawers);
+    const drawerCount = Number.isFinite(configuredDrawers) ? configuredDrawers : (item.type === "cabinet" ? 2 : 0);
     if (drawerCount > 0) {
       const gap = clamp(panelTh * 0.16, 2, 4);
       const fullGap = gap * (drawerCount + 1);

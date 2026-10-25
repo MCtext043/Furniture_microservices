@@ -11,6 +11,7 @@ import { KitchenRun } from "./furniture/definitions/kitchen.js";
 import { ModelAssetLoader } from "./furniture/ModelAssetLoader.js";
 import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis, getRotatedFootprint, snapPlacement3D } from "./interaction/Transform3D.js";
 import { HARD_FURNITURE_CATEGORIES, HARD_FURNITURE_LIBRARY } from "./catalog/HardFurnitureCatalog.js";
+import { CostQuoteController } from "./pricing/CostQuoteController.js";
 
 test("FurnitureRegistry rejects duplicates and delegates behavior", () => {
   const registry = new FurnitureRegistry();
@@ -26,6 +27,45 @@ test("legacy placement migration round-trips stable identity and transform", () 
   assert.equal(placement.definitionId, "storage.cabinet.v1");
   assert.deepEqual({ x: placement.transform.x, z: placement.transform.z, rotationY: placement.transform.rotationY }, { x: 12, z: 34, rotationY: 90 });
   assert.equal(toLegacyObject(placement).id, "client-1");
+});
+
+test("server scene reload preserves client identity, construction and finishes", () => {
+  const source = { id: "client-stable", type: "cabinet", name: "Модуль", width: 600, depth: 560, height: 850, x: 1200, y: 100, z: 800,
+    section: "kitchen", variant: "k-base-hinged", drawers: 0, handles: 2, texture: "mdf_film_matte", milling: true, countertopType: "quartz" };
+  const payload = serializeScene({ roomConfig: { width: 4000, length: 3000, height: 2700 }, objects: [source] });
+  const loaded = toLegacyObject(migrateLegacyObject({ ...payload.placements[0], id: 42 }));
+  for (const key of ["id", "variant", "section", "drawers", "handles", "texture", "milling", "countertopType"]) {
+    assert.equal(loaded[key], source[key], key);
+  }
+});
+
+test("quote controller rejects stale results after a scene changes or empties", async () => {
+  const requests = [];
+  const quotes = new CostQuoteController((key) => new Promise((resolve) => requests.push({ key, resolve })));
+  const first = quotes.begin("old");
+  const oldRequest = quotes.request("old");
+  const second = quotes.begin("new");
+  const newRequest = quotes.request("new");
+  await Promise.resolve();
+  requests[1].resolve({ total_sheets: 2 });
+  await newRequest;
+  requests[0].resolve({ total_sheets: 9 });
+  await oldRequest;
+  assert.equal(quotes.isCurrent(first), false);
+  assert.equal(quotes.isCurrent(second), true);
+  assert.equal(quotes.get("new").total_sheets, 2);
+  assert.equal(quotes.get("unrelated"), null);
+  quotes.begin("empty");
+  assert.equal(quotes.isCurrent(second), false);
+});
+
+test("quote requests deduplicate and recover after failures", async () => {
+  let calls = 0;
+  const quotes = new CostQuoteController(async () => { calls += 1; if (calls === 1) throw new Error("offline"); return { total_sheets: 3 }; });
+  await assert.rejects(quotes.request("scene"), /offline/);
+  const [a, b] = await Promise.all([quotes.request("scene"), quotes.request("scene")]);
+  assert.deepEqual(a, b);
+  assert.equal(calls, 2);
 });
 
 test("scene serializer emits schema v2 atomic payload", () => {

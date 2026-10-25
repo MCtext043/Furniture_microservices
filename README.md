@@ -42,7 +42,7 @@
 - Каталог товаров: категории, поиск, фильтры, карточки с ценой и остатком.
 - Корзина и избранное (JWT).
 - **Доставка:** расчёт по адресу (геокодинг Nominatim), порог бесплатной доставки.
-- **3D-планировщик:** размеры комнаты, расстановка модулей мебели по плоскостям XZ/XY/YZ прямо в сцене, поворот, BOM и ориентировочная стоимость.
+- **3D-планировщик:** размеры комнаты, выбор предмета и перемещение по трём осям прямо в 3D-сцене, поворот, магнитное примыкание, BOM и ориентировочная стоимость.
 - Экспорт: **GLTF**, **DBS**, PDF-инструкция.
 
 ### Админ-панель
@@ -209,7 +209,7 @@ Furniture/
 │   ├── gateway_service/       # прокси + frontend
 │   └── assets_service/
 ├── frontend/                  # SPA (index + admin)
-├── alembic/versions/          # 001_initial, 002_delivery, 003_crm
+├── alembic/versions/          # последовательные миграции схемы БД
 ├── deploy/                    # скрипты деплоя, local.env
 ├── docker-compose.yml         # локальный стенд
 ├── docker-compose.server.yml  # VPS
@@ -371,6 +371,8 @@ Authorization: Bearer <token>
 | `001_initial` | Каталог, auth, cutting, planner |
 | `002_delivery` | Настройки доставки |
 | `003_crm` | CRM: материалы, склад, заказы |
+| `010_planner_scene_v2` | Версионированная сцена и стабильные идентификаторы предметов |
+| `018_planner_project_contacts` | Контакты клиента для сохранённого проекта |
 
 Локально (миграции через Docker):
 
@@ -381,7 +383,7 @@ docker compose run --rm migrate
 Или:
 
 ```powershell
-$env:DATABASE_URL = "postgresql+psycopg2://furniture:furniture@127.0.0.1:5432/furniture"
+$env:DATABASE_URL = "postgresql+psycopg2://furniture:furniture@127.0.0.1:$env:POSTGRES_HOST_PORT/furniture"
 python -m alembic upgrade head
 ```
 
@@ -391,9 +393,12 @@ python -m alembic upgrade head
 
 ```powershell
 $env:PYTHONPATH = "$PWD"
-$env:TEST_DATABASE_URL = "postgresql+psycopg2://furniture:furniture@127.0.0.1:5432/furniture_test"
+$env:POSTGRES_HOST_PORT = if ($env:POSTGRES_HOST_PORT) { $env:POSTGRES_HOST_PORT } else { "5432" }
+$env:TEST_DATABASE_URL = "postgresql+psycopg2://furniture:furniture@127.0.0.1:$env:POSTGRES_HOST_PORT/furniture_test"
 pytest
 ```
+
+Пользовательские сценарии и границы расчёта — в [README-USER-CASES.md](README-USER-CASES.md). Результаты последнего локального аудита — в [docs/SYSTEM-AUDIT-2026-10-25.md](docs/SYSTEM-AUDIT-2026-10-25.md).
 
 ---
 

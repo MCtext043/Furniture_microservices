@@ -227,10 +227,6 @@
                   </select>
                 </div>
               </div>
-              <div class="form-check legal-consent-check">
-                <input class="form-check-input" type="checkbox" id="projectConsent" />
-                <label class="form-check-label" for="projectConsent">Я даю <a href="consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a> и принимаю <a href="terms.html" target="_blank" rel="noopener">условия использования</a>.</label>
-              </div>
               <div class="custom-color-row">
                 <div class="form-check">
                   <input class="form-check-input" type="checkbox" id="roomUseCustomColors" />
@@ -319,11 +315,16 @@
             </div> -->
             <div class="control-section save-section">
               <div class="control-heading"><span>03</span><div><h3>Сохранение</h3><p>Заполните контактные данные, чтобы мы могли связаться с вами.</p></div></div>
+              <div class="form-field"><label for="projectName">Название проекта</label><input class="form-control" id="projectName" placeholder="Например, кухня дома" maxlength="200" /></div>
               <div class="field-grid field-grid-2">
                 <div class="form-field"><label for="customerName">Ваше имя</label><input class="form-control" id="customerName" placeholder="Иван Иванов" /></div>
                 <div class="form-field"><label for="customerPhone">Номер телефона</label><input class="form-control" id="customerPhone" placeholder="+7 (900) 123-45-67" type="tel" /></div>
                 <div class="form-field"><label for="customerEmail">Email</label><input class="form-control" id="customerEmail" placeholder="ivan@example.com" type="email" /></div>
-                <div class="form-field"><label for="projectLocation">Город или адрес</label><input class="form-control" id="projectLocation" placeholder="Самара" /></div>
+                <div class="form-field"><label for="projectLocation">Город или адрес</label><input class="form-control" id="projectLocation" placeholder="Ижевск" /></div>
+              </div>
+              <div class="form-check legal-consent-check">
+                <input class="form-check-input" type="checkbox" id="projectConsent" />
+                <label class="form-check-label" for="projectConsent">Я даю <a href="consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a> и принимаю <a href="terms.html" target="_blank" rel="noopener">условия использования</a>.</label>
               </div>
               <div class="control-actions save-actions">
                 <button class="btn btn-secondary" id="btnCreateRoom">Сохранить проект</button>
@@ -339,13 +340,8 @@
               <div><span class="live-indicator"><i></i> Предпросмотр</span><h3>Ваша комната</h3></div>
               <div class="preview-header-actions"><p>Выберите объект, чтобы увидеть его размеры и изменить положение.</p><button class="btn btn-quiet btn-sm" id="btnPlannerFullscreen" type="button" aria-pressed="false">⛶ На весь экран</button></div>
             </div>
-            <ul class="nav nav-pills planner-tabs" role="tablist" aria-label="Режим просмотра проекта">
-              <li class="nav-item" role="presentation"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#room3dPane" type="button" role="tab">3D-вид</button></li>
-              <li class="nav-item d-none" id="bomTabNav" role="presentation"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#bomPane" type="button" role="tab">Детали</button></li>
-              <li class="nav-item" role="presentation"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#costPane" type="button" role="tab">Стоимость</button></li>
-            </ul>
             <div class="tab-content preview-content">
-              <div class="tab-pane fade show active" id="room3dPane" role="tabpanel">
+              <div class="scene-pane" id="room3dPane">
                 <div class="viewer-3d" id="room3d"><span class="viewer-badge">3D-планировщик</span></div>
                 <div class="viewer-help" id="transformGizmoHint"><span>Выберите предмет и тяните стрелку X, Y или Z · магнитная привязка включена</span><span>Тяните фон для вращения · масштаб — двумя пальцами</span></div>
                 <div class="object-transform-panel is-empty" id="selectedObjectTransform">
@@ -368,10 +364,6 @@
                 </div>
               </div>
               <div class="tab-pane fade" id="bomPane" role="tabpanel"><div id="bomList" class="detail-list"></div></div>
-              <div class="tab-pane fade" id="costPane" role="tabpanel">
-                <div id="costEstimate" class="cost-panel"></div>
-                <button class="btn btn-secondary mt-3" id="btnEstimateCost">Пересчитать стоимость</button>
-              </div>
             </div>
 
             <template id="extraObjectCategories">
@@ -435,6 +427,14 @@
             </template>
           </div>
         </div>
+        <section class="planner-estimate" id="costPane" aria-labelledby="projectCostTitle">
+          <div class="planner-estimate-heading">
+            <div><div class="eyebrow">Ваш бюджет</div><h2 id="projectCostTitle">Стоимость проекта</h2><p>Расчёт обновляется после изменения мебели. Выберите комплектацию и настройте комплектующие.</p></div>
+            <button class="btn btn-secondary" id="btnEstimateCost" type="button">Пересчитать стоимость</button>
+          </div>
+          <div id="costEstimate" class="cost-panel" aria-busy="false"></div>
+          <p class="estimate-disclaimer">Предварительная оценка изготовления мебели. Техника, сантехника, доставка и монтаж рассчитываются отдельно. Окончательная цена — после замера и согласования материалов.</p>
+        </section>
       </div>
     </section>
 

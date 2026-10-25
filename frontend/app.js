@@ -10,6 +10,7 @@ import { PlannerDiagnostics } from "/planner-modules/core/PlannerDiagnostics.js"
 import { ModelAssetLoader } from "/planner-modules/furniture/ModelAssetLoader.js";
 import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis, snapPlacement3D } from "/planner-modules/interaction/Transform3D.js";
 import { HARD_FURNITURE_CATEGORIES, HARD_FURNITURE_LIBRARY } from "/planner-modules/catalog/HardFurnitureCatalog.js";
+import { CostQuoteController } from "/planner-modules/pricing/CostQuoteController.js";
 
 const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
 const APP_MODE = window.APP_MODE || "user";
@@ -1778,18 +1779,18 @@ async function savePlannerProject() {
   const tiers = estimateTierPrices(cost);
   
   // Получаем данные из новых полей
-  const customerName = document.getElementById("customerName")?.value?.trim() || "Клиент";
+  const customerName = document.getElementById("customerName")?.value?.trim() || "";
   const customerPhone = document.getElementById("customerPhone")?.value?.trim() || "";
   const customerEmail = document.getElementById("customerEmail")?.value?.trim() || "";
   const projectLocation = document.getElementById("projectLocation")?.value?.trim() || "Онлайн";
   
   // Формируем название проекта из имени клиента
-  const projectName = `Проект ${customerName}`;
+  const projectName = document.getElementById("projectName")?.value?.trim() || `Проект ${customerName || "комнаты"}`;
   
   const payload = {
     name: projectName,
     location: projectLocation,
-    user_id: customerName,
+    customer_name: customerName || null,
     customer_phone: customerPhone,
     customer_email: customerEmail,
     room_width: state.roomConfig.width,
@@ -1816,7 +1817,7 @@ async function syncPlannerObjectsToBackend() {
     serializeScene({
       revision: state.sceneRevision,
       roomConfig: state.roomConfig,
-      roomFinish: state.roomFinish,
+      roomFinish: { ...state.roomFinish, hardwareLevels: { ...state.hardwareLevels } },
       objects: state.objects3d,
       bomJson: JSON.stringify(buildBomFromObjects()),
     }),
@@ -1833,6 +1834,7 @@ function createDemoObjects() {
     { id: makeId(), type: "cabinet", texture: "board_black", name: "Остров Chef", width: 1800, depth: 800, height: 900, x: 3000, z: 2200, rotationY: 0 },
   ];
   state.selected3dObjectId = state.objects3d[0]?.id || null;
+  state.objects3d.forEach((item) => clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length));
 }
 
 function addFurnitureSet() {
@@ -3015,10 +3017,15 @@ function applyRoomSize() {
   const width = Number(widthInput.value);
   const length = Number(lengthInput.value);
   const height = Number(heightInput.value);
-  if (width < 2000 || length < 2000 || height < 2000) {
+  if (![width, length, height].every(Number.isFinite) || width < 2000 || length < 2000 || height < 2000) {
     toast("Размеры комнаты должны быть не менее 2000 мм", false);
     return;
   }
+  const tooLarge = state.objects3d.some((item) => {
+    const footprint = getObjectPlanSize(item);
+    return footprint.planW > width || footprint.planD > length || item.height > height;
+  });
+  if (tooLarge) { toast("В комнате таких размеров не помещается добавленная мебель", false); return; }
   const before = plannerSnapshot();
   state.roomConfig = { width, length, height };
   for (const item of state.objects3d) {
@@ -3039,11 +3046,15 @@ function addObject3DFromForm() {
   const width = Number(document.getElementById("objW").value);
   const depth = Number(document.getElementById("objD").value);
   const height = Number(document.getElementById("objH").value);
-  if (width <= 0 || depth <= 0 || height <= 0) {
+  if (![width, depth, height].every(Number.isFinite) || width <= 0 || depth <= 0 || height <= 0) {
     toast("Габариты объекта должны быть > 0 мм", false);
     return;
   }
   const { planW, planD } = getObjectPlanSize({ width, depth, height, rotationY: 0 });
+  if (planW > state.roomConfig.width || planD > state.roomConfig.length || height > state.roomConfig.height) {
+    toast("Предмет не помещается в комнате. Уменьшите габариты или увеличьте комнату", false);
+    return;
+  }
   const defaults = furnitureAccessoryDefaults(type);
   const useCustomColor = document.getElementById("objUseCustomColor")?.checked;
   const customColor = useCustomColor ? normalizeColorHex(document.getElementById("objCustomColor")?.value) : "";
@@ -3070,6 +3081,7 @@ function addObject3DFromForm() {
     z: Math.min(Math.max(state.roomConfig.length * 0.5, planD / 2), state.roomConfig.length - planD / 2),
     rotationY: 0,
   };
+  clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
   state.objects3d.push(item);
   state.selected3dObjectId = item.id;
   plannerHistory.record(before, plannerSnapshot(), "add");
@@ -3133,7 +3145,6 @@ function buildBomFromObjects() {
       pushPart("Изголовье", w, h, 1);
       pushPart("Основание", w, d, 1);
       assembly.push(`Собрать кровать "${item.name}": основание, царги и изголовье`);
-      assembly.push(`Собрать диван "${item.name}": уголки 6 шт, болты 12 шт`);
     }
   }
 
@@ -3141,7 +3152,6 @@ function buildBomFromObjects() {
     parts: parts.map(({ key, ...rest }) => rest),
     assembly,
   };
-  if (state.three.renderer?.shadowMap) state.three.renderer.shadowMap.needsUpdate = true;
 }
 
 function renderBom() {
@@ -3223,26 +3233,27 @@ function cuttingPartsSignature(parts) {
 }
 
 let costQuoteTimer = 0;
+const costQuotes = new CostQuoteController(async (_key, payload) => {
+  const data = await api("POST", "/cutting/quote", payload);
+  return { ...data, sheet_width: payload.sheet_width, sheet_height: payload.sheet_height };
+});
+
+function cuttingQuoteInput(bom) {
+  if (!bom?.parts?.length) return null;
+  const sheet_width = Number(document.getElementById("sheetW")?.value) || 2800;
+  const sheet_height = Number(document.getElementById("sheetH")?.value) || 2070;
+  const parts = normalizePartsForCutting(bom.parts);
+  return { key: `${sheet_width}x${sheet_height}:${cuttingPartsSignature(parts)}`, payload: { sheet_width, sheet_height, parts } };
+}
 
 async function quoteCuttingForBom(bom) {
-  if (!bom?.parts?.length) return null;
-  const sheetW = Number(document.getElementById("sheetW")?.value) || 2800;
-  const sheetH = Number(document.getElementById("sheetH")?.value) || 2070;
-  const key = `${sheetW}x${sheetH}:${cuttingPartsSignature(bom.parts)}`;
-  if (state.cuttingQuoteCache?.key === key) return state.cuttingQuoteCache.data;
+  const input = cuttingQuoteInput(bom);
+  if (!input) return null;
   try {
-    const data = await api("POST", "/cutting/quote", {
-      sheet_width: sheetW,
-      sheet_height: sheetH,
-      parts: normalizePartsForCutting(bom.parts),
-    });
-    const packed = { ...data, sheet_width: sheetW, sheet_height: sheetH };
-    state.cuttingQuoteCache = { key, data: packed };
-    return packed;
+    const data = await costQuotes.request(input.key, input.payload);
+    state.cuttingQuoteCache = { key: input.key, data };
+    return data;
   } catch {
-    if (state.lastCutResult) {
-      return { ...state.lastCutResult, sheet_width: sheetW, sheet_height: sheetH };
-    }
     return null;
   }
 }
@@ -3349,7 +3360,8 @@ function bindHardwareConstructor(host) {
 function refreshCostAmounts(host) {
   const data = buildBomFromObjects();
   if (!data.parts.length && !state.objects3d.length) return;
-  const tiers = estimateTierPrices(estimateProjectCost(data));
+  const quote = cuttingQuoteInput(data);
+  const tiers = estimateTierPrices(estimateProjectCost(data, quote ? costQuotes.get(quote.key) : null));
   const selectedTotal = tiers[state.selectedTier] || tiers.comfort;
   const totalEl = host.querySelector(".estimate-total");
   if (totalEl) totalEl.textContent = `от ${money(selectedTotal)}`;
@@ -3363,16 +3375,28 @@ function renderCostEstimate(bom = null) {
   const host = document.getElementById("costEstimate");
   if (!host) return;
   const data = bom || buildBomFromObjects();
+  window.clearTimeout(costQuoteTimer);
+  const input = cuttingQuoteInput(data);
+  const generation = costQuotes.begin(input?.key || "empty");
+  host.setAttribute("aria-busy", "false");
   if (!data.parts.length && !state.objects3d.length) {
     host.innerHTML = `<div class="estimate-empty"><div><span class="estimate-empty-icon">₽</span><h3>Расчёт появится здесь</h3><p class="estimate-note">Добавьте хотя бы один предмет мебели, чтобы увидеть ориентировочную стоимость.</p><button class="btn btn-secondary" type="button" data-open-furniture>Добавить мебель</button></div></div>`;
     host.querySelector("[data-open-furniture]")?.addEventListener("click", () => document.getElementById("btnOpenObjectPicker")?.click());
     return;
   }
-  paintCostEstimate(host, data, state.cuttingQuoteCache?.data || state.lastCutResult);
-  window.clearTimeout(costQuoteTimer);
+  if (!data.parts.length) {
+    host.innerHTML = `<div class="estimate-empty"><div><span class="estimate-empty-icon">₽</span><h3>Мебель для расчёта не выбрана</h3><p class="estimate-note">Техника и декор не входят в расчёт изготовления. Добавьте корпусную мебель, чтобы получить ориентир.</p><button class="btn btn-secondary" type="button" data-open-furniture>Добавить мебель</button></div></div>`;
+    host.querySelector("[data-open-furniture]")?.addEventListener("click", () => document.getElementById("btnOpenObjectPicker")?.click());
+    return;
+  }
+  paintCostEstimate(host, data, costQuotes.get(input.key));
+  host.setAttribute("aria-busy", "true");
   costQuoteTimer = window.setTimeout(async () => {
     const cutting = await quoteCuttingForBom(data);
-    if (document.getElementById("costEstimate") === host) paintCostEstimate(host, data, cutting);
+    if (document.getElementById("costEstimate") === host && costQuotes.isCurrent(generation)) {
+      paintCostEstimate(host, data, cutting);
+      host.setAttribute("aria-busy", "false");
+    }
   }, 280);
 }
 
@@ -3388,7 +3412,7 @@ function paintCostEstimate(host, data, cutting) {
       <div class="estimate-card">
         <div class="estimate-kicker">Ориентировочная стоимость</div>
         <div class="estimate-total">от ${money(selectedTotal)}</div>
-        <div class="small text-muted mt-1 mb-2">Цена действительна 5 дней. ${escapeHtml(cuttingNote)}</div>
+        <div class="small text-muted mt-1 mb-2">${escapeHtml(cuttingNote)}</div>
         <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
       </div>
       <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
@@ -3398,8 +3422,9 @@ function paintCostEstimate(host, data, cutting) {
     bindTierCardSelection(host);
     bindHardwareConstructor(host);
     host.querySelector("[data-exact-quote]")?.addEventListener("click", () => {
-      if (!isAuthenticated()) bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
-      else submitProjectToWork();
+      const contact = document.getElementById("customerName");
+      contact?.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => contact?.focus(), 300);
     });
     return;
   }
@@ -3871,7 +3896,8 @@ function render3DTransformCollisionStatus(item, snap = null) {
     status.classList.remove("has-collision", "is-snapped");
     return;
   }
-  const collisions = findCollisions(item, state.objects3d, 2);
+  // Touching faces is a valid magnetic placement; only real overlap is a collision.
+  const collisions = findCollisions(item, state.objects3d, 0);
   status.classList.toggle("has-collision", collisions.length > 0);
   status.classList.toggle("is-snapped", !collisions.length && Boolean(snap?.snapped));
   if (collisions.length) {
@@ -5688,7 +5714,7 @@ function applyPlannerModeUi() {
   if (APP_MODE === "admin") return;
   document.getElementById("bomTabNav")?.classList.add("d-none");
   document.getElementById("btnGenerateBom")?.classList.add("d-none");
-  ["btnEstimateCost", "btnExportAssemblyPdf", "btnExport3d", "btnExportDbs"].forEach((id) => {
+  ["btnExportAssemblyPdf", "btnExport3d", "btnExportDbs"].forEach((id) => {
     document.getElementById(id)?.classList.add("d-none");
   });
 }
@@ -5719,6 +5745,8 @@ async function loadPlannerProject(projectId) {
   state.projectId = project.id;
   state.sceneRevision = Number(project.scene_revision) || 0;
   state.selectedTier = project.selected_tier || "standard";
+  const projectNameField = document.getElementById("projectName");
+  if (projectNameField) projectNameField.value = project.name || "";
   state.roomConfig = {
     width: Number(project.room_width) || 6000,
     length: Number(project.room_length) || 5000,
@@ -5731,9 +5759,8 @@ async function loadPlannerProject(projectId) {
   const customerEmailField = document.getElementById("customerEmail");
   const projectLocationField = document.getElementById("projectLocation");
   
-  // Используем user_id как имя, если нет отдельных полей
-  if (customerNameField && project.user_id) {
-    customerNameField.value = project.user_id;
+  if (customerNameField && project.customer_name) {
+    customerNameField.value = project.customer_name;
   }
   if (customerPhoneField && project.customer_phone) {
     customerPhoneField.value = project.customer_phone;
@@ -5756,9 +5783,11 @@ async function loadPlannerProject(projectId) {
   if (scene.room) {
     state.roomConfig = { width: Number(scene.room.width), length: Number(scene.room.length), height: Number(scene.room.height) };
     state.roomFinish = { ...state.roomFinish, ...(scene.room.finish || {}) };
+    if (scene.room.finish?.hardwareLevels) state.hardwareLevels = { ...state.hardwareLevels, ...scene.room.finish.hardwareLevels };
   }
   state.objects3d = scene.placements.map(toLegacyObject);
   state.selected3dObjectId = state.objects3d[0]?.id || null;
+  plannerHistory.clear();
 
   if (project.bom_json) {
     try {
@@ -6632,7 +6661,10 @@ function goToPlannerStep(step) {
   updatePlannerProgress();
   if (step === 1) document.getElementById("roomWidth")?.focus();
   if (step === 2) document.getElementById("btnOpenObjectPicker")?.focus();
-  if (step === 3) document.querySelector('[data-bs-target="#room3dPane"]')?.click();
+  if (step === 3) {
+    document.getElementById("room3dPane")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    ensureRoom3D();
+  }
   if (step === 4) document.getElementById("projectName")?.focus();
 }
 
@@ -6645,7 +6677,7 @@ function initPlannerProgress() {
 
 function initPlannerShortcuts() {
   document.addEventListener("keydown", (event) => {
-    if (APP_MODE === "admin" || /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName || "")) return;
+    if (APP_MODE === "admin" || /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName || "") || document.querySelector(".modal.show")) return;
     const modifier = event.ctrlKey || event.metaKey;
     if (modifier && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? plannerHistory.redo() : plannerHistory.undo(); return; }
     if (modifier && event.key.toLowerCase() === "y") { event.preventDefault(); plannerHistory.redo(); return; }
@@ -6662,7 +6694,7 @@ function initPlannerShortcuts() {
       event.preventDefault(); const before = plannerSnapshot(); const step = event.shiftKey ? 100 : 10;
       if (event.key === "ArrowLeft") selected.x -= step; if (event.key === "ArrowRight") selected.x += step;
       if (event.key === "ArrowUp") selected.z -= step; if (event.key === "ArrowDown") selected.z += step;
-      if (event.key === "PageUp") selected.y += step; if (event.key === "PageDown") selected.y -= step;
+      if (event.key === "PageUp") selected.y = (Number(selected.y) || 0) + step; if (event.key === "PageDown") selected.y = (Number(selected.y) || 0) - step;
       clampObjectPosition(selected, state.roomConfig.width, state.roomConfig.length); plannerHistory.record(before, plannerSnapshot(), "nudge");
       updateFurnitureTransform(selected); syncSelectedObjectControls();
     }
@@ -6947,8 +6979,10 @@ function initObjectPicker() {
     if (wEl && w) wEl.value = w;
     if (dEl && d) dEl.value = d;
     if (hEl && h) hEl.value = h;
-    if (textureEl && texture) textureEl.value = texture;
-    if (countertopEl && countertop) countertopEl.value = countertop;
+    // Rebuild the permitted finishes for a type before setting a library item's finish.
+    syncObjectEditorControls();
+    if (textureEl && texture && [...textureEl.options].some((option) => option.value === texture)) textureEl.value = texture;
+    if (countertopEl) countertopEl.value = countertop;
 
     const millingEl = document.getElementById("objMilling");
     if (millingEl) millingEl.checked = false;
@@ -7067,9 +7101,7 @@ async function boot() {
   bindClick("btnGenerateBom", () => { renderBom(); toast("Список деталей обновлён"); });
   bindClick("btnEstimateCost", () => {
     renderBom();
-    if (APP_MODE !== "admin") {
-      document.querySelector('[data-bs-target="#costPane"]')?.click();
-    }
+    document.getElementById("costPane")?.scrollIntoView({ behavior: "smooth", block: "start" });
     toast("Стоимость пересчитана");
   });
   bindClick("btnSubmitToWork", submitProjectToWork);
