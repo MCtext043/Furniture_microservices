@@ -9,7 +9,7 @@ import { findCollisions } from "/planner-modules/interaction/CollisionController
 import { PlannerDiagnostics } from "/planner-modules/core/PlannerDiagnostics.js";
 import { ModelAssetLoader } from "/planner-modules/furniture/ModelAssetLoader.js";
 import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis, snapPlacement3D } from "/planner-modules/interaction/Transform3D.js";
-import { HARD_FURNITURE_CATEGORIES, HARD_FURNITURE_LIBRARY } from "/planner-modules/catalog/HardFurnitureCatalog.js";
+import { HARD_FURNITURE_CATEGORIES, HARD_FURNITURE_LIBRARY } from "/planner-modules/catalog/HardFurnitureCatalog.js?v=20261026-furniture-catalog";
 import { CostQuoteController } from "/planner-modules/pricing/CostQuoteController.js";
 import { DEFAULT_SPREADSHEET_PRICING, estimateSpreadsheetPrices, quantitiesFromScene } from "/planner-modules/pricing/SpreadsheetPricing.js";
 import { catalogThumbnailSvg } from "/planner-modules/catalog/CatalogThumbnail.js";
@@ -47,7 +47,7 @@ const state = {
     wallColor: "#FAF7F2",
   },
   objects3d: [],
-  objectEditor: { section: "living", elevation: 0, drawers: null, handles: null, variant: "" },
+  objectEditor: { section: "living", elevation: 0, drawers: null, handles: null, doorCount: null, variant: "" },
   drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0, scale: 1, wrapEl: null, chipEl: null },
   rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0, scale: 1, wrapEl: null, chipEl: null },
   cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0, pointers: new Map(), pinchDistance: 0, pinching: false },
@@ -3177,6 +3177,7 @@ function addObject3DFromForm() {
     milling,
     drawers: state.objectEditor?.drawers ?? defaults.drawers,
     handles: state.objectEditor?.handles ?? defaults.handles,
+    doorCount: state.objectEditor?.doorCount ?? 0,
     variant: state.objectEditor?.variant || "",
     name,
     width,
@@ -7036,7 +7037,7 @@ function renderHardFurnitureLibrary(accordion) {
                 ["data-type", item.type], ["data-name", item.name], ["data-w", item.width],
                 ["data-d", item.depth], ["data-h", item.height], ["data-texture", item.texture], ["data-variant", item.variant],
               ];
-              [["data-y", item.y], ["data-drawers", item.drawers], ["data-handles", item.handles], ["data-countertop", item.countertop]]
+              [["data-y", item.y], ["data-drawers", item.drawers], ["data-handles", item.handles], ["data-door-count", item.doorCount], ["data-countertop", item.countertop]]
                 .forEach(([name, value]) => { if (value !== undefined && value !== null) attributes.push([name, value]); });
               const attrs = attributes.map(([name, value]) => value === "" ? name : `${name}="${escapeHtml(value)}"`).join(" ");
               return `<button type="button" class="list-group-item list-group-item-action object-picker-item" ${attrs} data-search="${escapeHtml(item.name)}"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#${hardFurnitureIcon(item.type)}"></use></svg></span><span><strong>${escapeHtml(item.name)}</strong><small>${item.width}×${item.depth}×${item.height} мм${item.y ? ` · высота ${item.y} мм` : ""}</small></span></button>`;
@@ -7059,6 +7060,13 @@ function upgradeObjectPickerThumbnails(accordion) {
       width: Number(button.dataset.w || 0),
       depth: Number(button.dataset.d || 0),
       height: Number(button.dataset.h || 0),
+      texture: button.dataset.texture || "wood_oak",
+      variant: button.dataset.variant || "",
+      section: button.dataset.section || "kitchen",
+      drawers: Number(button.dataset.drawers || 0),
+      handles: Number(button.dataset.handles || 0),
+      doorCount: Number(button.dataset.doorCount || 0),
+      countertopType: button.dataset.countertop || "",
     };
     const model = document.createElement("span");
     model.className = "object-picker-model";
@@ -7071,6 +7079,13 @@ function upgradeObjectPickerThumbnails(accordion) {
     canvas.dataset.furnitureWidth = String(item.width || 600);
     canvas.dataset.furnitureDepth = String(item.depth || 450);
     canvas.dataset.furnitureHeight = String(item.height || 800);
+    canvas.dataset.furnitureTexture = item.texture || "wood_oak";
+    canvas.dataset.furnitureVariant = item.variant || "";
+    canvas.dataset.furnitureSection = item.section || "kitchen";
+    canvas.dataset.furnitureDrawers = String(item.drawers ?? 0);
+    canvas.dataset.furnitureHandles = String(item.handles ?? 0);
+    canvas.dataset.furnitureDoorCount = String(item.doorCount ?? 0);
+    canvas.dataset.furnitureCountertop = item.countertopType || "";
     observeFurnitureThumbnail(canvas);
   });
 }
@@ -7091,6 +7106,13 @@ function observeFurnitureThumbnail(canvas) {
           width: Number(entry.target.dataset.furnitureWidth),
           depth: Number(entry.target.dataset.furnitureDepth),
           height: Number(entry.target.dataset.furnitureHeight),
+          texture: entry.target.dataset.furnitureTexture,
+          variant: entry.target.dataset.furnitureVariant,
+          section: entry.target.dataset.furnitureSection,
+          drawers: Number(entry.target.dataset.furnitureDrawers),
+          handles: Number(entry.target.dataset.furnitureHandles),
+          doorCount: Number(entry.target.dataset.furnitureDoorCount),
+          countertopType: entry.target.dataset.furnitureCountertop,
         });
       });
     }, { rootMargin: "100px 0px", threshold: 0.01 });
@@ -7214,12 +7236,14 @@ function initObjectPicker() {
     const elevation = Number(btn.dataset.y) || 0;
     const drawers = btn.dataset.drawers === undefined ? null : Number(btn.dataset.drawers);
     const handles = btn.dataset.handles === undefined ? null : Number(btn.dataset.handles);
+    const doorCount = btn.dataset.doorCount === undefined ? null : Number(btn.dataset.doorCount);
     const variant = btn.dataset.variant || "";
 
     state.objectEditor.section = section;
     state.objectEditor.elevation = elevation;
     state.objectEditor.drawers = drawers;
     state.objectEditor.handles = handles;
+    state.objectEditor.doorCount = doorCount;
     state.objectEditor.variant = variant;
     if (typeEl) typeEl.value = type;
     if (nameEl) nameEl.value = name;

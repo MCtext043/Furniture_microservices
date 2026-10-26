@@ -798,6 +798,20 @@
       addPanel(group, w * 0.74, Math.min(h * 0.34, 520), 20, dark, 0, h * 0.48, frontZ + 8, 5);
       addHandleBar(group, 0, h * 0.64, frontZ + 22, false, materials.handles);
     }
+    if (/dishwasher/.test(variant)) {
+      addPanel(group, w * 0.72, h * 0.16, 18, dark, 0, h * 0.84, frontZ + 12, 3);
+      addHandleBar(group, 0, h * 0.9, frontZ + 25, false, materials.handles);
+    }
+    if (/fridge/.test(variant)) {
+      addHandleBar(group, w * 0.34, h * 0.52, frontZ + 20, true, materials.handles);
+      addHandleBar(group, -w * 0.34, h * 0.52, frontZ + 20, true, materials.handles);
+    }
+    if (/microwave/.test(variant)) {
+      addPanel(group, w * 0.68, h * 0.19, 18, dark, 0, h * 0.63, frontZ + 8, 4);
+    }
+    if (/hood/.test(variant)) {
+      addPanel(group, w * 0.66, Math.min(h * 0.34, 260), d * 0.42, materials.handles, 0, h * 0.54, 0, 4);
+    }
     if (/sink/.test(variant)) {
       const basin = new THREE.Mesh(prepareGeometry(new THREE.CylinderGeometry(Math.min(w, d) * 0.25, Math.min(w, d) * 0.21, 55, 28)), dark);
       basin.scale.z = 0.72;
@@ -1173,21 +1187,31 @@
 
     const configuredDrawers = Number(item.drawers);
     const drawerCount = Number.isFinite(configuredDrawers) ? configuredDrawers : (item.type === "cabinet" ? 2 : 0);
+    const mixedDrawerDoor = item.type === "cabinet" && drawerCount > 0 && Number(item.doorCount) > 0;
     if (drawerCount > 0) {
       const gap = clamp(panelTh * 0.16, 2, 4);
       const fullGap = gap * (drawerCount + 1);
       const drawerH = (bodyH - fullGap) / drawerCount;
       for (let i = 0; i < drawerCount; i++) {
         const y = kickH + gap + drawerH / 2 + i * (drawerH + gap);
-        const front = panelMesh(w - panelTh * 0.8, drawerH - gap, Math.max(18, panelTh * 0.7), materialSet.facade, { radiusMm: 1.4 });
-        front.position.set(0, y, d / 2 + facadeOffset);
+        const drawerW = mixedDrawerDoor ? w * 0.55 : w - panelTh * 0.8;
+        const drawerX = mixedDrawerDoor ? -w * 0.21 : 0;
+        const front = panelMesh(drawerW, drawerH - gap, Math.max(18, panelTh * 0.7), materialSet.facade, { radiusMm: 1.4 });
+        front.position.set(drawerX, y, d / 2 + facadeOffset);
         group.add(front);
 
         const drawerBox = panelMesh(innerW - 12, Math.max(58, drawerH * 0.72), innerD * 0.88, materialSet.interior, { radiusMm: 1.2 });
         drawerBox.position.set(0, y, -panelTh * 0.08);
         group.add(drawerBox);
 
-        addHandleBar(group, 0, y, d / 2 + panelTh * 0.92, false, materialSet.handles);
+        addHandleBar(group, drawerX, y, d / 2 + panelTh * 0.92, false, materialSet.handles);
+      }
+      if (mixedDrawerDoor) {
+        const doorW = w * 0.39;
+        const door = panelMesh(doorW, bodyH - panelTh * 0.8, Math.max(16, panelTh * 0.65), materialSet.facade, { radiusMm: 1.4 });
+        door.position.set(w * 0.29, kickH + bodyH / 2, d / 2 + facadeOffset);
+        group.add(door);
+        addHandleBar(group, w * 0.43, kickH + bodyH * 0.56, d / 2 + panelTh * 0.96, true, materialSet.handles);
       }
     }
 
@@ -1201,10 +1225,16 @@
         addHandleBar(group, side * (doorW / 2 - 28), kickH + bodyH / 2, d / 2 + panelTh * 0.96, true, materialSet.handles);
       });
     } else if (item.type === "cabinet" && drawerCount === 0) {
-      const door = panelMesh(w - panelTh * 0.7, bodyH - panelTh * 0.8, Math.max(16, panelTh * 0.65), materialSet.facade, { radiusMm: 1.4 });
-      door.position.set(0, kickH + bodyH / 2, d / 2 + facadeOffset);
-      group.add(door);
-      addHandleBar(group, 0, kickH + bodyH * 0.62, d / 2 + panelTh * 0.96, false, materialSet.handles);
+      const doorCount = Math.max(1, Math.min(4, Number(item.doorCount) || 1));
+      const doorGap = 3;
+      const doorW = (w - panelTh * 0.7 - doorGap * (doorCount - 1)) / doorCount;
+      for (let index = 0; index < doorCount; index += 1) {
+        const x = -((doorCount - 1) * (doorW + doorGap)) / 2 + index * (doorW + doorGap);
+        const door = panelMesh(doorW, bodyH - panelTh * 0.8, Math.max(16, panelTh * 0.65), materialSet.facade, { radiusMm: 1.4 });
+        door.position.set(x, kickH + bodyH / 2, d / 2 + facadeOffset);
+        group.add(door);
+        addHandleBar(group, x + doorW * 0.34, kickH + bodyH * 0.62, d / 2 + panelTh * 0.96, true, materialSet.handles);
+      }
     }
 
     if (edgeTh > 0.8) {
@@ -1214,7 +1244,7 @@
       group.add(edgeTop);
     }
 
-    if (item.type === "cabinet") {
+    if (item.type === "cabinet" && !/wall|hood/.test(String(item.variant || ""))) {
       const capThickness = clamp(panelTh * 1.45, 24, 34);
       const cap = panelMesh(w + 18, capThickness, d + 14, materialSet.countertop.clone(), { radiusMm: 2 });
       cap.position.set(0, h - capThickness / 2 + 3, 0);

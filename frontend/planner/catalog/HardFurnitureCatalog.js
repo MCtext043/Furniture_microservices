@@ -11,6 +11,84 @@ const make = (id, category, type, name, dimensions, extra = {}) => ({
   ...extra,
 });
 
+const makeKitchenSeries = (prefix, rows) => rows.map(([suffix, name, type, dimensions, extra = {}]) =>
+  make(`k-${prefix}-${suffix}`, "kitchen", type, name, dimensions, {
+    texture: "mdf_film_matte",
+    ...(type === "cabinet" ? { countertop: "skif", doorCount: extra.drawers ? 0 : 1, handles: 1 } : {}),
+    ...extra,
+  }),
+);
+
+const KITCHEN_VARIATIONS = [
+  ...makeKitchenSeries("base", [
+    ["2-door-800", "Нижний шкаф 800 мм · две дверцы", "cabinet", [800, 560, 850], { doorCount: 2, handles: 2 }],
+    ["2-door-900", "Нижний шкаф 900 мм · две дверцы", "cabinet", [900, 560, 850], { doorCount: 2, handles: 2 }],
+    ["narrow-300", "Узкий нижний шкаф 300 мм", "cabinet", [300, 560, 850]],
+    ["narrow-400", "Узкий нижний шкаф 400 мм", "cabinet", [400, 560, 850]],
+    ["wide-1000", "Широкий нижний шкаф 1000 мм · две дверцы", "cabinet", [1000, 560, 850], { doorCount: 2, handles: 2 }],
+    ["deep-600", "Нижний шкаф увеличенной глубины", "cabinet", [600, 600, 850]],
+    ["drawer-2", "Тумба с двумя широкими ящиками", "cabinet", [600, 560, 850], { drawers: 2, handles: 2 }],
+    ["drawer-4", "Тумба с четырьмя ящиками", "cabinet", [600, 560, 850], { drawers: 4, handles: 4 }],
+    ["drawer-5", "Узкая тумба с пятью ящиками", "cabinet", [450, 560, 850], { drawers: 5, handles: 5 }],
+    ["mixed-3", "Тумба: три ящика и дверца", "cabinet", [800, 560, 850], { drawers: 3, doorCount: 1, handles: 4 }],
+    ["mixed-2", "Тумба: два ящика и дверца", "cabinet", [900, 560, 850], { drawers: 2, doorCount: 1, handles: 3 }],
+    ["cooktop", "Тумба под варочную панель", "cabinet", [800, 560, 850], { drawers: 2, handles: 2 }],
+    ["dishwasher-450", "Фасад под узкую посудомоечную машину", "cabinet", [450, 560, 850], { drawers: 0, handles: 1 }],
+    ["dishwasher-600", "Фасад под посудомоечную машину 600 мм", "cabinet", [600, 560, 850], { drawers: 0, handles: 1 }],
+    ["waste-bin", "Тумба с выдвижной системой для мусора", "cabinet", [500, 560, 850], { drawers: 1, handles: 1 }],
+    ["bottle-300", "Бутылочница 300 мм", "cabinet", [300, 560, 850], { drawers: 1, handles: 1 }],
+  ]),
+  ...makeKitchenSeries("wall", [
+    ["single-300", "Навесной шкаф 300 мм · одна дверца", "cabinet", [300, 340, 720], { y: 1400, doorCount: 1, handles: 1 }],
+    ["single-400", "Навесной шкаф 400 мм · одна дверца", "cabinet", [400, 340, 720], { y: 1400, doorCount: 1, handles: 1 }],
+    ["double-600", "Навесной шкаф 600 мм · две дверцы", "cabinet", [600, 340, 720], { y: 1400, doorCount: 2, handles: 2 }],
+    ["double-800", "Навесной шкаф 800 мм · две дверцы", "cabinet", [800, 340, 720], { y: 1400, doorCount: 2, handles: 2 }],
+    ["double-1000", "Навесной шкаф 1000 мм · две дверцы", "cabinet", [1000, 340, 720], { y: 1400, doorCount: 2, handles: 2 }],
+    ["short-360", "Короткий верхний шкаф 360 мм", "cabinet", [600, 340, 360], { y: 1500, doorCount: 2, handles: 2 }],
+    ["high-900", "Высокий верхний шкаф 900 мм", "cabinet", [800, 340, 900], { y: 1300, doorCount: 2, handles: 2 }],
+    ["lift-wide", "Широкий шкаф с подъёмным фасадом", "cabinet", [1000, 340, 480], { y: 1600, doorCount: 1, handles: 1 }],
+    ["glass-double", "Витрина с двумя стеклянными фасадами", "cabinet", [800, 340, 720], { y: 1400, texture: "mdf_film_gloss", doorCount: 2, handles: 2 }],
+    ["open-cubes", "Открытый верхний модуль с нишами", "shelf", [800, 300, 720], { y: 1400 }],
+    ["hood", "Шкаф-короб для вытяжки", "cabinet", [600, 340, 480], { y: 1600, doorCount: 1, handles: 1 }],
+    ["corner-900", "Угловой навесной модуль 900 мм", "cabinet", [900, 600, 720], { y: 1400, doorCount: 1, handles: 1 }],
+  ]),
+  ...makeKitchenSeries("tall", [
+    ["pantry-450", "Узкий пенал-кладовая 450 мм", "wardrobe", [450, 560, 2200]],
+    ["pantry-800", "Широкий пенал-кладовая 800 мм", "wardrobe", [800, 560, 2200]],
+    ["oven-micro", "Пенал: духовка и микроволновая печь", "wardrobe", [600, 560, 2200]],
+    ["oven-drawers", "Пенал с духовкой и нижними ящиками", "wardrobe", [600, 560, 2200], { drawers: 2, handles: 2 }],
+    ["fridge-side", "Пенал для холодильника с боковой секцией", "wardrobe", [900, 650, 2200]],
+    ["broom", "Хозяйственный пенал для инвентаря", "wardrobe", [500, 560, 2200]],
+    ["pullout", "Высокая выдвижная кладовая", "cabinet", [450, 560, 2200], { drawers: 5, handles: 5 }],
+    ["oven-compact", "Компактный пенал под духовой шкаф", "wardrobe", [600, 560, 1800]],
+  ]),
+  ...makeKitchenSeries("special", [
+    ["sink-600", "Тумба под мойку 600 мм", "cabinet", [600, 560, 850], { doorCount: 2, handles: 2 }],
+    ["sink-corner", "Угловая тумба под мойку", "cabinet", [900, 900, 850], { doorCount: 1, handles: 1 }],
+    ["corner-drawer", "Угловая тумба с выдвижными ящиками", "cabinet", [900, 900, 850], { drawers: 3, handles: 3 }],
+    ["open-shelves", "Нижняя секция с открытыми полками", "shelf", [600, 560, 850]],
+    ["wine-rack", "Открытый винный модуль", "shelf", [300, 560, 850]],
+    ["island-1200", "Компактный кухонный остров 1200 мм", "cabinet", [1200, 800, 900], { drawers: 2, handles: 2, countertop: "quartz" }],
+    ["island-2000", "Большой кухонный остров 2000 мм", "cabinet", [2000, 1000, 900], { drawers: 4, handles: 4, countertop: "quartz" }],
+    ["island-seating", "Остров с посадочным местом", "cabinet", [1800, 950, 900], { drawers: 3, handles: 3, countertop: "quartz" }],
+  ]),
+];
+
+const WARDROBE_VARIATIONS = [
+  make("w-mirror-double", "wardrobe", "wardrobe", "Шкаф с двумя зеркальными фасадами", [1600, 600, 2300], { texture: "mdf_film_gloss", handles: 2 }),
+  make("w-four-door", "wardrobe", "wardrobe", "Четырёхстворчатый шкаф", [2400, 600, 2400], { handles: 4 }),
+  make("w-sliding-three", "wardrobe", "wardrobe_sliding", "Шкаф-купе с тремя дверями", [2700, 650, 2400], { texture: "wood_dark_oak", handles: 3 }),
+  make("w-sliding-mirror", "wardrobe", "wardrobe_sliding", "Шкаф-купе с зеркальными дверями", [2200, 650, 2400], { texture: "mdf_film_gloss", handles: 2 }),
+  make("w-open-double", "wardrobe", "shelf", "Открытая гардеробная секция с двумя штангами", [1600, 550, 2400]),
+  make("w-corner-open", "wardrobe", "wardrobe_corner", "Открытая угловая гардеробная система", [1600, 1200, 2400]),
+  make("w-mezzanine", "wardrobe", "wardrobe", "Шкаф с антресольной секцией", [1800, 600, 2600], { handles: 4 }),
+  make("w-drawer-wardrobe", "wardrobe", "wardrobe", "Шкаф с внутренними выдвижными ящиками", [1200, 600, 2300], { drawers: 3, handles: 4 }),
+  make("w-shoe", "wardrobe", "cabinet", "Обувной шкаф с откидными секциями", [1000, 350, 1200], { drawers: 3, handles: 3 }),
+  make("w-narrow", "wardrobe", "wardrobe", "Узкий шкаф для прихожей", [500, 450, 2100], { handles: 1 }),
+  make("w-dressing-table", "wardrobe", "cabinet", "Комод с зеркалом для гардеробной", [1200, 500, 900], { drawers: 5, handles: 5, countertop: "quartz" }),
+  make("w-overhead", "wardrobe", "cabinet", "Антресольный шкаф", [1800, 600, 600], { y: 1800, doorCount: 3, handles: 3 }),
+];
+
 // These identifiers intentionally match the original accordion sections in
 // index.html. The library extends those sections instead of creating new ones.
 export const HARD_FURNITURE_CATEGORIES = [
@@ -42,6 +120,7 @@ export const HARD_FURNITURE_LIBRARY = Object.freeze([
   make("k-tall-fridge", "kitchen", "wardrobe", "Пенал для встроенного холодильника", [600, 650, 2200], { texture: "mdf_film_matte" }),
   make("k-island", "kitchen", "cabinet", "Остров с рабочей зоной", [1600, 900, 900], { texture: "mdf_film_matte", countertop: "quartz", drawers: 4, handles: 4 }),
   make("k-peninsula", "kitchen", "cabinet", "Полуостров с барной зоной", [1400, 700, 900], { texture: "mdf_film_matte", countertop: "skif", drawers: 2, handles: 2 }),
+  ...KITCHEN_VARIATIONS,
 
   // Гостиная.
   make("l-tv", "living", "cabinet", "ТВ-тумба", [1600, 420, 520], { drawers: 2, handles: 2 }),
@@ -64,6 +143,7 @@ export const HARD_FURNITURE_LIBRARY = Object.freeze([
   make("w-dresser", "wardrobe", "cabinet", "Комод с шестью ящиками", [1400, 480, 900], { drawers: 6, handles: 6 }),
   make("w-linen", "wardrobe", "wardrobe", "Бельевой шкаф", [800, 500, 2100]),
   make("w-island", "wardrobe", "cabinet", "Гардеробный остров", [1400, 800, 950], { drawers: 6, handles: 6, countertop: "quartz" }),
+  ...WARDROBE_VARIATIONS,
 
   // Ванная.
   make("ba-vanity-drawers", "bathroom", "cabinet", "Тумба под раковину с ящиками", [800, 500, 700], { texture: "mdf_film_matte", y: 150, drawers: 2, handles: 2 }),

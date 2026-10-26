@@ -87,3 +87,16 @@ def test_no_reminder_before_the_window_or_after_stage_is_reached(catalog_client:
         rows = list(session.scalars(select(CrmStageReminder)))
         assert len(rows) == 1
         assert rows[0].order_id == waiting["id"]
+
+
+def test_calendar_marks_stage_deadline_in_russian_workdays(catalog_client: TestClient, catalog_engine):
+    order = _order(catalog_client, {"технолог": 3})
+    Session = sessionmaker(bind=catalog_engine)
+    with Session() as session:
+        row = session.get(CrmProductionOrder, order["id"])
+        row.created_at = datetime(2026, 10, 12, 6, 0, tzinfo=timezone.utc)
+        session.commit()
+    response = catalog_client.get("/crm/calendar")
+    assert response.status_code == 200
+    deadlines = [item for item in response.json() if item.get("calendar_kind") == "stage_deadline" and item["id"] == order["id"]]
+    assert any(item.get("calendar_stage") == "технолог" and item["status_changed_at"].startswith("2026-10-15") for item in deadlines)

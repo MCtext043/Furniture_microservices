@@ -169,3 +169,7 @@ def ensure_cutting_runner(auth: AuthContext = Depends(get_auth_context)) -> None
 
 def ensure_assets_writer(auth: AuthContext = Depends(get_auth_context)) -> None:
     _require_roles(auth, ("assets:write",), "Недостаточно прав для загрузки файлов")
+
+
+def ensure_order_files_writer(auth: AuthContext = Depends(get_auth_context)) -> None:
+    _require_roles(auth, ("assets:write", "crm:orders:write", "catalog:write"), "Недостаточно прав для загрузки файлов заказа")

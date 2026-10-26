@@ -98,3 +98,8 @@ def test_update_staff_roles(auth_client: TestClient, auth_engine):
     )
     assert updated.status_code == 200
     assert updated.json()["roles"] == ["admin", "crm:orders:write", "crm:orders:delete"]
+
+
+def test_assembler_preset_has_calendar_price_and_file_permissions():
+    roles = normalize_staff_roles(["assembler"])
+    assert roles == ["admin", "calendar:read", "crm:assembler_price:read", "assets:write"]

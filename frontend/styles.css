@@ -289,6 +289,9 @@ html { scroll-padding-top: 5.5rem; }
 [data-theme="dark"] .product-art-photo { background: #3d3731; }
 .product-art-photo img { display: block; width: 100%; height: 230px; object-fit: cover; transition: transform 400ms ease; }
 .product-card:hover .product-art-photo img { transform: scale(1.025); }
+.product-art-3d { background: #eee9e3; padding: 0; }
+.catalog-3d-thumbnail { display: block; width: 100%; height: 230px; }
+[data-theme="dark"] .product-art-3d { background: #3d3731; }
 .product-card .card-body { display: flex; flex-direction: column; padding: 1.3rem; }
 .product-card .badge { width: max-content; padding: 0.4rem 0.6rem; border-radius: 999px; background: var(--color-surface-soft) !important; color: var(--color-brown) !important; font-size: 0.63rem; }
 [data-theme="dark"] .product-card .badge { background: #342f28 !important; color: #f2ede2 !important; }
@@ -395,6 +398,32 @@ html { scroll-padding-top: 5.5rem; }
 .control-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 .control-actions .btn { flex: 1 1 auto; min-height: 40px; padding: 0.55rem 0.8rem; font-size: 0.75rem; }
 .save-actions .btn-primary { flex-grow: 1.25; }
+.object-catalog-trigger {
+  display: grid;
+  grid-template-columns: 2.7rem minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 70px;
+  margin: 0.2rem 0 1rem;
+  padding: 0.65rem 0.8rem 0.65rem 0.65rem;
+  border: 1px solid rgba(122, 87, 28, 0.44);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, #f5d66f, #d8a73d);
+  box-shadow: 0 8px 18px rgba(76, 50, 17, 0.18);
+  color: #2a2116;
+  text-align: left;
+  transition: transform var(--transition), box-shadow var(--transition), filter var(--transition);
+}
+.object-catalog-trigger:hover { box-shadow: 0 12px 24px rgba(76, 50, 17, 0.26); color: #2a2116; filter: brightness(1.03); transform: translateY(-1px); }
+.object-catalog-trigger:active { box-shadow: 0 4px 10px rgba(76, 50, 17, 0.18); transform: translateY(0); }
+.object-catalog-trigger:focus-visible { outline: 3px solid var(--color-secondary); outline-offset: 3px; }
+.object-catalog-trigger-icon { display: grid; width: 2.7rem; height: 2.7rem; place-items: center; border: 1px solid rgba(42, 33, 22, 0.2); border-radius: 12px; background: rgba(255, 255, 255, 0.46); box-shadow: inset 0 1px rgba(255,255,255,.5); font-size: 0.76rem; font-weight: 900; letter-spacing: 0.05em; }
+.object-catalog-trigger-copy { min-width: 0; }
+.object-catalog-trigger-copy strong, .object-catalog-trigger-copy small { display: block; }
+.object-catalog-trigger-copy strong { font-size: 0.9rem; font-weight: 850; line-height: 1.2; }
+.object-catalog-trigger-copy small { margin-top: 0.18rem; color: rgba(42, 33, 22, 0.76); font-size: 0.7rem; line-height: 1.2; }
+.object-catalog-trigger-arrow { font-size: 1.35rem; font-weight: 500; line-height: 1; }
+[data-theme="dark"] .object-catalog-trigger { border-color: rgba(246, 214, 111, 0.46); background: linear-gradient(135deg, #d7a73e, #a8741f); color: #1f1911; }
 .object-list, .planner-hint { margin-top: 1rem; padding: 0.75rem 0.85rem; border-radius: var(--radius-sm); background: var(--color-surface-soft); color: var(--color-muted); font-size: 0.72rem; }
 [data-theme="dark"] .object-list,
 [data-theme="dark"] .planner-hint { background: #342f28; color: #c0b69e; }
@@ -517,6 +546,8 @@ html { scroll-padding-top: 5.5rem; }
 .object-picker-item strong { display: block; font-size: 0.9rem; line-height: 1.2; color: var(--color-text); }
 .object-picker-item small { display: block; color: var(--color-muted); font-size: 0.72rem; line-height: 1.25; }
 .object-picker-icon-wrap { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border: 1px solid var(--color-border); border-radius: 14px; background: rgba(255, 255, 255, 0.72); }
+.object-picker-model { display: block; width: 82px; height: 62px; flex: 0 0 82px; overflow: hidden; border: 1px solid var(--color-border); border-radius: 12px; background: #eee9e3; }
+.furniture-3d-thumbnail { display: block; width: 100%; height: 100%; }
 [data-theme="dark"] .object-picker-icon-wrap { background: #3a342c; border-color: rgba(232, 220, 196, 0.16); }
 .object-picker-icon { width: 22px; height: 22px; color: var(--color-brown); }
 [data-theme="dark"] .object-picker-icon { color: #e8dcc4; }
@@ -673,6 +704,8 @@ html { scroll-padding-top: 5.5rem; }
   .control-section { padding: 1.25rem; }
   .control-actions { flex-direction: column; }
   .control-actions .btn { width: 100%; }
+  .object-catalog-trigger { min-height: 76px; margin-bottom: 1.15rem; padding-right: 0.9rem; }
+  .object-catalog-trigger-copy small { font-size: 0.72rem; }
   .planner-preview { min-height: 520px; }
   .viewer-3d, .viewer-3d canvas { min-height: 360px; height: 360px; }
   /* The axis instructions are essential on touch screens: keep the primary
@@ -689,6 +722,7 @@ html { scroll-padding-top: 5.5rem; }
   .object-transform-heading { align-items:flex-start; flex-direction:column; gap:.35rem; }
   .object-transform-actions [role="status"] { width:100%; margin-left:0; }
   .object-library-search { align-items:stretch; flex-direction:column; gap:.25rem; }
+  .object-library-search .search-field { flex:0 0 auto; width:100%; }
   .object-library-count { padding:0; white-space:normal; }
   .cookie-consent { align-items:stretch; flex-direction:column; }
   .cookie-consent-actions { display:grid; grid-template-columns:1fr 1fr; }
@@ -1210,8 +1244,14 @@ html.is-scene-immersive .planner-diagnostics {
 .planner-estimate .cost-panel { min-height:0; padding:0; border:0; background:transparent; }
 .planner-estimate .estimate-card,.planner-estimate .hardware-constructor { background:var(--color-surface); }
 .planner-estimate .tier-select-card { height:100%; padding:1.1rem; border-color:var(--color-border)!important; border-radius:var(--radius-md); background:var(--color-surface)!important; color:var(--color-text); }
+.planner-estimate .tier-select-card { min-height: 228px; display: flex; flex-direction: column; }
+.planner-estimate .tier-select-card .cost-highlight { margin-top: auto; }
 .planner-estimate .tier-select-card.border-primary { border-color:var(--color-primary)!important; box-shadow:0 0 0 2px color-mix(in srgb,var(--color-primary) 24%,transparent)!important; }
 .planner-estimate .tier-select-card:focus-visible { outline:3px solid var(--color-secondary); outline-offset:3px; }
+@media (max-width: 767.98px) {
+  .planner-estimate .tier-select-card { min-height: 0; }
+  .planner-estimate .tier-select-card .cost-highlight { margin-top: .65rem; }
+}
 .estimate-disclaimer { margin:1rem 0 0; color:#cfc3b9; font-size:.72rem; line-height:1.5; }
 .cost-panel[aria-busy="true"] { opacity:.72; }
 @media (max-width: 991.98px) {

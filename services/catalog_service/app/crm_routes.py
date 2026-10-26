@@ -18,13 +18,15 @@ from common.jwt_auth import (
     ensure_crm_dicts_writer,
     ensure_crm_order_delete,
     ensure_crm_order_writer,
+    ensure_order_files_writer,
     ensure_crm_status,
     ensure_superadmin,
 )
 
 from .db import get_session
 from .order_email import enqueue_order_email
-from .stage_reminders import lead_days, normalize_stage_workdays
+from .stage_reminders import lead_days, normalize_stage_workdays, moscow_date
+from common.ru_workdays import add_working_days
 from .crm_admin_fields import (
     CRM_DICT_FIELDS,
     DEFAULT_FIELD_OPTIONS,
@@ -255,6 +257,7 @@ ADMIN_ORDER_FIELDS = (
     "signature_date",
     "delivery_date",
     "price_admin",
+    "price_assembler",
     "advance_paid",
     "balance_due",
     "email",
@@ -326,6 +329,7 @@ def _admin_fields_from_order(order: CrmProductionOrder) -> dict:
         "signature_date": _date_iso(order.signature_date),
         "delivery_date": _date_iso(order.delivery_date),
         "price_admin": _money(order.price_admin),
+        "price_assembler": _money(order.price_assembler),
         "advance_paid": _money(order.advance_paid),
         "balance_due": _money(order.balance_due),
         "email": order.email or "",
@@ -369,6 +373,7 @@ def _order_out(
     order: CrmProductionOrder,
     *,
     calendar_kind: str | None = None,
+    calendar_stage: str | None = None,
 ) -> CrmOrderOut:
     lines = _order_material_lines(session, order.id)
     return CrmOrderOut(
@@ -396,6 +401,7 @@ def _order_out(
         created_at=_iso(order.created_at),
         status_changed_at=_iso(order.status_changed_at),
         calendar_kind=calendar_kind,
+        calendar_stage=calendar_stage,
         stage_workdays={key: int(value) for key, value in (order.stage_workdays or {}).items()},
         custom_fields={key: str(value) for key, value in (order.custom_fields or {}).items() if value},
         **_admin_fields_from_order(order),
@@ -564,7 +570,7 @@ def update_warehouse_stock(
 @router.post(
     "/warehouse/{material_id}/adjust",
     response_model=CrmWarehouseStockOut,
-    dependencies=[Depends(ensure_crm_order_writer)],
+    dependencies=[Depends(ensure_order_files_writer)],
 )
 @crm_db_guard
 def adjust_warehouse_stock(
@@ -586,7 +592,7 @@ def adjust_warehouse_stock(
 @router.post(
     "/warehouse/purchases",
     response_model=list[CrmWarehouseStockOut],
-    dependencies=[Depends(ensure_crm_order_writer)],
+    dependencies=[Depends(ensure_order_files_writer)],
 )
 @crm_db_guard
 def create_purchase(payload: CrmPurchaseCreate, session: Session = Depends(get_session)) -> list[CrmWarehouseStockOut]:
@@ -1346,6 +1352,14 @@ def calendar_orders(session: Session = Depends(get_session)) -> list[CrmOrderOut
                 tzinfo=timezone.utc,
             ).isoformat()
             items.append(delivery_item)
+        started = moscow_date(order.created_at)
+        for stage, days in (order.stage_workdays or {}).items():
+            deadline_item = _order_out(session, order, calendar_kind="stage_deadline", calendar_stage=stage)
+            deadline = add_working_days(started, int(days))
+            deadline_item.status_changed_at = datetime(
+                deadline.year, deadline.month, deadline.day, 12, 0, tzinfo=timezone.utc
+            ).isoformat()
+            items.append(deadline_item)
     return items
 
 

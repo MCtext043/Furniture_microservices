@@ -1,0 +1,7345 @@
+import { FurnitureRegistry } from "/planner-modules/furniture/FurnitureRegistry.js";
+import { registerBuiltInFurniture } from "/planner-modules/furniture/definitions/index.js";
+import { migrateLegacyObject, migrateScene, toLegacyObject } from "/planner-modules/persistence/migrations.js";
+import { serializeScene } from "/planner-modules/persistence/SceneSerializer.js";
+import { RenderScheduler } from "/planner-modules/core/RenderScheduler.js";
+import { ResourceManager } from "/planner-modules/core/ResourceManager.js";
+import { HistoryManager } from "/planner-modules/interaction/HistoryManager.js";
+import { findCollisions } from "/planner-modules/interaction/CollisionController.js";
+import { PlannerDiagnostics } from "/planner-modules/core/PlannerDiagnostics.js";
+import { ModelAssetLoader } from "/planner-modules/furniture/ModelAssetLoader.js";
+import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis, snapPlacement3D } from "/planner-modules/interaction/Transform3D.js";
+import { HARD_FURNITURE_CATEGORIES, HARD_FURNITURE_LIBRARY } from "/planner-modules/catalog/HardFurnitureCatalog.js";
+import { CostQuoteController } from "/planner-modules/pricing/CostQuoteController.js";
+import { DEFAULT_SPREADSHEET_PRICING, estimateSpreadsheetPrices, quantitiesFromScene } from "/planner-modules/pricing/SpreadsheetPricing.js";
+
+const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
+const APP_MODE = window.APP_MODE || "user";
+const LS_API = "furniture_gateway_url";
+const LS_TOKEN = "furniture_jwt";
+const LS_CUSTOMER = "furniture_customer_name";
+const LS_THEME = "woodcraft_theme";
+const LS_PRIVACY_PREFS = "petrov_privacy_preferences_v1";
+
+const state = {
+  categories: [],
+  products: [],
+  activeCategory: "all",
+  search: "",
+  cart: [],
+  roles: [],
+  deliverySettings: null,
+  deliveryQuote: null,
+  pricingConfig: null,
+  deliveryAddress: "",
+  projectId: null,
+  sceneRevision: 0,
+  three: null,
+  cuttingParts: [],
+  roomConfig: { width: 6000, length: 5000, height: 2800 },
+  roomFinish: {
+    floorTexture: "wood_oak",
+    wallTexture: "wall_default",
+    useCustomColors: false,
+    floorColor: "#E9DCCB",
+    wallColor: "#FAF7F2",
+  },
+  objects3d: [],
+  objectEditor: { section: "living", elevation: 0, drawers: null, handles: null, variant: "" },
+  drag: { active: false, id: null, startX: 0, startY: 0, baseX: 0, baseZ: 0, scale: 1, wrapEl: null, chipEl: null },
+  rotate: { active: false, id: null, centerX: 0, centerY: 0, startAngle: 0, baseRotation: 0, scale: 1, wrapEl: null, chipEl: null },
+  cameraDrag: { active: false, startX: 0, startY: 0, moved: false, pendingTheta: 0, pendingPhi: 0, raf: 0, pointers: new Map(), pinchDistance: 0, pinching: false },
+  transform3d: { axis: null, active: false, pointerId: null, id: null, startPoint: null, startOrigin: null, startItem: null, historyBefore: null, moved: false },
+  lastCutResult: null,
+  cuttingQuoteCache: null,
+  selectedCutJobId: null,
+  crm: { orders: [], warehouse: [], movements: [], whTab: "stock", purchaseDraft: [], procurementByOrder: {}, tab: "active", dictionaries: [], editingOrderId: null },
+  calendar: { year: null, month: null },
+  staff: [],
+  staffPermissionCatalog: [],
+  userOrders: [],
+  userProjects: [],
+  selectedTier: "comfort",
+  hardwareLevels: { hinges: 50, slides: 50, facades: 50, handles: 50 },
+  selected3dObjectId: null,
+  productPhotoUrls: {},
+  productPhotoGalleries: {},
+  wishlistIds: new Set(),
+  commercePending: new Set(),
+  plannerStep: 1,
+};
+
+const productEditorPhotos = { existing: [], pending: [], removed: [] };
+
+const demoCategories = ["Готовые проекты", "Кухни", "Шкафы", "Гостиные", "Спальни", "Офис", "Детские"];
+const demoProducts = [
+  ["Кухня Nord Line", "DEMO-KITCHEN-NORD", "FurniPro", "Кухни", 184900, 4, "Полный кухонный гарнитур с матовыми фасадами", "🍽️", "linear-gradient(135deg,#bf7b45,#f1c27d)"],
+  ["Кровать Loft Oak", "DEMO-BED-LOFT", "OakLab", "Спальни", 75900, 3, "Двуспальная кровать с ящиками хранения", "🛏️", "linear-gradient(135deg,#855e42,#d9b88f)"],
+  ["Стол Manager Pro", "DEMO-DESK-MANAGER", "OfficeWood", "Офис", 35900, 12, "Рабочий стол с кабель-каналом", "💼", "linear-gradient(135deg,#293241,#98c1d9)"],
+  ["Стеллаж Kids Castle", "DEMO-KIDS-CASTLE", "HappyRoom", "Детские", 28900, 7, "Цветной стеллаж для книг и игрушек", "🧸", "linear-gradient(135deg,#ff9a9e,#fad0c4)"],
+  ["Комод Scandi 120", "DEMO-DRESSER-SCANDI", "NordHome", "Спальни", 42900, 6, "Комод с натуральной шпонированной отделкой", "🪵", "linear-gradient(135deg,#8d6e63,#d7ccc8)"],
+  ["ТВ-тумба Cinema", "DEMO-TV-CINEMA", "MediaRoom", "Гостиные", 38900, 9, "Низкая тумба для гостиной с мягким закрыванием", "📺", "linear-gradient(135deg,#434343,#b7b7b7)"],
+  ["Кухонный остров Chef", "DEMO-ISLAND-CHEF", "FurniPro", "Кухни", 112000, 2, "Остров с барной зоной и местом хранения", "🥘", "linear-gradient(135deg,#4b6cb7,#182848)"],
+  ["Переговорный стол Team", "DEMO-TABLE-TEAM", "OfficeWood", "Офис", 58900, 4, "Большой стол для переговорной", "🤝", "linear-gradient(135deg,#134e5e,#71b280)"],
+  ["Гардероб Family", "DEMO-WARD-FAMILY", "WoodLine", "Шкафы", 129900, 2, "Встроенный гардероб с индивидуальным наполнением", "👗", "linear-gradient(135deg,#42275a,#734b6d)"],
+  ["Детская система Nova", "DEMO-KIDS-NOVA", "HappyRoom", "Детские", 96900, 3, "Кровать, шкаф и рабочая зона в одном стиле", "🚀", "linear-gradient(135deg,#36d1dc,#5b86e5)"],
+  ["Лофт кухня", "DEMO-LOFT-KITCHEN", "Loft kitchen", "Готовые проекты", 100000, 2, "Кухонный гарнитур в стиле лофт", "📺", "linear-gradient(135deg,#36d3ec,#5b36d1)"],
+];
+
+const RETIRED_DEMO_SKUS = ["DEMO-SOFA-CLOUD", "DEMO-WARD-VERONA"];
+
+const defaultCuttingParts = [
+  { name: "Боковина шкафа", width: 600, height: 2200, quantity: 2, allow_rotation: true },
+  { name: "Полка", width: 560, height: 400, quantity: 5, allow_rotation: true },
+  { name: "Фасад", width: 480, height: 720, quantity: 4, allow_rotation: false },
+  { name: "Цоколь", width: 1800, height: 120, quantity: 1, allow_rotation: true },
+];
+
+const PRICING_TIERS = [
+  { key: "standard", title: "Вариант 0", material: 1, hardware: 1, labor: 1 },
+  { key: "comfort", title: "Вариант 1 · МДФ + Boyard", material: 1, hardware: 1, labor: 1 },
+  { key: "premium", title: "Вариант 2 · МДФ + JAT", material: 1, hardware: 1, labor: 1 },
+  { key: "luxury", title: "Вариант 3 · Эмаль + Blum", material: 1, hardware: 1, labor: 1 },
+];
+
+const HARDWARE_SLIDERS = [
+  { key: "hinges", title: "Петли", cheap: "Обычные", quality: "С доводчиком" },
+  { key: "slides", title: "Направляющие", cheap: "Шариковые", quality: "Полного выдвижения" },
+  { key: "facades", title: "Фасады", cheap: "ЛДСП", quality: "МДФ / эмаль" },
+  { key: "handles", title: "Ручки", cheap: "Стандарт", quality: "Премиум" },
+];
+
+const TIER_MATERIAL_PROFILES = {
+  standard: {
+    qty: { panel: 1, edge: 1, hinges: 1, slides: 1, screws: 1 },
+    specs: ["ЛДСП 16 мм", "Кромка ПВХ 0,4 мм", "Петли стандарт", "Направляющие шариковые"],
+    patterns: { panel: "дсп", edge: "кромка", hinges: "петл", slides: "направляющ", screws: "саморез" },
+  },
+  comfort: {
+    qty: { panel: 1.06, edge: 1.14, hinges: 1.35, slides: 1.45, screws: 1.1 },
+    specs: ["ЛДСП 18 мм, улучшенный декор", "Кромка ПВХ 2 мм", "Петли с доводчиком", "Направляющие полного выдвижения"],
+    patterns: { panel: "дсп", edge: "кромка", hinges: "петл", slides: "направляющ", screws: "саморез" },
+  },
+  premium: {
+    qty: { panel: 1.18, edge: 1.28, hinges: 1.65, slides: 1.8, screws: 1.2 },
+    specs: ["МДФ фасады / шпон", "Кромка ABS 2 мм", "Blum / Hettich", "Tandembox / Legrabox"],
+    patterns: { panel: "дсп", edge: "кромка", hinges: "blum", slides: "направляющ", screws: "саморез" },
+  },
+  luxury: {
+    qty: { panel: 1, edge: 1, hinges: 1, slides: 1, screws: 1 },
+    specs: ["Эмаль", "Кромка ABS 2 мм", "Blum", "Фурнитура премиум"],
+    patterns: { panel: "дсп", edge: "кромка", hinges: "blum", slides: "направляющ", screws: "саморез" },
+  },
+};
+
+const CRM_STATUSES = [
+  "черновой замер",
+  "чистовой замер",
+  "выбор цветов",
+  "технолог",
+  "распил-фасады-фурнитура",
+  "доставлено",
+  "собрано",
+  "готово",
+];
+const CRM_STATUS_DONE = "готово";
+const CRM_STATUS_DONE_ALIASES = new Set(["готово", "готова"]);
+
+const typePresets = {
+  wardrobe: { title: "Шкаф", color: "#8B5E3C", texture: "wood" },
+  wardrobe_sliding: { title: "Шкаф-купе", color: "#8B5E3C", texture: "wood" },
+  wardrobe_corner: { title: "Угловой шкаф", color: "#8B5E3C", texture: "wood" },
+  cabinet: { title: "Тумба", color: "#A67C52", texture: "wood" },
+  shelf: { title: "Стеллаж", color: "#B08968", texture: "wood" },
+  table: { title: "Стол", color: "#4B5563", texture: "metal" },
+  sofa: { title: "Диван", color: "#64748B", texture: "fabric" },
+  armchair: { title: "Кресло", color: "#64748B", texture: "fabric" },
+  chair: { title: "Стул", color: "#64748B", texture: "fabric" },
+  bed: { title: "Кровать", color: "#8B5E3C", texture: "fabric" },
+  bath_vanity: { title: "Тумба с раковиной", color: "#D6CEC3", texture: "mdf" },
+  bathroom_sink: { title: "Раковина", color: "#F3F4F6", texture: "stone" },
+  bathroom_bathtub: { title: "Ванна", color: "#F3F4F6", texture: "stone" },
+  bathroom_shower: { title: "Душевая кабина", color: "#CBD5E1", texture: "glass" },
+  bathroom_toilet: { title: "Унитаз", color: "#F3F4F6", texture: "stone" },
+  bathroom_mirror: { title: "Зеркало", color: "#CBD5E1", texture: "glass" },
+  appliance_fridge: { title: "Холодильник", color: "#D1D5DB", texture: "metal" },
+  appliance_washer: { title: "Стиральная машина", color: "#D1D5DB", texture: "metal" },
+  appliance_dishwasher: { title: "Посудомоечная машина", color: "#D1D5DB", texture: "metal" },
+  appliance_microwave: { title: "СВЧ", color: "#9CA3AF", texture: "metal" },
+  appliance_hood: { title: "Вытяжка", color: "#9CA3AF", texture: "metal" },
+  appliance_hood_builtin: { title: "Вытяжка (встраиваемая)", color: "#9CA3AF", texture: "metal" },
+  appliance_stove_gas: { title: "Плита (газовая)", color: "#6B7280", texture: "metal" },
+  appliance_stove_electric: { title: "Плита (электро)", color: "#6B7280", texture: "metal" },
+  appliance_oven: { title: "Духовой шкаф", color: "#6B7280", texture: "metal" },
+};
+
+const texturePresets = {
+  wood_dark_oak: { title: "Темный дуб", material: "wood", color: "#6B4423" },
+  wood_oak: { title: "Светлый дуб", material: "wood", color: "#B68655" },
+  board_black: { title: "Черное ДСП", material: "board", color: "#222629" },
+  board_white: { title: "Белое ДСП", material: "board", color: "#E8E8E4" },
+  fabric_gray: { title: "Серая ткань", material: "fabric", color: "#6C757D" },
+  metal_graphite: { title: "Графитовый металл", material: "metal", color: "#495057" },
+  mdf_matte: { title: "МДФ матовый", material: "mdf", color: "#B8AEA2" },
+  laminate_grey: { title: "Ламинат серый", material: "laminate", color: "#85898B" },
+  countertop: { title: "Столешница", material: "stone", color: "#C4B5A3" },
+  mdf_film_matte: { title: "МДФ в плёнке (матовая)", material: "mdf", color: "#C8BBAA" },
+  mdf_film_gloss: { title: "МДФ в плёнке (глянцевая)", material: "laminate", color: "#D7CBBF" },
+  mdf_enamel: { title: "МДФ в эмали", material: "mdf", color: "#E5E7EB" },
+  mdf_plastic: { title: "МДФ пластик", material: "laminate", color: "#9CA3AF" },
+  countertop_skif: { title: "Скиф", material: "laminate", color: "#B9B3AA" },
+  countertop_kedr: { title: "Кедр", material: "wood", color: "#9B6B4A" },
+  countertop_quartz: { title: "Кварцевый агломерат", material: "stone", color: "#D6CEC3" },
+  countertop_compact: { title: "Компакт плита", material: "laminate", color: "#8B8F93" },
+  ceramic_white: { title: "Санитарная керамика · белая", material: "ceramic", color: "#F7F8F8" },
+  ceramic_black: { title: "Санитарная керамика · графит", material: "ceramic", color: "#303438" },
+  stone_marble: { title: "Литьевой мрамор", material: "stone", color: "#E5E1D9" },
+  glass_clear: { title: "Закалённое прозрачное стекло", material: "glass", color: "#CDE7EE" },
+  chrome_polished: { title: "Полированный хром", material: "metal", color: "#D6DCE1" },
+};
+
+function plannerSnapshot() {
+  return { roomConfig: structuredClone(state.roomConfig), roomFinish: structuredClone(state.roomFinish), objects3d: structuredClone(state.objects3d), selected3dObjectId: state.selected3dObjectId };
+}
+
+function applyPlannerSnapshot(snapshot) {
+  state.roomConfig = structuredClone(snapshot.roomConfig);
+  state.roomFinish = structuredClone(snapshot.roomFinish);
+  state.objects3d = structuredClone(snapshot.objects3d);
+  state.selected3dObjectId = snapshot.selected3dObjectId;
+  if (state.three) rebuildRoomGeometry();
+  renderObjects3dList(); renderRoomTopView(); renderRoom3D(); renderBom(); syncSelectedObjectControls();
+}
+
+const plannerHistory = new HistoryManager(applyPlannerSnapshot);
+const modelAssetLoader = new ModelAssetLoader({
+  async parse(buffer) {
+    const { GLTFLoader } = await import("https://esm.sh/three@0.160.0/examples/jsm/loaders/GLTFLoader.js");
+    return new Promise((resolve, reject) => new GLTFLoader().parse(buffer, "", (gltf) => resolve(gltf.scene), reject));
+  },
+  clone(scene) {
+    const copy = scene.clone(true);
+    copy.traverse((node) => {
+      if (node.geometry) node.geometry = node.geometry.clone();
+      if (Array.isArray(node.material)) node.material = node.material.map((material) => material.clone());
+      else if (node.material) node.material = node.material.clone();
+    });
+    return copy;
+  },
+});
+
+const materialOptions = Object.fromEntries(Object.entries(texturePresets).map(([value, preset]) => [value, preset.title]));
+const bathroomFixtureTypes = new Set(["bathroom_sink", "bathroom_bathtub", "bathroom_toilet"]);
+const allowedMaterialsByType = {
+  bathroom_sink: ["ceramic_white", "ceramic_black", "stone_marble"],
+  bathroom_bathtub: ["ceramic_white", "stone_marble"],
+  bathroom_toilet: ["ceramic_white", "ceramic_black"],
+  bathroom_shower: ["glass_clear", "metal_graphite", "chrome_polished"],
+  bathroom_mirror: ["glass_clear"],
+  bath_vanity: ["mdf_film_matte", "mdf_film_gloss", "mdf_enamel", "mdf_plastic", "wood_oak", "wood_dark_oak", "stone_marble"],
+};
+
+function allowedObjectMaterials(type) {
+  if (allowedMaterialsByType[type]) return allowedMaterialsByType[type];
+  if (String(type).startsWith("appliance_")) return ["metal_graphite", "board_white", "board_black"];
+  if (["sofa", "armchair", "chair", "bed"].includes(type)) return ["fabric_gray", "wood_oak", "wood_dark_oak"];
+  return ["wood_dark_oak", "wood_oak", "mdf_matte", "board_white", "board_black", "laminate_grey", "countertop", "metal_graphite", "mdf_film_matte", "mdf_film_gloss", "mdf_enamel", "mdf_plastic"];
+}
+
+function sameOriginApiBase() {
+  const { protocol, hostname, port } = window.location;
+  const gatewayPorts = new Set(["8080", "8001", "8002", "8000", "443", "80"]);
+  if (!port || gatewayPorts.has(port)) {
+    return `${protocol}//${hostname}${port ? `:${port}` : ""}`;
+  }
+  return null;
+}
+
+function apiBase() {
+  const onPage = sameOriginApiBase();
+  if (onPage) return onPage.replace(/\/$/, "");
+  const input = document.getElementById("apiBase");
+  if (input?.value?.trim()) return input.value.trim().replace(/\/$/, "");
+  const stored = localStorage.getItem(LS_API);
+  if (stored?.trim()) return stored.trim().replace(/\/$/, "");
+  return defaultApiBase().replace(/\/$/, "");
+}
+
+function defaultApiBase() {
+  const { protocol, hostname, port } = window.location;
+  if (!port || port === "8080" || port === "8001" || port === "8002" || port === "443") {
+    return `${protocol}//${hostname}${port ? `:${port}` : ""}`;
+  }
+  const host = hostname || "127.0.0.1";
+  return `http://${host}:8080`;
+}
+
+function token() {
+  return localStorage.getItem(LS_TOKEN) || "";
+}
+
+function setToken(value) {
+  value ? localStorage.setItem(LS_TOKEN, value) : localStorage.removeItem(LS_TOKEN);
+  updateAccountButton();
+}
+
+const APP_TIME_ZONE = "Asia/Dubai";
+
+function hasRole(role) {
+  if (state.roles.includes("superadmin") || state.roles.includes("*")) return true;
+  return state.roles.includes(role);
+}
+
+function isAdmin() {
+  return state.roles.includes("admin") || state.roles.includes("superadmin") || state.roles.includes("*");
+}
+
+function isSuperAdmin() {
+  return state.roles.includes("superadmin") || state.roles.includes("*");
+}
+
+function canDeleteRecords() {
+  return hasRole("records:delete");
+}
+
+function canManageCatalog() {
+  return hasRole("catalog:write");
+}
+
+function canRunCutting() {
+  return hasRole("cutting:run");
+}
+
+function canEditCrmOrders() {
+  return hasRole("crm:orders:write") || hasRole("catalog:write");
+}
+
+function canChangeCrmStatus() {
+  return hasRole("crm:orders:status") || hasRole("catalog:write");
+}
+
+function canDeleteCrmOrders() {
+  return hasRole("crm:orders:delete") || canDeleteRecords();
+}
+
+function canEditCrmDicts() {
+  return hasRole("crm:dicts:write") || hasRole("catalog:write");
+}
+
+function canAccessAdminPanel() {
+  return isAdmin() && (
+    canManageCatalog()
+    || canRunCutting()
+    || canEditCrmOrders()
+    || canChangeCrmStatus()
+    || hasRole("planner:write")
+    || hasRole("assets:write")
+    || isSuperAdmin()
+  );
+}
+
+function cartUserId() {
+  return customerName() || "guest";
+}
+
+async function refreshAuth() {
+  state.roles = [];
+  if (!token()) return;
+  try {
+    const me = await api("GET", "/auth/me", undefined, true);
+    state.roles = me.roles || [];
+    if (me.username) setCustomerName(me.username);
+  } catch {
+    setToken("");
+    setCustomerName("");
+    state.roles = [];
+  }
+}
+
+function customerName() {
+  return localStorage.getItem(LS_CUSTOMER) || "";
+}
+
+function isAuthenticated() {
+  return Boolean(token() && customerName());
+}
+
+function setCustomerName(value) {
+  value ? localStorage.setItem(LS_CUSTOMER, value) : localStorage.removeItem(LS_CUSTOMER);
+  updateAccountButton();
+}
+
+function updateAccountButton() {
+  const btn = document.getElementById("accountBtn");
+  const name = customerName();
+  if (btn) btn.textContent = name ? `Кабинет: ${name}` : "Войти";
+  document.getElementById("accountGuest")?.classList.toggle("d-none", Boolean(name));
+  document.getElementById("accountMember")?.classList.toggle("d-none", !name);
+  const memberName = document.getElementById("accountMemberName");
+  if (memberName) memberName.textContent = name;
+  const ordersTab = document.getElementById("userOrdersTabNav");
+  const projectsTab = document.getElementById("userProjectsTabNav");
+  if (ordersTab) ordersTab.classList.toggle("d-none", !name);
+  if (projectsTab) projectsTab.classList.toggle("d-none", !name);
+  if (name && APP_MODE !== "admin") {
+    loadUserOrders();
+    loadUserProjects();
+  }
+  updatePlannerAuthUi();
+}
+
+function logoutCustomer() {
+  setToken("");
+  setCustomerName("");
+  state.roles = [];
+  state.cart = [];
+  state.wishlistIds.clear();
+  state.userOrders = [];
+  state.userProjects = [];
+  renderCart();
+  renderProducts();
+  toast("Вы вышли из аккаунта");
+}
+
+function updatePlannerAuthUi() {
+  const hint = document.getElementById("plannerHint");
+  if (!hint) return;
+  if (!isAuthenticated()) {
+    hint.textContent = "Войдите, чтобы сохранить проект на сервере.";
+  } else if (hint.textContent.includes("Войдите")) {
+    hint.textContent = "Проект можно сохранить или отправить в работу.";
+  }
+}
+
+function applyTheme(theme) {
+  const resolved = theme === "dark" ? "dark" : "light";
+  document.documentElement.dataset.theme = resolved;
+  localStorage.setItem(LS_THEME, resolved);
+  const button = document.getElementById("themeToggle");
+  if (button) {
+    button.querySelector("span").textContent = resolved === "dark" ? "☀" : "☾";
+    button.setAttribute("aria-label", resolved === "dark" ? "Включить светлую тему" : "Включить тёмную тему");
+  }
+}
+
+function toggleTheme() {
+  applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+}
+
+function money(value) {
+  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "RUB", maximumFractionDigits: 0 }).format(value);
+}
+
+function toast(message, ok = true) {
+  const host = document.querySelector(".toast-container");
+  if (!host) return;
+  const el = document.createElement("div");
+  el.className = `toast align-items-center text-bg-${ok ? "success" : "danger"} border-0 show`;
+  el.setAttribute("role", ok ? "status" : "alert");
+  el.innerHTML = `<div class="d-flex"><div class="toast-body">${escapeHtml(message)}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Закрыть уведомление"></button></div>`;
+  host.appendChild(el);
+  setTimeout(() => el.remove(), 4500);
+}
+
+function requireFormConsent(inputId, message) {
+  const input = document.getElementById(inputId);
+  if (!input || input.checked) return true;
+  input.focus();
+  input.closest(".legal-consent-check")?.classList.add("is-invalid");
+  input.addEventListener("change", () => input.closest(".legal-consent-check")?.classList.remove("is-invalid"), { once: true });
+  toast(message, false);
+  return false;
+}
+
+function readPrivacyPreferences() {
+  try {
+    const value = JSON.parse(localStorage.getItem(LS_PRIVACY_PREFS) || "null");
+    return value?.version === 1 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function savePrivacyPreferences({ functional = false, analytics = false } = {}) {
+  const value = { version: 1, necessary: true, functional: !!functional, analytics: !!analytics, updatedAt: new Date().toISOString() };
+  localStorage.setItem(LS_PRIVACY_PREFS, JSON.stringify(value));
+  document.cookie = `petrov_privacy_v1=${encodeURIComponent(JSON.stringify({ functional: value.functional, analytics: value.analytics }))}; Max-Age=31536000; Path=/; SameSite=Lax`;
+  const banner = document.getElementById("cookieConsent");
+  if (banner) banner.hidden = true;
+  window.dispatchEvent(new CustomEvent("petrov:privacy-preferences", { detail: value }));
+  return value;
+}
+
+function initCookieConsent() {
+  const banner = document.getElementById("cookieConsent");
+  const functional = document.getElementById("cookieFunctional");
+  const analytics = document.getElementById("cookieAnalytics");
+  const current = readPrivacyPreferences();
+  if (functional) functional.checked = !!current?.functional;
+  if (analytics) analytics.checked = !!current?.analytics;
+  if (banner) banner.hidden = !!current;
+  document.querySelectorAll("[data-cookie-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const allowAll = button.dataset.cookieChoice === "all";
+      savePrivacyPreferences({ functional: allowAll, analytics: allowAll });
+    });
+  });
+  document.getElementById("saveCookiePreferences")?.addEventListener("click", () => {
+    savePrivacyPreferences({ functional: !!functional?.checked, analytics: !!analytics?.checked });
+    const modal = document.getElementById("cookiePreferencesModal");
+    if (modal) bootstrap.Modal.getInstance(modal)?.hide();
+  });
+  document.querySelectorAll("[data-open-cookie-settings]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const preferences = readPrivacyPreferences();
+      if (functional) functional.checked = !!preferences?.functional;
+      if (analytics) analytics.checked = !!preferences?.analytics;
+      const modal = document.getElementById("cookiePreferencesModal");
+      if (modal) bootstrap.Modal.getOrCreateInstance(modal).show();
+    });
+  });
+}
+
+function extractErrorText(error) {
+  if (!error) return "";
+  if (typeof error === "string") return error;
+  const detail = error.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item) => item?.msg || item?.message || "").filter(Boolean).join(". ");
+  }
+  if (detail && typeof detail === "object") return detail.message || "";
+  return String(error.message || error || "");
+}
+
+function formatApiError(error) {
+  let raw = extractErrorText(error).replace(/^"|"$/g, "").trim();
+  const status = Number(error?.status || error?.statusCode);
+  const map = [
+    [/unauthorized/i, "Войдите в аккаунт"],
+    [/not authenticated/i, "Войдите в аккаунт"],
+    [/missing bearer/i, "Войдите в аккаунт"],
+    [/missing or invalid credentials/i, "Войдите в аккаунт"],
+    [/invalid credentials/i, "Неверный логин или пароль"],
+    [/token expired/i, "Сессия истекла. Войдите снова"],
+    [/invalid token/i, "Недействительный токен. Войдите снова"],
+    [/forbidden/i, "Недостаточно прав для этого действия"],
+    [/insufficient role/i, "Недостаточно прав для этого действия"],
+    [/not found/i, "Данные не найдены"],
+    [/internal server error/i, "Ошибка сервера. Попробуйте позже"],
+    [/bad gateway/i, "Сервис временно недоступен. Попробуйте позже"],
+    [/service unavailable/i, "Сервис временно недоступен. Попробуйте позже"],
+    [/gateway timeout/i, "Сервер не ответил вовремя. Попробуйте ещё раз"],
+    [/failed to fetch/i, "Нет связи с сервером. Проверьте интернет"],
+    [/networkerror/i, "Нет связи с сервером. Проверьте интернет"],
+    [/abort(ed)?/i, "Превышено время ожидания. Попробуйте ещё раз"],
+  ];
+  for (const [pattern, text] of map) {
+    if (pattern.test(raw)) return text;
+  }
+  if (!raw || /^(ok|error|unauthorized|forbidden)$/i.test(raw)) {
+    if (status === 401) return "Войдите в аккаунт";
+    if (status === 403) return "Недостаточно прав для этого действия";
+    if (status === 404) return "Данные не найдены";
+    if (status >= 500) return "Ошибка сервера. Попробуйте позже";
+  }
+  return raw;
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function normalizeSearch(value) {
+  return String(value || "").trim().toLocaleLowerCase("ru-RU").replace(/\s+/g, " ");
+}
+
+let pdfMakeLoadPromise = null;
+function loadExternalScript(src) {
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) { existing.addEventListener("load", resolve, { once: true }); existing.addEventListener("error", reject, { once: true }); return; }
+    const script = document.createElement("script");
+    script.src = src;
+    script.onload = resolve;
+    script.onerror = () => reject(new Error(`Не удалось загрузить ${src}`));
+    document.head.appendChild(script);
+  });
+}
+
+async function ensurePdfMake() {
+  if (window.pdfMake) return true;
+  if (!pdfMakeLoadPromise) {
+    pdfMakeLoadPromise = loadExternalScript("https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/pdfmake.min.js")
+      .then(() => loadExternalScript("https://cdn.jsdelivr.net/npm/pdfmake@0.2.15/build/vfs_fonts.min.js"));
+  }
+  try { await pdfMakeLoadPromise; return Boolean(window.pdfMake); }
+  catch (error) { pdfMakeLoadPromise = null; toast("Не удалось загрузить модуль PDF", false); return false; }
+}
+
+function makeId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (window.crypto?.getRandomValues) {
+    window.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function isLikelyCorruptText(value, { treatEmptyAsCorrupt = false } = {}) {
+  if (value == null) return treatEmptyAsCorrupt;
+  const s = String(value);
+  if (s.trim() === "") return treatEmptyAsCorrupt;
+  if (s.includes("\uFFFD")) return true;
+  const q = (s.match(/\?/g) || []).length;
+  if (q === 0) return false;
+  const coreLen = s.replace(/\s/g, "").length;
+  if (coreLen === 0) return true;
+  if (q >= Math.max(2, coreLen * 0.12)) return true;
+  if (q >= 1 && coreLen <= 8) return true;
+  return false;
+}
+
+function isLikelyCorruptCategoryName(name) {
+  return isLikelyCorruptText(name, { treatEmptyAsCorrupt: true });
+}
+
+function demoRowForSku(sku) {
+  return demoProducts.find((r) => r[1] === sku) || null;
+}
+
+function displayProductTitle(p) {
+  const row = demoRowForSku(p.sku);
+  if (row && isLikelyCorruptText(p.name)) return row[0];
+  return p.name;
+}
+
+function displayProductBrand(p) {
+  const row = demoRowForSku(p.sku);
+  if (row && isLikelyCorruptText(p.brand)) return row[2];
+  return p.brand;
+}
+
+function displayProductDescription(p) {
+  const row = demoRowForSku(p.sku);
+  const desc = p.description ?? "";
+  if (row && isLikelyCorruptText(desc)) return row[6];
+  return desc;
+}
+
+function inferDemoCategoryLabel(categoryId, products) {
+  if (categoryId == null) return null;
+  const tallies = new Map();
+  for (const p of products) {
+    if (p.category_id !== categoryId) continue;
+    const row = demoProducts.find((r) => r[1] === p.sku);
+    if (!row) continue;
+    const label = row[3];
+    tallies.set(label, (tallies.get(label) || 0) + 1);
+  }
+  if (!tallies.size) return null;
+  return [...tallies.entries()].sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function visibleCategories() {
+  return state.categories.filter((cat) => !isLikelyCorruptCategoryName(cat.name));
+}
+
+async function purgeCorruptCategories() {
+  if (!canManageCatalog()) return;
+  const corrupt = state.categories.filter((cat) => isLikelyCorruptCategoryName(cat.name));
+  if (!corrupt.length) return;
+  for (const cat of corrupt) {
+    const label = inferDemoCategoryLabel(cat.id, state.products);
+    let targetId = null;
+    if (label) {
+      try {
+        targetId = await resolveCategoryIdByName(label, { reload: false });
+      } catch {
+        targetId = null;
+      }
+    }
+    for (const product of state.products.filter((p) => p.category_id === cat.id)) {
+      try {
+        await api("PATCH", `/catalog/products/${product.id}`, { category_id: targetId }, true);
+        product.category_id = targetId;
+      } catch (error) {
+        console.warn("Product reassign skipped:", product.id, error);
+      }
+    }
+    try {
+      await requestNoBody("DELETE", `/catalog/categories/${cat.id}`, true);
+    } catch (error) {
+      console.warn("Category delete skipped:", cat.id, error);
+    }
+  }
+  state.categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
+}
+
+async function repairCorruptDemoProducts(products) {
+  for (const p of products) {
+    const row = demoRowForSku(p.sku);
+    if (!row) continue;
+    const [dName, , dBrand, , , , dDesc] = row;
+    const patch = {};
+    if (isLikelyCorruptText(p.name)) patch.name = dName;
+    if (isLikelyCorruptText(p.brand)) patch.brand = dBrand;
+    if (isLikelyCorruptText(p.description ?? "")) patch.description = dDesc;
+    if (!Object.keys(patch).length) continue;
+    try {
+      await api("PATCH", `/catalog/products/${p.id}`, patch, true);
+    } catch (error) {
+      console.warn("Product repair skipped:", p.id, p.sku, error);
+    }
+  }
+}
+
+async function api(method, path, body, withAuth = false) {
+  const headers = { Accept: "application/json" };
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  if (withAuth && token()) headers.Authorization = `Bearer ${token()}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  let response;
+  try {
+    response = await fetch(`${apiBase()}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error(`Таймаут API (${apiBase()}). Проверьте, что Docker запущен.`);
+    }
+    throw new Error(`Нет связи с API ${apiBase()}: ${error.message || error}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = text;
+  }
+  if (!response.ok) {
+    const detail = payload?.detail;
+    const message =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((item) => item?.msg || item?.message || "").filter(Boolean).join(". ")
+          : detail?.message
+            ? detail.message
+            : detail
+              ? JSON.stringify(detail)
+              : text || response.statusText;
+    const error = new Error(message);
+    error.status = response.status;
+    error.detail = detail;
+    throw error;
+  }
+  return payload;
+}
+
+async function validateToken() {
+  if (!token()) return false;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const response = await fetch(`${apiBase()}/auth/me`, {
+      headers: { Authorization: `Bearer ${token()}` },
+      signal: controller.signal,
+    });
+    return response.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function requestNoBody(method, path, withAuth = false) {
+  const headers = { Accept: "application/json" };
+  if (withAuth && token()) headers.Authorization = `Bearer ${token()}`;
+  const response = await fetch(`${apiBase()}${path}`, { method, headers });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if (!response.ok) {
+    const error = new Error(payload?.detail || text || response.statusText);
+    error.status = response.status;
+    error.detail = payload?.detail;
+    throw error;
+  }
+  return payload;
+}
+
+async function autoLogin() {
+  if (APP_MODE !== "admin") return;
+  if (token() && (await validateToken())) {
+    await refreshAuth();
+    return;
+  }
+  setToken("");
+  setCustomerName("");
+  state.roles = [];
+}
+
+async function loginCustomer() {
+  const username = document.getElementById("loginUser").value.trim();
+  const password = document.getElementById("loginPass").value;
+  if (!username || !password) {
+    toast("Введите логин и пароль", false);
+    return;
+  }
+  try {
+    const data = await api("POST", "/auth/token", { username, password });
+    setToken(data.access_token);
+    setCustomerName(username);
+    await refreshAuth();
+    if (APP_MODE === "admin" && !canManageCatalog() && !canRunCutting()) {
+      setToken("");
+      setCustomerName("");
+      state.roles = [];
+      toast("Нет прав администратора. Используйте учётную запись admin.", false);
+      return;
+    }
+    toast(`Добро пожаловать, ${username}`);
+    if (APP_MODE === "admin") {
+      closeAccountModal();
+      bootAdminPanel();
+    } else {
+      await Promise.all([loadCommerceState(), loadUserProjects(), loadUserOrders()]);
+    }
+  } catch (error) {
+    toast(`Не удалось войти: ${formatApiError(error)}`, false);
+  }
+}
+
+async function registerCustomer() {
+  const username = document.getElementById("regUser").value.trim();
+  const password = document.getElementById("regPass").value;
+  if (!requireFormConsent("registrationConsent", "Подтвердите согласие на обработку данных и условия использования")) return;
+  if (!username || password.length < 8) {
+    toast("Введите имя и пароль минимум 8 символов", false);
+    return;
+  }
+  try {
+    await api("POST", "/auth/register", { username, password });
+    document.getElementById("loginUser").value = username;
+    document.getElementById("loginPass").value = password;
+    toast("Аккаунт создан. Выполняем вход.");
+    await loginCustomer();
+  } catch (error) {
+    toast(`Не удалось зарегистрироваться: ${formatApiError(error)}`, false);
+  }
+}
+
+function closeAccountModal() {
+  const modal = bootstrap.Modal.getInstance(document.getElementById("accountModal"));
+  if (modal) modal.hide();
+}
+
+async function removeRetiredDemoProducts() {
+  let products;
+  try {
+    products = await api("GET", "/catalog/products?limit=100");
+  } catch {
+    return;
+  }
+  for (const p of products) {
+    if (!RETIRED_DEMO_SKUS.includes(p.sku)) continue;
+    try {
+      await requestNoBody("DELETE", `/catalog/products/${p.id}`, true);
+    } catch (error) {
+      console.warn("Retired product delete skipped:", p.sku, error);
+    }
+  }
+}
+
+async function seedDemoData() {
+  await removeRetiredDemoProducts();
+  let categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
+  let products = await api("GET", "/catalog/products?limit=100");
+  if (canManageCatalog()) {
+    state.categories = categories;
+    state.products = products;
+    await purgeCorruptCategories();
+    categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
+  }
+  const byName = new Map(categories.map((c) => [c.name, c]));
+
+  for (const name of demoCategories) {
+    if (!byName.has(name)) {
+      try {
+        const created = await api("POST", "/catalog/categories", { name }, true);
+        byName.set(name, created);
+      } catch (error) {
+        console.warn("Category seed skipped:", name, error);
+      }
+    }
+  }
+
+  products = await api("GET", "/catalog/products?limit=100");
+  const existingSku = new Set(products.map((p) => p.sku));
+
+  for (const [name, sku, brand, catName, price, stock, description] of demoProducts) {
+    if (existingSku.has(sku)) continue;
+    const cat = byName.get(catName);
+    try {
+      await api(
+        "POST",
+        "/catalog/products",
+        {
+          name,
+          sku,
+          brand,
+          description,
+          price,
+          category_id: cat?.id || null,
+          stock,
+          is_active: true,
+        },
+        true
+      );
+    } catch (error) {
+      console.warn("Product seed skipped:", sku, error);
+    }
+  }
+
+  products = await api("GET", "/catalog/products?limit=100");
+  await repairCorruptDemoProducts(products);
+  if (canManageCatalog()) {
+    await purgeCorruptCategories();
+  }
+}
+
+async function loadCatalog() {
+  state.categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
+  state.products = await api("GET", "/catalog/products?limit=100&sort_by=name");
+  if (canManageCatalog()) {
+    await purgeCorruptCategories();
+    state.categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
+    state.products = await api("GET", "/catalog/products?limit=100&sort_by=name");
+  }
+  await hydrateProductPhotoUrls(state.products);
+  const statP = document.getElementById("statProducts");
+  const statC = document.getElementById("statCategories");
+  if (statP) statP.textContent = state.products.length;
+  if (statC) statC.textContent = state.categories.length;
+  renderCategories();
+  if (APP_MODE === "admin") renderAdminCatalogTable();
+  else {
+    renderProducts();
+    await loadCommerceState();
+  }
+}
+
+function demoMeta(product) {
+  const row = demoProducts.find((p) => p[1] === product.sku);
+  return {
+    icon: row?.[7] || "🪑",
+    gradient: row?.[8] || "linear-gradient(135deg,#8d6e63,#d7ccc8)",
+  };
+}
+
+function demoCategoryLabelForCategoryId(categoryId) {
+  return inferDemoCategoryLabel(categoryId, state.products);
+}
+
+function categoryName(id) {
+  const raw = visibleCategories().find((c) => c.id === id)?.name;
+  if (raw) return raw;
+  const inferred = demoCategoryLabelForCategoryId(id);
+  if (inferred) return inferred;
+  return "Каталог";
+}
+
+// function renderCategories() {
+//   const host = document.getElementById("categoryPills");
+//   if (!host) return;
+//   const counts = new Map();
+//   state.products.forEach((p) => counts.set(p.category_id, (counts.get(p.category_id) || 0) + 1));
+//   const buttons = [`<button class="category-pill ${state.activeCategory === "all" ? "active" : ""}" data-cat="all" aria-pressed="${state.activeCategory === "all"}">Все <span>${state.products.length}</span></button>`];
+//   for (const cat of visibleCategories()) {
+//     const count = counts.get(cat.id) || 0;
+//     if (!count) continue;
+//     const isActive = state.activeCategory === String(cat.id);
+//     buttons.push(`<button class="category-pill ${isActive ? "active" : ""}" data-cat="${cat.id}" aria-pressed="${isActive}">${escapeHtml(categoryName(cat.id))} <span>${count}</span></button>`);
+//   }
+//   host.innerHTML = buttons.join("");
+//   host.querySelectorAll("[data-cat]").forEach((btn) => {
+//     btn.addEventListener("click", () => {
+//       state.activeCategory = btn.dataset.cat;
+//       renderCategories();
+//       if (APP_MODE === "admin") renderAdminCatalogTable();
+//       else renderProducts();
+//     });
+//   });
+// }
+
+function renderCategories() {
+  const host = document.getElementById("categoryPills");
+  if (!host) return;
+  const counts = new Map();
+  state.products.forEach((p) => counts.set(p.category_id, (counts.get(p.category_id) || 0) + 1));
+  const buttons = [`<button class="category-pill ${state.activeCategory === "all" ? "active" : ""}" data-cat="all" aria-pressed="${state.activeCategory === "all"}">Все <span>${state.products.length}</span></button>`];
+  
+  // Сортируем категории: "Готовые проекты" поднимаем наверх
+  const sortedCategories = visibleCategories().sort((a, b) => {
+    const nameA = categoryName(a.id);
+    const nameB = categoryName(b.id);
+    if (nameA === "Готовые проекты") return -1;
+    if (nameB === "Готовые проекты") return 1;
+    return 0;
+  });
+
+  for (const cat of sortedCategories) {
+    const count = counts.get(cat.id) || 0;
+    if (!count) continue;
+    
+    const cName = categoryName(cat.id);
+    const isActive = state.activeCategory === String(cat.id);
+    
+    // Проверяем, является ли категория "Готовыми проектами", чтобы дать ей особый класс
+    const isSpecial = cName === "Готовые проекты" ? "category-yellow" : "";
+    
+    buttons.push(`<button class="category-pill ${isSpecial} ${isActive ? "active" : ""}" data-cat="${cat.id}" aria-pressed="${isActive}">${escapeHtml(cName)} <span>${count}</span></button>`);
+  }
+  if (APP_MODE !== "admin") {
+    const wishCount = state.wishlistIds.size;
+    const wishActive = state.activeCategory === "wishlist";
+    const wishButton = `<button class="category-pill category-wishlist ${wishActive ? "active" : ""}" data-cat="wishlist" aria-pressed="${wishActive}">Избранное <span>${wishCount}</span></button>`;
+    const readyIndex = buttons.findIndex((html) => html.includes("category-yellow"));
+    buttons.splice(readyIndex >= 0 ? readyIndex + 1 : 1, 0, wishButton);
+  }
+  host.innerHTML = buttons.join("");
+  host.querySelectorAll("[data-cat]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.activeCategory = btn.dataset.cat;
+      renderCategories();
+      if (APP_MODE === "admin") renderAdminCatalogTable();
+      else renderProducts();
+    });
+  });
+}
+
+
+
+function filteredProducts() {
+  const q = normalizeSearch(state.search);
+  return state.products.map((p, index) => {
+    const catOk = state.activeCategory === "all"
+      || (state.activeCategory === "wishlist" && state.wishlistIds.has(p.id))
+      || String(p.category_id) === state.activeCategory;
+    if (!catOk) return null;
+    if (!q) return { product: p, score: 0, index };
+    const title = normalizeSearch(displayProductTitle(p));
+    const category = normalizeSearch(categoryName(p.category_id));
+    const description = normalizeSearch(displayProductDescription(p));
+    const brand = normalizeSearch(displayProductBrand(p));
+    let score = -1;
+    if (title === q) score = 500;
+    else if (title.startsWith(q)) score = 400;
+    else if (title.includes(q)) score = 300;
+    else if (category.includes(q)) score = 200;
+    else if (description.includes(q)) score = 100;
+    else if (brand.includes(q) || normalizeSearch(p.sku).includes(q)) score = 50;
+    return score < 0 ? null : { product: p, score, index };
+  }).filter(Boolean).sort((a, b) => b.score - a.score || a.index - b.index).map((row) => row.product);
+}
+
+function renderProducts() {
+  const host = document.getElementById("productGrid");
+  if (!host) return;
+  host.setAttribute("aria-busy", "false");
+  const products = filteredProducts();
+  if (!products.length) {
+    const emptyWishlist = state.activeCategory === "wishlist";
+    host.innerHTML = `<div class="col-12"><div class="empty-state"><strong>${emptyWishlist ? "В избранном пока пусто" : "Подходящих товаров не нашлось"}</strong><p>${emptyWishlist ? "Нажмите сердечко на карточке товара — он появится здесь." : "Попробуйте изменить запрос или вернуться ко всем категориям."}</p><button class="btn btn-secondary" type="button" data-reset-catalog>Показать все товары</button></div></div>`;
+    host.querySelector("[data-reset-catalog]")?.addEventListener("click", () => {
+      state.search = "";
+      state.activeCategory = "all";
+      const searchInput = document.getElementById("searchInput");
+      if (searchInput) searchInput.value = "";
+      renderCategories();
+      renderProducts();
+    });
+    return;
+  }
+  const adminActions = APP_MODE === "admin";
+  host.innerHTML = products
+    .map((p) => {
+      const meta = demoMeta(p);
+      const imgUrl = state.productPhotoUrls[p.id];
+      const art = imgUrl
+        ? `<div class="product-art product-art-photo"><img src="${imgUrl}" alt="${escapeHtml(displayProductTitle(p))}" width="640" height="460" loading="lazy" decoding="async"></div>`
+        : `<div class="product-art" style="background:${meta.gradient}" role="img" aria-label="${escapeHtml(displayProductTitle(p))}">${meta.icon}</div>`;
+      const actionButtons = adminActions
+        ? `<div class="btn-group">
+            <button class="btn btn-outline-primary btn-sm" data-edit="${p.id}">Изменить</button>
+            <button class="btn btn-outline-danger btn-sm" data-del="${p.id}">Скрыть</button>
+          </div>`
+        : `<div class="product-actions">
+            <button class="btn btn-quiet btn-sm wishlist-button ${state.wishlistIds.has(p.id) ? "is-active" : ""}" data-wish="${p.id}" aria-pressed="${state.wishlistIds.has(p.id)}" aria-label="${state.wishlistIds.has(p.id) ? "Удалить" : "Добавить"} ${escapeHtml(displayProductTitle(p))} ${state.wishlistIds.has(p.id) ? "из" : "в"} избранное" title="Избранное">${state.wishlistIds.has(p.id) ? "♥" : "♡"}</button>
+            <button class="btn btn-primary btn-sm" data-cart="${p.id}" ${Number(p.stock) <= 0 ? "disabled" : ""}>${state.cart.some((item) => item.id === p.id) ? "✓ Добавлено" : Number(p.stock) <= 0 ? "Нет в наличии" : "В корзину"}</button>
+          </div>`;
+      return `
+        <div class="col-md-6 col-xl-4">
+          <article class="card product-card h-100" data-open-product="${p.id}" role="button" tabindex="0">
+            ${art}
+            <div class="card-body d-flex flex-column">
+              <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                <span class="badge text-bg-light">${escapeHtml(categoryName(p.category_id))}</span>
+                <span class="stock-status ${Number(p.stock) <= 0 ? "is-empty" : ""}">${Number(p.stock) <= 0 ? "Нет в наличии" : `В наличии: ${p.stock}`}</span>
+              </div>
+              <h3 class="card-title">${escapeHtml(displayProductTitle(p))}</h3>
+              <div class="product-brand">${escapeHtml(displayProductBrand(p))}</div>
+              <p class="card-text flex-grow-1">${escapeHtml(displayProductDescription(p) || "Практичное мебельное решение для дома.")}</p>
+              <div class="d-flex justify-content-between align-items-center">
+                <span class="price">${money(Number(p.price))}</span>
+                ${actionButtons}
+              </div>
+            </div>
+          </article>
+        </div>`;
+    })
+    .join("");
+
+  host.querySelectorAll("[data-open-product]").forEach((card) => {
+    const open = () => openProductCard(Number(card.dataset.openProduct));
+    card.addEventListener("click", (event) => {
+      if (event.target.closest("button")) return;
+      open();
+    });
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        open();
+      }
+    });
+  });
+  if (adminActions) {
+    host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openProductEditor(Number(btn.dataset.edit));
+    }));
+    host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      deactivateProduct(Number(btn.dataset.del));
+    }));
+  } else {
+    host.querySelectorAll("[data-cart]").forEach((btn) => btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      addToCart(Number(btn.dataset.cart), btn);
+    }));
+    host.querySelectorAll("[data-wish]").forEach((btn) => btn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      toggleWishlist(Number(btn.dataset.wish), btn);
+    }));
+  }
+}
+
+async function addToCart(id, button = null) {
+  if (!customerName()) {
+    toast("Войдите, чтобы добавить товар в корзину", false);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
+    return;
+  }
+  const pendingKey = `cart:${id}`;
+  if (state.commercePending.has(pendingKey)) return;
+  const product = state.products.find((p) => p.id === id);
+  if (!product) return;
+  state.commercePending.add(pendingKey);
+  if (button) { button.disabled = true; button.textContent = "Добавляем..."; }
+  try {
+    const serverItem = await api("POST", `/catalog/users/${cartUserId()}/cart/items`, { product_id: id, quantity: 1 }, true);
+    const existing = state.cart.find((item) => item.id === id);
+    if (existing) {
+      existing.qty = serverItem.quantity;
+      existing.cartItemId = serverItem.id;
+    } else {
+      state.cart.push({ ...product, qty: serverItem.quantity, cartItemId: serverItem.id });
+    }
+    state.deliveryQuote = null;
+    renderCart();
+    renderProducts();
+    toast(`${displayProductTitle(product)} добавлен в корзину`);
+  } catch (error) {
+    if (button) { button.disabled = false; button.textContent = "В корзину"; }
+    toast(`Не удалось добавить в корзину: ${formatApiError(error)}`, false);
+  } finally {
+    state.commercePending.delete(pendingKey);
+  }
+}
+
+async function toggleWishlist(id, button = null) {
+  if (!customerName()) {
+    toast("Войдите, чтобы сохранить в избранное", false);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
+    return;
+  }
+  const pendingKey = `wish:${id}`;
+  if (state.commercePending.has(pendingKey)) return;
+  const product = state.products.find((p) => p.id === id);
+  const removing = state.wishlistIds.has(id);
+  state.commercePending.add(pendingKey);
+  if (button) button.disabled = true;
+  try {
+    await requestNoBody(removing ? "DELETE" : "POST", `/catalog/users/${cartUserId()}/wishlist/products/${id}`, true);
+    removing ? state.wishlistIds.delete(id) : state.wishlistIds.add(id);
+    renderCategories();
+    renderProducts();
+    toast(`${product ? displayProductTitle(product) : "Товар"} ${removing ? "удалён из" : "добавлен в"} избранное`);
+  } catch (error) {
+    if (button) button.disabled = false;
+    toast(`Не удалось обновить избранное: ${formatApiError(error)}`, false);
+  } finally {
+    state.commercePending.delete(pendingKey);
+  }
+}
+
+async function loadCommerceState() {
+  if (APP_MODE !== "user" || !isAuthenticated() || !state.products.length) return;
+  try {
+    const [cartItems, wishlistItems] = await Promise.all([
+      api("GET", `/catalog/users/${cartUserId()}/cart/items`, undefined, true),
+      api("GET", `/catalog/users/${cartUserId()}/wishlist`, undefined, true),
+    ]);
+    state.cart = cartItems.map((item) => {
+      const product = state.products.find((row) => row.id === item.product_id);
+      return product ? { ...product, qty: item.quantity, cartItemId: item.id } : null;
+    }).filter(Boolean);
+    state.wishlistIds = new Set(wishlistItems.map((item) => item.product_id));
+    renderCart();
+    renderCategories();
+    renderProducts();
+  } catch (error) {
+    console.warn("Commerce state unavailable:", formatApiError(error));
+  }
+}
+
+async function removeCartItem(productId) {
+  const item = state.cart.find((row) => row.id === productId);
+  if (!item) return;
+  try {
+    if (item.cartItemId) await requestNoBody("DELETE", `/catalog/users/${cartUserId()}/cart/items/${item.cartItemId}`, true);
+    state.cart = state.cart.filter((row) => row.id !== productId);
+    state.deliveryQuote = null;
+    renderCart();
+    renderProducts();
+  } catch (error) {
+    toast(`Не удалось удалить товар: ${formatApiError(error)}`, false);
+  }
+}
+
+function cartSubtotal() {
+  return state.cart.reduce((sum, item) => sum + Number(item.price) * item.qty, 0);
+}
+
+async function loadDeliverySettings() {
+  if (APP_MODE !== "user") return;
+  try {
+    state.deliverySettings = await api("GET", "/catalog/delivery/settings");
+  } catch {
+    state.deliverySettings = { free_delivery_threshold: 0, delivery_price_per_km: 0, fixed_delivery_fee: 3000 };
+  }
+}
+
+async function quoteDelivery() {
+  const addressEl = document.getElementById("deliveryAddress");
+  const address = (addressEl?.value || state.deliveryAddress || "").trim();
+  if (!state.cart.length) {
+    toast("Корзина пуста", false);
+    return;
+  }
+  if (address.length < 5) {
+    toast("Укажите адрес доставки (город, улица, дом)", false);
+    return;
+  }
+  state.deliveryAddress = address;
+  const subtotal = cartSubtotal();
+  try {
+    state.deliveryQuote = await api("POST", "/catalog/delivery/quote", { address, subtotal });
+    renderCart();
+    toast("Стоимость доставки рассчитана");
+  } catch (error) {
+    state.deliveryQuote = null;
+    renderCart();
+    toast(`Не удалось рассчитать доставку: ${formatApiError(error)}`, false);
+  }
+}
+
+let sbpPollTimer = null;
+
+function stopSbpPoll() {
+  if (sbpPollTimer) {
+    clearInterval(sbpPollTimer);
+    sbpPollTimer = null;
+  }
+}
+
+function cartGrandTotal() {
+  const subtotal = cartSubtotal();
+  const delivery = state.deliveryQuote ? numOrZero(state.deliveryQuote.delivery_price) : 0;
+  return Math.round((subtotal + delivery) * 100) / 100;
+}
+
+function sbpQrImageUrl(qrData) {
+  return `https://api.qrserver.com/v1/create-qr-code/?size=300x300&ecc=M&margin=12&data=${encodeURIComponent(qrData)}`;
+}
+
+function renderSbpPaySuccess(payment) {
+  const body = document.getElementById("sbpPayBody");
+  if (!body) return;
+  body.innerHTML = `
+    <div class="py-3">
+      <div class="display-4 text-success mb-2" aria-hidden="true">✓</div>
+      <h3 class="h5">Оплата прошла успешно</h3>
+      <p class="text-muted mb-1">Сумма: <strong>${money(payment.amount_rub)}</strong></p>
+      ${payment.ebl27 ? `<p class="small text-muted mb-0">Операция СБП: ${escapeHtml(payment.ebl27)}</p>` : ""}
+    </div>`;
+}
+
+function renderSbpPayPending(payment) {
+  const body = document.getElementById("sbpPayBody");
+  if (!body) return;
+  const qrData = payment.qr_data || payment.payment_url || "";
+  const isNarrow = window.matchMedia("(max-width: 768px)").matches;
+  body.innerHTML = `
+    <div class="d-flex justify-content-center align-items-center gap-2 mb-3">
+      <img src="assets/logo_sbp.png" alt="СБП" width="48" height="48" style="object-fit:contain" onerror="this.style.display='none'" />
+      <strong>Оплата через СБП</strong>
+    </div>
+    <p class="mb-2">Сумма к оплате: <strong>${money(payment.amount_rub)}</strong></p>
+    <p class="small text-muted">${escapeHtml(payment.payment_purpose || "")}</p>
+    <div class="mx-auto mb-3 p-2 bg-white rounded border d-inline-block" style="min-width:200px;min-height:200px">
+      ${qrData ? `<img src="${sbpQrImageUrl(qrData)}" width="300" height="300" alt="QR код СБП" class="img-fluid" style="max-width:300px;width:100%;height:auto" />` : `<span class="text-danger">QR не получен</span>`}
+    </div>
+    <p class="small text-start mb-2">Откройте мобильное приложение вашего банка, выберите «Оплатить по QR» и отсканируйте код.</p>
+    <p class="small text-muted text-start mb-3">Расчёты осуществляет НКО ЭЛПЛАТ. Контакт: *2717 (с мобильного бесплатно).</p>
+    ${
+      qrData
+        ? `<a class="btn w-100 mb-2" id="btnSbpOpenLink" href="${escapeHtml(qrData)}" target="_blank" rel="noopener"
+            style="background-color:#1d1346;color:#D0CFD8;display:inline-flex;align-items:center;justify-content:center;gap:10px">
+            <img src="assets/logo_sbp.png" alt="" height="28" onerror="this.style.display='none'" />
+            Оплатить
+          </a>`
+        : ""
+    }
+    ${isNarrow ? `<p class="small text-muted">На телефоне удобнее нажать «Оплатить» — откроется приложение банка.</p>` : ""}
+    <div class="small text-muted" id="sbpPayStatusHint">Ожидаем оплату…</div>
+    <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="btnSbpRefresh">Проверить статус</button>
+  `;
+  document.getElementById("btnSbpRefresh")?.addEventListener("click", () => refreshSbpPayment(payment.id, true));
+}
+
+async function refreshSbpPayment(paymentId, manual = false) {
+  try {
+    const payment = await api("POST", `/catalog/payments/sbp/${paymentId}/refresh`);
+    if (payment.status === "paid") {
+      stopSbpPoll();
+      renderSbpPaySuccess(payment);
+      toast("Оплата получена");
+      return payment;
+    }
+    if (payment.status === "failed") {
+      stopSbpPoll();
+      const hint = document.getElementById("sbpPayStatusHint");
+      if (hint) hint.textContent = "Платёж отклонён. Создайте новый QR.";
+      if (manual) toast("Платёж не прошёл", false);
+      return payment;
+    }
+    const hint = document.getElementById("sbpPayStatusHint");
+    if (hint) hint.textContent = manual ? "Пока не оплачено — можно подождать или оплатить по QR." : "Ожидаем оплату…";
+    return payment;
+  } catch (error) {
+    if (manual) toast(formatApiError(error), false);
+    return null;
+  }
+}
+
+async function startSbpCheckout() {
+  if (APP_MODE !== "user") return;
+  if (!requireFormConsent("checkoutConsent", "Подтвердите условия продажи и согласие на обработку данных")) return;
+  if (!state.cart.length) {
+    toast("Корзина пуста", false);
+    return;
+  }
+  const total = cartGrandTotal();
+  if (total < 1) {
+    toast("Минимальная сумма оплаты через СБП — 1 ₽", false);
+    return;
+  }
+  const body = document.getElementById("sbpPayBody");
+  const modalEl = document.getElementById("sbpPayModal");
+  if (!body || !modalEl) {
+    toast("Форма оплаты не найдена", false);
+    return;
+  }
+  stopSbpPoll();
+  body.innerHTML = `<div class="text-muted py-4">Создаём QR СБП…</div>`;
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  try {
+    const payment = await api("POST", "/catalog/payments/sbp", {
+      amount_rub: total,
+      payment_purpose: "Оплата заказа мебели Петров",
+      email: "",
+      user_id: cartUserId(),
+      customer_name: customerName() || "",
+    });
+    if (!payment.qr_data) {
+      body.innerHTML = `<div class="text-danger">Не удалось получить ссылку оплаты. Проверьте настройки Элплат.</div>`;
+      return;
+    }
+    renderSbpPayPending(payment);
+    sbpPollTimer = setInterval(() => refreshSbpPayment(payment.id, false), 4000);
+  } catch (error) {
+    body.innerHTML = `<div class="text-danger text-start">${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+document.getElementById("sbpPayModal")?.addEventListener("hidden.bs.modal", () => stopSbpPoll());
+
+async function loadDeliverySettingsAdmin() {
+  if (APP_MODE !== "admin" || !canManageCatalog()) return;
+  try {
+    const data = await api("GET", "/catalog/settings/delivery", undefined, true);
+    document.getElementById("freeDeliveryThreshold").value = data.free_delivery_threshold;
+    document.getElementById("deliveryPricePerKm").value = data.delivery_price_per_km;
+    document.getElementById("warehouseAddress").value = data.warehouse_address || "";
+    const hint = document.getElementById("warehouseCoordsHint");
+    if (hint) {
+      hint.textContent = data.warehouse_lat
+        ? `Координаты склада: ${data.warehouse_lat.toFixed(5)}, ${data.warehouse_lon.toFixed(5)}`
+        : "Координаты склада будут определены при сохранении адреса.";
+    }
+  } catch (error) {
+    toast(`Не удалось загрузить настройки доставки: ${formatApiError(error)}`, false);
+  }
+}
+
+async function loadPublicPricingConfig() {
+  try {
+    state.pricingConfig = await api("GET", "/catalog/pricing");
+  } catch (error) {
+    state.pricingConfig = DEFAULT_SPREADSHEET_PRICING;
+    console.warn("Pricing settings unavailable, using workbook defaults:", formatApiError(error));
+  }
+}
+
+function pricingConfigForForm(config) {
+  const source = config || DEFAULT_SPREADSHEET_PRICING;
+  return {
+    packaging: Number(source.packaging ?? 1000),
+    delivery: Number(source.delivery ?? 3000),
+    tax_coefficient: Number(source.tax_coefficient ?? source.taxCoefficient ?? 1.02),
+    tiers: (source.tiers || DEFAULT_SPREADSHEET_PRICING.tiers).map((tier) => ({
+      key: tier.key,
+      title: tier.title || tier.key,
+      coefficient: Number(tier.coefficient ?? 2),
+      tax_coefficient: Number(tier.tax_coefficient ?? tier.taxCoefficient ?? 1.02),
+      prices: {
+        facade1: Number(tier.prices?.facade1 ?? 0),
+        facade2: Number(tier.prices?.facade2 ?? 0),
+        facade3: Number(tier.prices?.facade3 ?? 0),
+        hinges: Number(tier.prices?.hinges ?? 0),
+        guides: Number(tier.prices?.guides ?? 0),
+        countertop: Number(tier.prices?.countertop ?? 0),
+        backsplash: Number(tier.prices?.backsplash ?? 0),
+      },
+    })),
+  };
+}
+
+function renderPricingSettingsForm(config) {
+  const host = document.getElementById("pricingSettingsForm");
+  if (!host) return;
+  const normalized = pricingConfigForForm(config);
+  const labels = {
+    facade1: "Фасад 1 (₽/м²)", facade2: "Фасад 2 (₽/м²)", facade3: "Фасад 3 (₽/м²)",
+    hinges: "Петли (₽/шт)", guides: "Направляющие (₽/шт)", countertop: "Столешница (₽/м)", backsplash: "Фартук (₽/м)",
+  };
+  host.innerHTML = `
+    <div class="row g-3 mb-3">
+      <div class="col-md-4"><label class="form-label small">Упаковка, ₽</label><input class="form-control" type="number" min="0" step="1" data-pricing-global="packaging" value="${normalized.packaging}"></div>
+      <div class="col-md-4"><label class="form-label small">Доставка, ₽ за заказ</label><input class="form-control" type="number" min="0" step="1" data-pricing-global="delivery" value="${normalized.delivery}"></div>
+      <div class="col-md-4"><label class="form-label small">Коэффициент таблицы</label><input class="form-control" type="number" min="0" step="0.01" data-pricing-global="tax_coefficient" value="${normalized.tax_coefficient}"></div>
+    </div>
+    <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Вариант</th><th>Множитель</th><th>Коэфф. 1,02</th>${Object.values(labels).map((label) => `<th class="small">${label}</th>`).join("")}</tr></thead><tbody>
+      ${normalized.tiers.map((tier) => `<tr data-pricing-tier="${escapeHtml(tier.key)}"><td><input class="form-control form-control-sm" data-pricing-field="title" value="${escapeHtml(tier.title)}"></td><td><input class="form-control form-control-sm" type="number" min="0" step="0.01" data-pricing-field="coefficient" value="${tier.coefficient}"></td><td><input class="form-control form-control-sm" type="number" min="0" step="0.01" data-pricing-field="tax_coefficient" value="${tier.tax_coefficient}"></td>${Object.keys(labels).map((key) => `<td><input class="form-control form-control-sm" type="number" min="0" step="0.01" data-pricing-price="${key}" value="${tier.prices[key]}"></td>`).join("")}</tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+function readPricingSettingsForm() {
+  const host = document.getElementById("pricingSettingsForm");
+  const config = { packaging: Number(host?.querySelector('[data-pricing-global="packaging"]')?.value), delivery: Number(host?.querySelector('[data-pricing-global="delivery"]')?.value), tax_coefficient: Number(host?.querySelector('[data-pricing-global="tax_coefficient"]')?.value), tiers: [] };
+  host?.querySelectorAll("[data-pricing-tier]").forEach((row) => {
+    const prices = {};
+    row.querySelectorAll("[data-pricing-price]").forEach((input) => { prices[input.dataset.pricingPrice] = Number(input.value); });
+    config.tiers.push({ key: row.dataset.pricingTier, title: row.querySelector('[data-pricing-field="title"]')?.value.trim() || row.dataset.pricingTier, coefficient: Number(row.querySelector('[data-pricing-field="coefficient"]')?.value), tax_coefficient: Number(row.querySelector('[data-pricing-field="tax_coefficient"]')?.value), prices });
+  });
+  return config;
+}
+
+async function loadPricingSettingsAdmin() {
+  const card = document.getElementById("pricing-admin");
+  if (!card) return;
+  card.classList.toggle("d-none", !isSuperAdmin());
+  if (!isSuperAdmin()) return;
+  try {
+    const config = await api("GET", "/catalog/settings/pricing", undefined, true);
+    state.pricingConfig = config;
+    renderPricingSettingsForm(config);
+  } catch (error) {
+    toast(`Не удалось загрузить цены: ${formatApiError(error)}`, false);
+  }
+}
+
+async function savePricingSettingsAdmin() {
+  if (!isSuperAdmin()) return;
+  const payload = readPricingSettingsForm();
+  if (![payload.packaging, payload.delivery, payload.tax_coefficient, ...payload.tiers.flatMap((tier) => [tier.coefficient, tier.tax_coefficient, ...Object.values(tier.prices)])].every((value) => Number.isFinite(value) && value >= 0) || payload.tiers.length !== 4) {
+    toast("Проверьте все цены и коэффициенты", false);
+    return;
+  }
+  try {
+    state.pricingConfig = await api("PUT", "/catalog/settings/pricing", payload, true);
+    renderPricingSettingsForm(state.pricingConfig);
+    renderBom();
+    toast("Цены из расчётной таблицы сохранены");
+  } catch (error) {
+    toast(`Ошибка сохранения цен: ${formatApiError(error)}`, false);
+  }
+}
+
+async function saveDeliverySettingsAdmin() {
+  const payload = {
+    free_delivery_threshold: Number(document.getElementById("freeDeliveryThreshold").value),
+    delivery_price_per_km: Number(document.getElementById("deliveryPricePerKm").value),
+    warehouse_address: document.getElementById("warehouseAddress").value.trim(),
+  };
+  if (payload.free_delivery_threshold <= 0 || payload.warehouse_address.length < 5) {
+    toast("Проверьте порог бесплатной доставки и адрес склада", false);
+    return;
+  }
+  try {
+    await api("PUT", "/catalog/settings/delivery", payload, true);
+    toast("Настройки доставки сохранены");
+    await loadDeliverySettingsAdmin();
+  } catch (error) {
+    toast(`Ошибка сохранения: ${formatApiError(error)}`, false);
+  }
+}
+
+function renderCart() {
+  const countEl = document.getElementById("cartCount");
+  if (countEl) countEl.textContent = state.cart.reduce((sum, item) => sum + item.qty, 0);
+  const host = document.getElementById("cartItems");
+  if (!host) return;
+  if (!state.cart.length) {
+    host.innerHTML = `<div class="empty-state cart-empty"><strong>Корзина пока пуста</strong><p>Добавьте мебель из каталога, чтобы рассчитать покупку и доставку.</p><button class="btn btn-secondary" type="button" data-bs-dismiss="offcanvas" onclick="location.hash='catalog'">Перейти в каталог</button></div>`;
+    state.deliveryQuote = null;
+  } else {
+    host.innerHTML = state.cart
+      .map((item) => `
+        <div class="d-flex justify-content-between gap-3">
+          <div>
+            <strong>${escapeHtml(displayProductTitle(item))}</strong>
+            <div class="small text-muted">${item.qty} × ${money(Number(item.price))}</div>
+          </div>
+          <button class="btn btn-sm btn-outline-danger" data-remove="${item.id}" aria-label="Удалить ${escapeHtml(displayProductTitle(item))} из корзины">×</button>
+        </div>`)
+      .join("");
+  }
+  host.querySelectorAll("[data-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => removeCartItem(Number(btn.dataset.remove)));
+  });
+
+  const subtotal = cartSubtotal();
+  const subtotalEl = document.getElementById("cartSubtotal");
+  if (subtotalEl) subtotalEl.textContent = money(subtotal);
+
+  const fixedFee = state.deliverySettings?.fixed_delivery_fee ?? 3000;
+  const hintEl = document.getElementById("deliveryHint");
+  if (hintEl) {
+    hintEl.textContent = `Фиксированная доставка — ${money(fixedFee)} за заказ.`;
+  }
+
+  const deliveryLine = document.getElementById("cartDeliveryLine");
+  const deliveryExtra = document.getElementById("cartDeliveryExtra");
+  const totalEl = document.getElementById("cartTotal");
+  const quote = state.deliveryQuote;
+
+  if (deliveryLine) {
+    if (!quote) {
+      deliveryLine.textContent = "—";
+    } else if (quote.fixed_delivery_fee != null) {
+      deliveryLine.textContent = money(quote.fixed_delivery_fee);
+    } else if (quote.free_delivery) {
+      deliveryLine.textContent = "Бесплатно";
+    } else {
+      deliveryLine.textContent = money(quote.delivery_fee);
+    }
+  }
+  if (deliveryExtra) {
+    if (!quote) {
+      deliveryExtra.textContent = "Укажите адрес и нажмите «Рассчитать доставку».";
+    } else {
+      deliveryExtra.textContent = quote.fixed_delivery_fee != null
+        ? "Фиксированная доставка для каждого заказа"
+        : `≈ ${quote.distance_km} км от склада · тариф ${money(quote.delivery_price_per_km)}/км`;
+    }
+  }
+  if (totalEl) {
+    totalEl.textContent = money(quote ? quote.grand_total : subtotal);
+  }
+}
+
+function renderParts() {
+  const host = document.getElementById("partsList");
+  if (!host) return;
+  if (!state.cuttingParts.length) {
+    host.innerHTML = `<div class="alert alert-light border small mb-0">Список деталей пуст. Добавьте хотя бы одну деталь.</div>`;
+    return;
+  }
+  host.innerHTML = state.cuttingParts
+    .map((part, index) => `
+      <div class="d-flex justify-content-between align-items-center border rounded p-2 mb-2 bg-light">
+        <div>
+          <strong>${escapeHtml(part.name)}</strong>
+          <div class="small text-muted">${part.width}×${part.height} мм</div>
+          <div class="form-check form-check-inline mt-1 mb-0">
+            <input class="form-check-input" type="checkbox" id="partRotate${index}" data-part-rotate="${index}" ${part.allow_rotation !== false ? "checked" : ""}>
+            <label class="form-check-label small" for="partRotate${index}">Можно вращать</label>
+          </div>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <button class="btn btn-sm btn-outline-secondary" data-part-minus="${index}">-</button>
+          <span class="badge text-bg-secondary">${part.quantity} шт.</span>
+          <button class="btn btn-sm btn-outline-secondary" data-part-plus="${index}">+</button>
+          <button class="btn btn-sm btn-outline-danger" data-part-remove="${index}">Удалить</button>
+        </div>
+      </div>`)
+    .join("");
+
+  host.querySelectorAll("[data-part-rotate]").forEach((input) =>
+    input.addEventListener("change", () => {
+      const idx = Number(input.dataset.partRotate);
+      if (state.cuttingParts[idx]) state.cuttingParts[idx].allow_rotation = input.checked;
+    })
+  );
+
+  host.querySelectorAll("[data-part-minus]").forEach((btn) =>
+    btn.addEventListener("click", () => changePartQty(Number(btn.dataset.partMinus), -1))
+  );
+  host.querySelectorAll("[data-part-plus]").forEach((btn) =>
+    btn.addEventListener("click", () => changePartQty(Number(btn.dataset.partPlus), 1))
+  );
+  host.querySelectorAll("[data-part-remove]").forEach((btn) =>
+    btn.addEventListener("click", () => removePart(Number(btn.dataset.partRemove)))
+  );
+}
+
+function normalizeAngle(deg) {
+  let angle = Number(deg) || 0;
+  angle %= 360;
+  if (angle < 0) angle += 360;
+  return angle;
+}
+
+function getObjectPlanSize(item) {
+  const width = Number(item.width) || 0;
+  const depth = Number(item.depth) || 0;
+  const rad = (normalizeAngle(item.rotationY) * Math.PI) / 180;
+  const cos = Math.abs(Math.cos(rad));
+  const sin = Math.abs(Math.sin(rad));
+  return {
+    planW: width * cos + depth * sin,
+    planD: width * sin + depth * cos,
+  };
+}
+
+function getObjectManufacturingSize(item) {
+  return {
+    width: Number(item.width),
+    depth: Number(item.depth),
+    height: Number(item.height),
+  };
+}
+
+function clampObjectPosition(item, roomWidth, roomLength) {
+  Object.assign(item, clampPlacementToRoom(item, {
+    width: roomWidth,
+    length: roomLength,
+    height: state.roomConfig.height,
+  }));
+}
+
+const SNAP_DISTANCE_MM = 70;
+
+// Edges (in room mm coordinates) that a dragged object's own edges can "stick" to: the room
+// walls plus the near/far edges of every other placed object along that axis.
+function collectSnapEdges(axis, excludeId, roomSize) {
+  const edges = [0, roomSize];
+  state.objects3d.forEach((obj) => {
+    if (obj.id === excludeId) return;
+    const { planW, planD } = getObjectPlanSize(obj);
+    if (axis === "x") edges.push(obj.x - planW / 2, obj.x + planW / 2);
+    else edges.push(obj.z - planD / 2, obj.z + planD / 2);
+  });
+  return edges;
+}
+
+// Finds the smallest shift (within SNAP_DISTANCE_MM) that would bring one of the dragged
+// object's edges flush against a wall or a neighboring object's edge along one axis.
+function findSnapShift(edges, itemMin, itemMax) {
+  let bestShift = 0;
+  let bestDist = SNAP_DISTANCE_MM;
+  edges.forEach((edge) => {
+    const shiftMin = edge - itemMin;
+    const shiftMax = edge - itemMax;
+    if (Math.abs(shiftMin) < bestDist) {
+      bestDist = Math.abs(shiftMin);
+      bestShift = shiftMin;
+    }
+    if (Math.abs(shiftMax) < bestDist) {
+      bestDist = Math.abs(shiftMax);
+      bestShift = shiftMax;
+    }
+  });
+  return bestShift;
+}
+
+// "Приклеивает" объект к стене/соседней мебели, если его подтащили достаточно близко.
+function snapObjectPosition(item, roomWidth, roomLength) {
+  const { planW, planD } = getObjectPlanSize(item);
+  const edgesX = collectSnapEdges("x", item.id, roomWidth);
+  const edgesZ = collectSnapEdges("z", item.id, roomLength);
+  item.x += findSnapShift(edgesX, item.x - planW / 2, item.x + planW / 2);
+  item.z += findSnapShift(edgesZ, item.z - planD / 2, item.z + planD / 2);
+}
+
+function normalizePartsForCutting(parts) {
+  return parts.map((part) => ({
+    name: part.name,
+    width: Number(part.width),
+    height: Number(part.height),
+    quantity: Number(part.quantity),
+    allow_rotation: part.allow_rotation !== false,
+  }));
+}
+
+async function optimizeCutting(customParts = null, silent = false) {
+  const sourceParts = customParts || state.cuttingParts;
+  if (!sourceParts.length) {
+    if (!silent) toast("Добавьте детали для расчета раскроя", false);
+    return null;
+  }
+  const sheetW = Number(document.getElementById("sheetW").value);
+  const sheetH = Number(document.getElementById("sheetH").value);
+  const parts = normalizePartsForCutting(sourceParts);
+  const payload = {
+    sheet_width: sheetW,
+    sheet_height: sheetH,
+    parts,
+  };
+  try {
+    const data = await api("POST", "/cutting/optimize", payload, true);
+    state.lastCutResult = data;
+    state.selectedCutJobId = data.job_id || null;
+    document.getElementById("cutStats").textContent = `${data.placed_count}/${data.requested_count} деталей, ${data.total_sheets} лист(ов), ${data.utilization_percent}%`;
+    renderCutView(payload.sheet_width, payload.sheet_height, data.sheets || []);
+    renderCutExtra(data);
+    if (!silent) toast("Раскрой рассчитан");
+    if (APP_MODE === "admin") renderCuttingJobs();
+    return data;
+  } catch (error) {
+    if (!silent) toast(`Раскрой недоступен: ${formatApiError(error)}`, false);
+    return null;
+  }
+}
+
+function renderCutView(sheetW, sheetH, sheets) {
+  const view = document.getElementById("cutView");
+  if (!sheets.length) {
+    view.innerHTML = `<span class="text-muted">Сервис не вернул размещения.</span>`;
+    return;
+  }
+  const scaleX = 100 / sheetW;
+  const scaleY = 100 / sheetH;
+  view.innerHTML = sheets
+    .map((sheet) => `
+      <div class="border rounded p-2 mb-2 bg-white w-100">
+        <div class="small fw-semibold mb-2 d-flex justify-content-between flex-wrap gap-1">
+          <span>Лист #${sheet.sheet_index + 1} · загрузка ${sheet.utilization_percent}%</span>
+          <span class="text-muted">Занято: ${sheet.utilized_area ?? 0} мм² · Свободно: ${sheet.unused_area ?? 0} мм²</span>
+        </div>
+        <div class="position-relative w-100" style="min-height:180px; background:#fcfaf6; border:1px dashed #d8c2aa; border-radius:.5rem;">
+          ${(sheet.placements || [])
+            .map((p, i) => {
+              const colors = ["#a16207", "#7c3aed", "#0f766e", "#be123c", "#2563eb", "#65a30d"];
+              const color = colors[i % colors.length];
+              const labelTop = Math.max(p.y * scaleY, 0.8);
+              const rotatedMark = p.rotated ? " ↻" : "";
+              return `<div title="${escapeHtml(p.name)}${p.rotated ? " (повёрнута на 90°)" : ""}" style="
+                position:absolute; left:${p.x * scaleX}%; top:${p.y * scaleY}%;
+                width:${Math.max(p.width * scaleX, 5)}%; height:${Math.max(p.height * scaleY, 6)}%;
+                background:${color};" class="cut-rect"></div>
+                <div class="cut-rect-label" style="left:${p.x * scaleX}%; top:${labelTop}%; background:${color};">${escapeHtml(p.name)}${rotatedMark}</div>`;
+            })
+            .join("")}
+        </div>
+      </div>`)
+    .join("");
+}
+
+function renderCutExtra(data) {
+  const host = document.getElementById("cutExtraInfo");
+  const areaInfo = `Занято: ${data.total_used_area} мм² · Свободно: ${data.total_unused_area} мм².`;
+  if (!data.unplaced_parts || !data.unplaced_parts.length) {
+    host.textContent = `${areaInfo} Все детали размещены по листам автоматически.`;
+    return;
+  }
+  host.innerHTML = `${areaInfo} Не размещены: ${data.unplaced_parts
+    .map((p) => `${escapeHtml(p.name)} (${p.width}×${p.height}) × ${p.quantity}`)
+    .join(", ")}`;
+}
+
+function addPartFromInputs() {
+  const name = document.getElementById("partName").value.trim();
+  const width = Number(document.getElementById("partWidth").value);
+  const height = Number(document.getElementById("partHeight").value);
+  const quantity = Number(document.getElementById("partQty").value);
+  if (!name || width <= 0 || height <= 0 || quantity <= 0) {
+    toast("Заполните название, размеры и количество детали", false);
+    return;
+  }
+  state.cuttingParts.push({ name, width, height, quantity, allow_rotation: true });
+  renderParts();
+  document.getElementById("partName").value = "";
+  document.getElementById("partWidth").value = "";
+  document.getElementById("partHeight").value = "";
+  document.getElementById("partQty").value = "1";
+}
+
+function changePartQty(index, delta) {
+  const part = state.cuttingParts[index];
+  if (!part) return;
+  part.quantity = Math.max(1, part.quantity + delta);
+  renderParts();
+}
+
+function removePart(index) {
+  state.cuttingParts.splice(index, 1);
+  renderParts();
+}
+
+function resetPartsToDefault() {
+  state.cuttingParts = defaultCuttingParts.map((p) => ({ ...p }));
+  renderParts();
+  document.getElementById("cutExtraInfo").textContent = "";
+}
+
+async function createRoom() {
+  if (!requireFormConsent("projectConsent", "Подтвердите согласие на обработку данных")) return;
+  if (!customerName()) {
+    toast("Войдите, чтобы сохранить проект", false);
+    bootstrap.Modal.getOrCreateInstance(document.getElementById("accountModal")).show();
+    return;
+  }
+  try {
+    const project = await savePlannerProject();
+    state.projectId = project.id;
+    if (!state.sceneRevision) state.sceneRevision = Number(project.scene_revision) || 0;
+    document.getElementById("plannerHint").textContent = `Проект №${project.id} сохранён: ${project.name}`;
+    await syncPlannerObjectsToBackend();
+    await loadUserProjects();
+    toast("Проект комнаты сохранён");
+    const savedModal = document.getElementById("projectSavedModal");
+    if (savedModal) bootstrap.Modal.getOrCreateInstance(savedModal).show();
+  } catch (error) {
+    toast(`Планировщик недоступен: ${formatApiError(error)}`, false);
+  }
+}
+
+async function savePlannerProject() {
+  const bom = buildBomFromObjects();
+  const cutting = await quoteCuttingForBom(bom);
+  const cost = estimateProjectCost(bom, cutting);
+  const tiers = estimateTierPrices(cost, bom);
+  
+  // Получаем данные из новых полей
+  const customerName = document.getElementById("customerName")?.value?.trim() || "";
+  const customerPhone = document.getElementById("customerPhone")?.value?.trim() || "";
+  const customerEmail = document.getElementById("customerEmail")?.value?.trim() || "";
+  const projectLocation = document.getElementById("projectLocation")?.value?.trim() || "Онлайн";
+  
+  // Формируем название проекта из имени клиента
+  const projectName = document.getElementById("projectName")?.value?.trim() || `Проект ${customerName || "комнаты"}`;
+  
+  const payload = {
+    name: projectName,
+    location: projectLocation,
+    customer_name: customerName || null,
+    customer_phone: customerPhone,
+    customer_email: customerEmail,
+    room_width: state.roomConfig.width,
+    room_length: state.roomConfig.length,
+    room_height: state.roomConfig.height,
+    price_standard: tiers.standard,
+    price_comfort: tiers.comfort,
+    price_premium: tiers.premium,
+    bom_json: JSON.stringify(bom),
+    selected_tier: state.selectedTier || "standard",
+  };
+  
+  if (state.projectId) {
+    return api("PATCH", `/planner/projects/${state.projectId}`, payload, true);
+  }
+  return api("POST", "/planner/projects", payload, true);
+}
+
+async function syncPlannerObjectsToBackend() {
+  if (!state.projectId) return;
+  const response = await api(
+    "PUT",
+    `/planner/projects/${state.projectId}/scene`,
+    serializeScene({
+      revision: state.sceneRevision,
+      roomConfig: state.roomConfig,
+      roomFinish: { ...state.roomFinish, hardwareLevels: { ...state.hardwareLevels } },
+      objects: state.objects3d,
+      bomJson: JSON.stringify(buildBomFromObjects()),
+    }),
+    true
+  );
+  state.sceneRevision = response.revision;
+  return response;
+}
+
+function createDemoObjects() {
+  state.objects3d = [
+    { id: makeId(), type: "wardrobe", texture: "wood_dark_oak", name: "Шкаф Verona", width: 1400, depth: 600, height: 2200, x: 5000, z: 900, rotationY: 0 },
+    { id: makeId(), type: "sofa", texture: "fabric_gray", name: "Диван Soft Cloud", width: 2200, depth: 1000, height: 900, x: 1500, z: 3500, rotationY: -90 },
+    { id: makeId(), type: "cabinet", texture: "board_black", name: "Остров Chef", width: 1800, depth: 800, height: 900, x: 3000, z: 2200, rotationY: 0 },
+  ];
+  state.selected3dObjectId = state.objects3d[0]?.id || null;
+  state.objects3d.forEach((item) => clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length));
+}
+
+function addFurnitureSet() {
+  createDemoObjects();
+  renderObjects3dList();
+  renderRoomTopView();
+  renderRoom3D();
+  renderBom();
+  toast("Демо-комплект добавлен");
+}
+
+function getTextureByType(type, variant = "default") {
+  return window.Texture3D?.getTextureByType(type, variant) || null;
+}
+
+function createSurfaceMaterial(type, variant, colorHex) {
+  if (!window.THREE) return null;
+  if (window.Texture3D?.createSurfaceMaterial) {
+    return window.Texture3D.createSurfaceMaterial(type, variant, colorHex);
+  }
+  return new THREE.MeshStandardMaterial({ color: colorHex });
+}
+
+function createSurfaceMaterialForPanel(type, variant, colorHex, widthMm, heightMm, orientation = "horizontal") {
+  if (!window.THREE) return null;
+  if (window.Texture3D?.createSurfaceMaterial) {
+    return window.Texture3D.createSurfaceMaterial(type, variant, colorHex, { widthMm, heightMm, orientation });
+  }
+  return new THREE.MeshStandardMaterial({ color: colorHex });
+}
+
+function prepareGeometry(geometry) {
+  return window.Texture3D?.prepareGeometry ? window.Texture3D.prepareGeometry(geometry) : geometry;
+}
+
+function normalizeColorHex(value) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  if (!raw) return "";
+  return raw.startsWith("#") ? raw : `#${raw}`;
+}
+
+function createFurnitureMaterial(item, texturePreset) {
+  if (!window.THREE) return null;
+  const customColor = normalizeColorHex(item.customColor);
+  if (customColor) {
+    return new THREE.MeshStandardMaterial({ color: customColor, roughness: 0.72, metalness: 0.04 });
+  }
+  return createSurfaceMaterialForPanel(
+    texturePreset.material,
+    item.texture || "default",
+    texturePreset.color,
+    Number(item.width) || 900,
+    Number(item.height) || 1800,
+    "vertical"
+  );
+}
+
+function countertopTextureKey(countertopType) {
+  const t = String(countertopType || "").toLowerCase();
+  if (t === "skif") return "countertop_skif";
+  if (t === "kedr") return "countertop_kedr";
+  if (t === "quartz") return "countertop_quartz";
+  if (t === "compact") return "countertop_compact";
+  return "";
+}
+
+const furnitureMaterialSetCache = new Map();
+
+function buildFurnitureMaterialSet(item, texturePreset) {
+  const customColor = normalizeColorHex(item.customColor);
+  if (customColor) {
+    const selected = new THREE.MeshStandardMaterial({ color: customColor, roughness: 0.7, metalness: 0.03 });
+    const caseFurniture = item.type === "wardrobe" || item.type === "cabinet";
+    const body = caseFurniture
+      ? new THREE.MeshStandardMaterial({ color: 0xe8e8e4, roughness: 0.76, metalness: 0 })
+      : selected;
+    return {
+      body,
+      facade: selected.clone(),
+      edge: body.clone(),
+      back: new THREE.MeshStandardMaterial({ color: 0xf3f4f6, roughness: 0.82, metalness: 0 }),
+      countertop: selected.clone(),
+      handles: new THREE.MeshStandardMaterial({ color: 0x27272a, roughness: 0.28, metalness: 0.94 }),
+      interior: body.clone(),
+    };
+  }
+
+  const width = Math.max(Number(item.width) || 350, 350);
+  const depth = Math.max(Number(item.depth) || 350, 350);
+  const height = Math.max(Number(item.height) || 350, 350);
+  const selectedVertical = createSurfaceMaterialForPanel(texturePreset.material, item.texture || "default", texturePreset.color, width, height, "vertical");
+  const selectedHorizontal = createSurfaceMaterialForPanel(texturePreset.material, item.texture || "default", texturePreset.color, width, depth, "horizontal");
+  const caseFurniture = item.type === "wardrobe" || item.type === "cabinet";
+  const neutralVariant = item.texture === "board_white" ? "mdf_matte" : "board_white";
+  const neutralType = neutralVariant === "mdf_matte" ? "mdf" : "board";
+  const neutralColor = neutralVariant === "mdf_matte" ? 0xb8aea2 : 0xe8e8e4;
+  const neutralVertical = createSurfaceMaterialForPanel(neutralType, neutralVariant, neutralColor, width, height, "vertical");
+  const neutralHorizontal = createSurfaceMaterialForPanel(neutralType, neutralVariant, neutralColor, width, depth, "horizontal");
+  const body = caseFurniture ? neutralVertical : selectedVertical;
+  const facade = selectedVertical;
+  const interior = caseFurniture ? neutralHorizontal : selectedHorizontal;
+  const edge = caseFurniture ? neutralVertical.clone() : selectedVertical.clone();
+  const back = createSurfaceMaterialForPanel("board", "board_white", 0xffffff, width, height, "vertical");
+  const countertopKey = countertopTextureKey(item.countertopType);
+  const countertopPreset = countertopKey ? texturePresets[countertopKey] : null;
+  const countertop = countertopPreset
+    ? createSurfaceMaterialForPanel(countertopPreset.material, countertopKey, countertopPreset.color, width, depth, "horizontal")
+    : selectedHorizontal;
+  const handles = new THREE.MeshStandardMaterial({ color: 0x3f3f46, roughness: 0.26, metalness: 0.96 });
+  return { body, facade, edge, back, countertop, handles, interior };
+}
+
+function createFurnitureMaterialSet(item, texturePreset) {
+  const key = JSON.stringify([
+    item.type, item.texture, item.customColor, item.width, item.depth, item.height,
+    item.countertopType, texturePreset.material, texturePreset.color,
+  ]);
+  const cached = furnitureMaterialSetCache.get(key);
+  if (cached) return cached;
+  const materialSet = buildFurnitureMaterialSet(item, texturePreset);
+  new Set(Object.values(materialSet).filter(Boolean)).forEach((material) => {
+    material.userData = { ...(material.userData || {}), sharedFurnitureMaterial: true };
+  });
+  furnitureMaterialSetCache.set(key, materialSet);
+  return materialSet;
+}
+
+function roomUnitToWorldX(x) {
+  return x - state.roomConfig.width / 2;
+}
+
+function roomUnitToWorldZ(z) {
+  return z - state.roomConfig.length / 2;
+}
+
+function resolveTexturePreset(item) {
+  const base = texturePresets[item.texture] || {
+    material: (typePresets[item.type] || typePresets.cabinet).texture,
+    color: (typePresets[item.type] || typePresets.cabinet).color,
+    title: "По типу",
+  };
+  if (item.customColor) return { ...base, color: item.customColor };
+  return base;
+}
+
+function furnitureAccessoryDefaults(type) {
+  if (type === "cabinet" || type === "bath_vanity") return { drawers: 2, handles: 2 };
+  if (type === "wardrobe" || type === "wardrobe_sliding" || type === "wardrobe_corner") return { drawers: 0, handles: 2 };
+  if (type === "shelf") return { drawers: 0, handles: 0 };
+  if (String(type || "").startsWith("appliance_")) return { drawers: 0, handles: 0 };
+  return { drawers: 0, handles: 1 };
+}
+
+function disposeRoom3D() {
+  if (!state.three) return;
+  const { renderer, host, dimensionManager, resizeObserver, animationFrame, renderScheduler, resourceManager, diagnostics, resizeHandler } = state.three;
+  resizeObserver?.disconnect();
+  if (animationFrame) cancelAnimationFrame(animationFrame);
+  renderScheduler?.dispose();
+  if (resizeHandler) window.removeEventListener("resize", resizeHandler);
+  dimensionManager?.dispose();
+  resourceManager?.dispose();
+  diagnostics?.dispose();
+  window.__room3dRenderer = null;
+  if (renderer) {
+    renderer.dispose();
+    if (typeof renderer.forceContextLoss === "function") {
+      renderer.forceContextLoss();
+    }
+  }
+  host?.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
+  state.three = null;
+  window.__requestRoom3DRender = null;
+  modelAssetLoader.clear();
+}
+
+function requestRoom3DRender({ shadows = false } = {}) {
+  if (!state.three || document.hidden) return;
+  const three = state.three;
+  if (shadows && three.renderer?.shadowMap) three.renderer.shadowMap.needsUpdate = true;
+  three.renderScheduler?.request(shadows ? "shadows" : "scene");
+}
+
+function canUseWebGL() {
+  try {
+    const canvas = document.createElement("canvas");
+    return !!(canvas.getContext("webgl2") || canvas.getContext("webgl") || canvas.getContext("experimental-webgl"));
+  } catch {
+    return false;
+  }
+}
+
+function createRoom3DRenderer(width, height) {
+  // logarithmicDepthBuffer greatly improves depth-buffer precision for scenes with a large
+  // near/far ratio (our camera spans 1mm..50000mm). Without it, panels that sit only a few mm
+  // apart (e.g. edge banding flush on a shelf top) can lose the depth test unpredictably as the
+  // camera rotates, which looks like flickering/"shimmering" noise on those surfaces.
+  const attempts = [
+    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "high-performance", logarithmicDepthBuffer: true },
+    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default", logarithmicDepthBuffer: true },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "high-performance", logarithmicDepthBuffer: true },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "default", logarithmicDepthBuffer: true },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "low-power", logarithmicDepthBuffer: true },
+    { antialias: true, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "high-performance" },
+    { antialias: false, alpha: false, failIfMajorPerformanceCaveat: false, powerPreference: "low-power" },
+  ];
+  let lastError = null;
+  for (const options of attempts) {
+    try {
+      const renderer = new THREE.WebGLRenderer(options);
+      // On mobile some GPUs fall back to antialias:false; keep DPR high anyway to avoid "pixelated" look.
+      const dpr = Math.min(Number(window.devicePixelRatio) || 1, state.objects3d.length > 24 ? 1.25 : 1.6);
+      renderer.setPixelRatio(dpr);
+      renderer.setSize(width, height, false);
+      return renderer;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Error creating WebGL context");
+}
+
+function initRoom3D() {
+  const host = document.getElementById("room3d");
+  if (!host || !window.THREE) {
+    return;
+  }
+
+  const liveCanvas = state.three?.renderer?.domElement;
+  if (state.three && liveCanvas && host.contains(liveCanvas)) {
+    refreshRoom3DLayout();
+    renderRoom3D();
+    return;
+  }
+
+  if (!canUseWebGL()) {
+    throw new Error("WebGL недоступен в браузере. Включите аппаратное ускорение или откройте сайт в Chrome/Edge.");
+  }
+
+  disposeRoom3D();
+
+  const width = host.clientWidth || 640;
+  const height = Math.max(320, Math.round(host.getBoundingClientRect().height) || 540);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xf3efe8);
+
+  // near=20mm keeps close-up zoom usable while avoiding an extreme near/far ratio; far=30000mm
+  // comfortably covers even oversized rooms. Combined with logarithmicDepthBuffer above, this
+  // fixes depth-buffer precision loss that caused nearby coplanar panels to z-fight/flicker.
+  const camera = new THREE.PerspectiveCamera(45, width / height, 20, 30000);
+  camera.position.set(7000, 5500, 7500);
+  camera.lookAt(0, 1000, 0);
+
+  const renderer = createRoom3DRenderer(width, height);
+  window.__room3dRenderer = renderer;
+  if (THREE.SRGBColorSpace) {
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+  } else if (THREE.sRGBEncoding) {
+    renderer.outputEncoding = THREE.sRGBEncoding;
+  }
+  if (THREE.ACESFilmicToneMapping) {
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
+  }
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  // Shadows are expensive on mobile; update only when scene changes to keep rotation smooth.
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
+  host.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
+  host.appendChild(renderer.domElement);
+
+  const ambient = new THREE.AmbientLight(0xffffff, 0.3);
+  scene.add(ambient);
+  const hemi = new THREE.HemisphereLight(0xfff7ed, 0xd7dee8, 0.55);
+  scene.add(hemi);
+  const light = new THREE.DirectionalLight(0xfff6eb, 1.5);
+  light.position.set(4200, 9000, 4600);
+  light.castShadow = true;
+  light.shadow.mapSize.set(1024, 1024);
+  light.shadow.bias = -0.00012;
+  light.shadow.normalBias = 0.015;
+  light.shadow.radius = 2.6;
+  scene.add(light);
+  const fill = new THREE.DirectionalLight(0xe6edf7, 0.52);
+  fill.position.set(-5400, 3200, -2600);
+  scene.add(fill);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.26);
+  rim.position.set(0, 4200, -6200);
+  scene.add(rim);
+
+  if (THREE.PMREMGenerator) {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envScene = new THREE.Scene();
+    envScene.background = new THREE.Color(0xf3efe8);
+    envScene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const envKey = new THREE.DirectionalLight(0xffffff, 1.2);
+    envKey.position.set(6, 10, 8);
+    envScene.add(envKey);
+    const envFill = new THREE.DirectionalLight(0xdde7f5, 0.45);
+    envFill.position.set(-7, 4, -5);
+    envScene.add(envFill);
+    const envMap = pmrem.fromScene(envScene, 0.04).texture;
+    scene.environment = envMap;
+    pmrem.dispose();
+  }
+
+  const roomGroup = new THREE.Group();
+  const furnitureGroup = new THREE.Group();
+  const transformGizmo = createTransformGizmo();
+  scene.add(roomGroup);
+  scene.add(furnitureGroup);
+  scene.add(transformGizmo);
+  const dimensionManager = window.Dimension3D?.DimensionManager
+    ? new window.Dimension3D.DimensionManager(camera, renderer)
+    : null;
+
+  const orbit = {
+    theta: 0.78,
+    phi: 1.03,
+    radius: 11000,
+    target: new THREE.Vector3(0, 1000, 0),
+  };
+  const resourceManager = new ResourceManager();
+  const diagnostics = new PlannerDiagnostics(renderer);
+  state.three = { scene, camera, renderer, roomGroup, furnitureGroup, transformGizmo, dimensionManager, host, orbit, objectGroups: new Map(), resourceManager, diagnostics };
+  state.three.renderScheduler = new RenderScheduler(() => {
+    if (!state.three) return;
+    dimensionManager?.update(camera, renderer);
+    renderer.render(scene, camera);
+    diagnostics.update({ objects: state.objects3d.length });
+  });
+  window.__requestRoom3DRender = requestRoom3DRender;
+  if (window.ResizeObserver) {
+    const resizeObserver = new ResizeObserver(() => {
+      if (!state.three) return;
+      // Mobile browsers may change viewport height while dragging (address bar). Avoid "jerky" resizes mid-rotation.
+      if (state.cameraDrag?.active) {
+        state.three.pendingLayoutRefresh = true;
+        return;
+      }
+      refreshRoom3DLayout();
+    });
+    resizeObserver.observe(host);
+    state.three.resizeObserver = resizeObserver;
+  }
+  init3DPointerControls(renderer.domElement);
+  updateOrbitCamera();
+  rebuildRoomGeometry();
+  renderRoom3D();
+
+  state.three.resizeHandler = () => refreshRoom3DLayout();
+  window.addEventListener("resize", state.three.resizeHandler, { passive: true });
+}
+
+function refreshRoom3DLayout() {
+  if (!state.three) return;
+  const { host, camera, renderer } = state.three;
+  const workspace = host.closest(".planner-workspace");
+  const immersive = host.classList.contains("is-scene-immersive");
+  const fullscreen = document.fullscreenElement === workspace || workspace?.classList.contains("is-fullscreen-fallback");
+  const cssHeight = Math.round(host.getBoundingClientRect().height);
+  const height = Math.max(320, immersive ? window.innerHeight : fullscreen ? window.innerHeight - 180 : cssHeight || 540);
+  const width = host.clientWidth || 640;
+  camera.aspect = width / height;
+  camera.updateProjectionMatrix();
+  renderer.setPixelRatio(Math.min(Number(window.devicePixelRatio) || 1, state.objects3d.length > 24 ? 1.25 : 1.6));
+  renderer.setSize(width, height, false);
+  updateOrbitCamera();
+  requestRoom3DRender();
+}
+
+function ensureRoom3D() {
+  try {
+    initRoom3D();
+  } catch (error) {
+    console.error("3D init failed:", error);
+    const host = document.getElementById("room3d");
+    if (host) {
+      host.innerHTML = `<div class="text-warning small p-3">3D не запустился: ${escapeHtml(formatApiError(error))}<div class="mt-2 text-muted">Попробуйте закрыть другие вкладки с 3D, включить аппаратное ускорение в браузере и обновить страницу (Ctrl+F5).</div></div>`;
+    }
+  }
+  if (document.getElementById("roomPlan")) renderRoomTopView();
+}
+
+function updateOrbitCamera() {
+  if (!state.three) return;
+  const { orbit, camera } = state.three;
+  const sinPhi = Math.sin(orbit.phi);
+  const x = orbit.target.x + orbit.radius * sinPhi * Math.sin(orbit.theta);
+  const y = orbit.target.y + orbit.radius * Math.cos(orbit.phi);
+  const z = orbit.target.z + orbit.radius * sinPhi * Math.cos(orbit.theta);
+  camera.position.set(x, y, z);
+  camera.lookAt(orbit.target);
+  updateDynamicWallVisibility();
+  updateTransformGizmo();
+}
+
+function wallSideWithHysteresis(value, currentSide) {
+  const enterThreshold = 0.2;
+  const exitThreshold = 0.1;
+  if (currentSide === 1) {
+    if (value < -enterThreshold) return -1;
+    return value < exitThreshold ? 0 : 1;
+  }
+  if (currentSide === -1) {
+    if (value > enterThreshold) return 1;
+    return value > -exitThreshold ? 0 : -1;
+  }
+  if (value > enterThreshold) return 1;
+  if (value < -enterThreshold) return -1;
+  return 0;
+}
+
+function updateDynamicWallVisibility() {
+  if (!state.three?.walls) return;
+  const { camera, orbit, walls } = state.three;
+  const directionX = (camera.position.x - orbit.target.x) / Math.max(orbit.radius, 1);
+  const directionZ = (camera.position.z - orbit.target.z) / Math.max(orbit.radius, 1);
+  const sideState = state.three.wallSideState || { x: 0, z: 0 };
+  sideState.x = wallSideWithHysteresis(directionX, sideState.x);
+  sideState.z = wallSideWithHysteresis(directionZ, sideState.z);
+  state.three.wallSideState = sideState;
+
+  walls.left.visible = sideState.x !== -1;
+  walls.right.visible = sideState.x !== 1;
+  walls.back.visible = sideState.z !== -1;
+  walls.front.visible = sideState.z !== 1;
+}
+
+function pinchDistance(pointers) {
+  const pts = [...pointers.values()];
+  if (pts.length < 2) return 0;
+  return Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+}
+
+function applyOrbitRadius(nextRadius) {
+  if (!state.three) return;
+  state.three.orbit.radius = Math.min(Math.max(nextRadius, 3000), 18000);
+  updateOrbitCamera();
+  requestRoom3DRender();
+}
+
+function pointerVector(event, canvas) {
+  const rect = canvas.getBoundingClientRect();
+  return new THREE.Vector2(
+    ((event.clientX - rect.left) / rect.width) * 2 - 1,
+    -((event.clientY - rect.top) / rect.height) * 2 + 1
+  );
+}
+
+function furnitureAtPointer(event, canvas) {
+  if (!state.three) return null;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointerVector(event, canvas), state.three.camera);
+  const hit = raycaster.intersectObjects(state.three.furnitureGroup.children, true)[0];
+  let object = hit?.object || null;
+  while (object && object.parent !== state.three.furnitureGroup) object = object.parent;
+  return object?.userData?.objectId ? object : null;
+}
+
+function axisVector(axis) {
+  if (axis === "x") return new THREE.Vector3(1, 0, 0);
+  if (axis === "y") return new THREE.Vector3(0, 1, 0);
+  return new THREE.Vector3(0, 0, 1);
+}
+
+function createTransformGizmo() {
+  const gizmo = new THREE.Group();
+  gizmo.name = "FurnitureTransformGizmo";
+  gizmo.visible = false;
+  gizmo.renderOrder = 50;
+  const colors = { x: 0xe85d5d, y: 0x4db477, z: 0x4b83e5 };
+  Object.entries(colors).forEach(([axis, color]) => {
+    const handle = new THREE.Group();
+    handle.name = `TransformAxis:${axis}`;
+    handle.userData.transformAxis = axis;
+    if (axis === "x") handle.rotation.z = -Math.PI / 2;
+    if (axis === "z") handle.rotation.x = Math.PI / 2;
+    const material = new THREE.MeshBasicMaterial({ color, depthTest: false, depthWrite: false, transparent: true, opacity: 0.94 });
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.68, 12), material);
+    shaft.position.y = 0.34;
+    const head = new THREE.Mesh(new THREE.ConeGeometry(0.095, 0.24, 18), material);
+    head.position.y = 0.8;
+    const hitMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.001, depthTest: false, depthWrite: false });
+    const hitArea = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 1.05, 12), hitMaterial);
+    hitArea.position.y = 0.52;
+    [shaft, head, hitArea].forEach((mesh) => {
+      mesh.renderOrder = 50;
+      mesh.userData.transformAxis = axis;
+      handle.add(mesh);
+    });
+    gizmo.add(handle);
+  });
+  return gizmo;
+}
+
+function updateTransformGizmo() {
+  const gizmo = state.three?.transformGizmo;
+  const selected = state.objects3d.find((item) => item.id === state.selected3dObjectId);
+  const group = selected ? state.three?.objectGroups?.get(selected.id) : null;
+  if (!gizmo || !selected || !group) {
+    if (gizmo) gizmo.visible = false;
+    return;
+  }
+  const height = Math.max(Number(selected.height) || 0, 0);
+  gizmo.visible = true;
+  gizmo.position.set(group.position.x, group.position.y + Math.max(height * 0.52, 180), group.position.z);
+  const distance = state.three.camera.position.distanceTo(gizmo.position);
+  const size = Math.min(Math.max(distance * 0.06, 320), 900);
+  gizmo.scale.setScalar(size);
+}
+
+function gizmoAxisAtPointer(event, canvas) {
+  const gizmo = state.three?.transformGizmo;
+  if (!gizmo?.visible) return null;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointerVector(event, canvas), state.three.camera);
+  const hit = raycaster.intersectObjects(gizmo.children, true)[0];
+  let node = hit?.object || null;
+  while (node && !node.userData?.transformAxis) node = node.parent;
+  return node?.userData?.transformAxis || null;
+}
+
+function rayPointOnAxisDragPlane(event, canvas, axis, origin) {
+  if (!state.three || !origin) return null;
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(pointerVector(event, canvas), state.three.camera);
+  const direction = axisVector(axis);
+  const cameraDirection = state.three.camera.getWorldDirection(new THREE.Vector3());
+  let normal = direction.clone().cross(cameraDirection).cross(direction);
+  if (normal.lengthSq() < 0.0001) {
+    normal = direction.clone().cross(axis === "y" ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0));
+  }
+  normal.normalize();
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, origin);
+  return raycaster.ray.intersectPlane(plane, new THREE.Vector3());
+}
+
+function select3DObject(id) {
+  state.selected3dObjectId = id || null;
+  const group = id ? state.three?.objectGroups?.get(id) : null;
+  state.three?.dimensionManager?.clear();
+  if (group?.userData?.dimensions) state.three?.dimensionManager?.attach(group, group.userData.dimensions);
+  state.three?.dimensionManager?.setSelected(group || null);
+  updateTransformGizmo();
+  syncSelectedObjectControls();
+  renderObjects3dList();
+  requestRoom3DRender();
+}
+
+function begin3DTransform(event, canvas, axis) {
+  const item = state.objects3d.find((candidate) => candidate.id === state.selected3dObjectId);
+  if (!item) return false;
+  const origin = state.three?.transformGizmo?.position?.clone();
+  const startPoint = rayPointOnAxisDragPlane(event, canvas, axis, origin);
+  if (!startPoint) return false;
+  const transform = state.transform3d;
+  transform.axis = axis;
+  transform.active = true;
+  transform.pointerId = event.pointerId;
+  transform.id = item.id;
+  transform.startPoint = startPoint;
+  transform.startOrigin = origin;
+  transform.startItem = structuredClone(item);
+  transform.historyBefore = plannerSnapshot();
+  transform.moved = false;
+  try { canvas.setPointerCapture(event.pointerId); } catch { /* pointer capture is optional */ }
+  canvas.style.cursor = "grabbing";
+  document.getElementById("selectedObjectTransformStatus")?.classList.add("is-active");
+  return true;
+}
+
+function move3DTransform(event, canvas) {
+  const transform = state.transform3d;
+  if (!transform.active || transform.pointerId !== event.pointerId) return false;
+  const item = state.objects3d.find((candidate) => candidate.id === transform.id);
+  const point = rayPointOnAxisDragPlane(event, canvas, transform.axis, transform.startOrigin);
+  if (!item || !point || !transform.startPoint) return true;
+  const worldDelta = point.clone().sub(transform.startPoint);
+  const scalar = worldDelta.dot(axisVector(transform.axis));
+  const delta = coordinateDeltaForAxis(transform.axis, { [transform.axis]: scalar });
+  const next = applyTranslationDelta(transform.startItem, delta, state.roomConfig);
+  const snap = snapPlacement3D(next, state.objects3d, state.roomConfig, {
+    axis: transform.axis,
+    threshold: SNAP_DISTANCE_MM,
+  });
+  Object.assign(item, snap.placement);
+  transform.moved = transform.moved || Math.abs(delta.x) + Math.abs(delta.y) + Math.abs(delta.z) > 2;
+  updateFurnitureTransform(item);
+  syncSelectedObjectControls();
+  render3DTransformCollisionStatus(item, snap);
+  event.preventDefault();
+  return true;
+}
+
+function end3DTransform(event, canvas) {
+  const transform = state.transform3d;
+  if (!transform.active || (event && transform.pointerId !== event.pointerId)) return false;
+  const before = transform.historyBefore;
+  const moved = transform.moved;
+  transform.active = false;
+  transform.pointerId = null;
+  transform.id = null;
+  transform.axis = null;
+  transform.startPoint = null;
+  transform.startOrigin = null;
+  transform.startItem = null;
+  transform.historyBefore = null;
+  transform.moved = false;
+  canvas.style.cursor = "grab";
+  document.getElementById("selectedObjectTransformStatus")?.classList.remove("is-active");
+  if (moved && before) plannerHistory.record(before, plannerSnapshot(), "move-3d");
+  if (moved) {
+    renderObjects3dList();
+    renderBom();
+  }
+  return true;
+}
+
+function init3DPointerControls(canvas) {
+  canvas.style.cursor = "grab";
+  canvas.style.touchAction = "none";
+  canvas.style.userSelect = "none";
+  const drag = state.cameraDrag;
+  if (!(drag.pointers instanceof Map)) drag.pointers = new Map();
+
+  const scheduleOrbit = () => {
+    if (drag.raf) return;
+    drag.raf = requestAnimationFrame(() => {
+      drag.raf = 0;
+      if (!state.three || drag.pinching) return;
+      const { orbit } = state.three;
+      orbit.theta += drag.pendingTheta;
+      orbit.phi = Math.min(Math.max(orbit.phi + drag.pendingPhi, 0.22), Math.PI / 2 - 0.04);
+      drag.pendingTheta = 0;
+      drag.pendingPhi = 0;
+      updateOrbitCamera();
+      requestRoom3DRender();
+    });
+  };
+
+  canvas.addEventListener("pointerdown", (event) => {
+    if (state.transform3d.active) return;
+    const gizmoAxis = gizmoAxisAtPointer(event, canvas);
+    if (gizmoAxis && begin3DTransform(event, canvas, gizmoAxis)) {
+      event.preventDefault();
+      return;
+    }
+    const picked = furnitureAtPointer(event, canvas);
+    if (picked) {
+      select3DObject(picked.userData.objectId);
+      event.preventDefault();
+      return;
+    }
+    drag.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (event.pointerType !== "touch") {
+      try { canvas.setPointerCapture(event.pointerId); } catch { /* ignore */ }
+    }
+    if (drag.pointers.size >= 2) {
+      drag.pinching = true;
+      drag.active = false;
+      drag.moved = true;
+      drag.pinchDistance = pinchDistance(drag.pointers);
+      canvas.style.cursor = "grab";
+      event.preventDefault();
+      return;
+    }
+    drag.active = true;
+    drag.startX = event.clientX;
+    drag.startY = event.clientY;
+    drag.moved = false;
+    drag.pendingTheta = 0;
+    drag.pendingPhi = 0;
+    canvas.style.cursor = "grabbing";
+    event.preventDefault();
+  });
+
+  canvas.addEventListener("pointermove", (event) => {
+    if (move3DTransform(event, canvas)) return;
+    if (!drag.pointers.has(event.pointerId)) {
+      canvas.style.cursor = gizmoAxisAtPointer(event, canvas) ? "pointer" : "grab";
+      return;
+    }
+    if (!drag.pointers.has(event.pointerId)) return;
+    drag.pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (drag.pointers.size >= 2 && state.three) {
+      const next = pinchDistance(drag.pointers);
+      if (drag.pinchDistance > 0 && next > 0) {
+        applyOrbitRadius(state.three.orbit.radius * (drag.pinchDistance / next));
+      }
+      drag.pinchDistance = next;
+      drag.pinching = true;
+      drag.moved = true;
+      event.preventDefault();
+      return;
+    }
+    if (!drag.active || drag.pinching || !state.three) return;
+    const dx = event.clientX - drag.startX;
+    const dy = event.clientY - drag.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+    drag.startX = event.clientX;
+    drag.startY = event.clientY;
+    const sens = event.pointerType === "touch" ? 0.006 : 0.01;
+    drag.pendingTheta -= dx * sens;
+    drag.pendingPhi -= dy * sens;
+    scheduleOrbit();
+    event.preventDefault();
+  });
+
+  const stopDrag = (event) => {
+    if (end3DTransform(event, canvas)) return;
+    const wasPinching = drag.pinching;
+    if (event) drag.pointers.delete(event.pointerId);
+    else drag.pointers.clear();
+    if (drag.pointers.size >= 2) {
+      drag.pinchDistance = pinchDistance(drag.pointers);
+      return;
+    }
+    drag.pinching = false;
+    drag.pinchDistance = 0;
+    if (drag.pointers.size === 1) {
+      const remaining = [...drag.pointers.values()][0];
+      drag.active = true;
+      drag.startX = remaining.x;
+      drag.startY = remaining.y;
+      return;
+    }
+    if (event?.type === "pointerup" && !drag.moved && !wasPinching) {
+      selectFurnitureAtPointer(event, canvas);
+    }
+    drag.active = false;
+    canvas.style.cursor = "grab";
+    if (state.three?.pendingLayoutRefresh) {
+      state.three.pendingLayoutRefresh = false;
+      refreshRoom3DLayout();
+    }
+  };
+  canvas.addEventListener("pointerup", stopDrag);
+  canvas.addEventListener("pointerleave", (event) => {
+    if (event.pointerType === "touch") return;
+    stopDrag(event);
+  });
+  canvas.addEventListener("pointercancel", stopDrag);
+  canvas.addEventListener(
+    "wheel",
+    (event) => {
+      if (!state.three) return;
+      event.preventDefault();
+      applyOrbitRadius(state.three.orbit.radius + event.deltaY * 10);
+    },
+    { passive: false }
+  );
+}
+
+function selectFurnitureAtPointer(event, canvas) {
+  if (!state.three) return;
+  const object = furnitureAtPointer(event, canvas);
+  select3DObject(object?.userData?.objectId || null);
+}
+
+function resolveRoomSurfaceMaterial(textureKey, fallbackType, fallbackVariant, fallbackColor, widthMm, heightMm, orientation) {
+  if (textureKey === "wall_default") {
+    return createSurfaceMaterialForPanel("wall", "default", fallbackColor, widthMm, heightMm, orientation);
+  }
+  const preset = texturePresets[textureKey];
+  if (!preset) {
+    return createSurfaceMaterialForPanel(fallbackType, fallbackVariant, fallbackColor, widthMm, heightMm, orientation);
+  }
+  return createSurfaceMaterialForPanel(preset.material, textureKey, preset.color, widthMm, heightMm, orientation);
+}
+
+function rebuildRoomGeometry() {
+  if (!state.three) return;
+  const { roomGroup } = state.three;
+  roomGroup.clear();
+
+  const { width, length, height } = state.roomConfig;
+  const finish = state.roomFinish || {};
+  const floorMat = resolveRoomSurfaceMaterial(
+    finish.floorTexture || "wood_oak",
+    "floor",
+    "default",
+    0xffffff,
+    width,
+    length,
+    "horizontal"
+  );
+  if (finish.useCustomColors && floorMat?.color && finish.floorColor) {
+    floorMat.color.set(normalizeColorHex(finish.floorColor));
+  }
+  const floor = new THREE.Mesh(
+    prepareGeometry(new THREE.BoxGeometry(width, 60, length)),
+    floorMat
+  );
+  floor.position.y = -30;
+  floor.receiveShadow = true;
+  roomGroup.add(floor);
+
+  const wallMat = resolveRoomSurfaceMaterial(
+    finish.wallTexture || "wall_default",
+    "wall",
+    "default",
+    0xfaf7f2,
+    width,
+    height,
+    "vertical"
+  );
+  if (finish.useCustomColors && wallMat?.color && finish.wallColor) {
+    wallMat.color.set(normalizeColorHex(finish.wallColor));
+  }
+  const createWall = (name, geometry, position) => {
+    const wall = new THREE.Group();
+    wall.name = name;
+    wall.userData.isRoomWall = true;
+    const surface = new THREE.Mesh(prepareGeometry(geometry), wallMat.clone());
+    surface.position.copy(position);
+    surface.receiveShadow = true;
+    wall.add(surface);
+    roomGroup.add(wall);
+    return wall;
+  };
+
+  state.three.walls = {
+    back: createWall("wall-back", new THREE.BoxGeometry(width, height, 50), new THREE.Vector3(0, height / 2, -length / 2)),
+    front: createWall("wall-front", new THREE.BoxGeometry(width, height, 50), new THREE.Vector3(0, height / 2, length / 2)),
+    left: createWall("wall-left", new THREE.BoxGeometry(50, height, length), new THREE.Vector3(-width / 2, height / 2, 0)),
+    right: createWall("wall-right", new THREE.BoxGeometry(50, height, length), new THREE.Vector3(width / 2, height / 2, 0)),
+  };
+  state.three.wallSideState = { x: 0, z: 0 };
+  updateDynamicWallVisibility();
+  requestRoom3DRender({ shadows: true });
+}
+
+function furnitureRenderSignature(item) {
+  return JSON.stringify([
+    item.type, item.texture, item.customColor, item.width, item.depth, item.height,
+    item.drawers, item.handles, item.variant, item.countertopType, item.milling, item.rendererMode, item.modelAssetKey, item.modelVersion,
+  ]);
+}
+
+function disposeFurnitureGroup(group) {
+  if (!group) return;
+  if (state.three?.resourceManager) {
+    state.three.resourceManager.disposeValue(group);
+    return;
+  }
+  const materials = new Set();
+  group.traverse((child) => {
+    if (!child.isMesh) return;
+    const list = Array.isArray(child.material) ? child.material : [child.material];
+    list.filter(Boolean).forEach((material) => materials.add(material));
+  });
+  materials.forEach((material) => {
+    if (material.userData?.sharedFurnitureMaterial) return;
+    ["map", "normalMap", "roughnessMap", "aoMap", "metalnessMap"].forEach((key) => material[key]?.dispose?.());
+    material.dispose?.();
+  });
+}
+
+function renderRoom3D() {
+  if (!state.three) return;
+  const { furnitureGroup, dimensionManager } = state.three;
+  const objectGroups = state.three.objectGroups || (state.three.objectGroups = new Map());
+  const liveIds = new Set(state.objects3d.map((item) => item.id));
+  objectGroups.forEach((group, id) => {
+    if (liveIds.has(id)) return;
+    dimensionManager?.detach(group);
+    furnitureGroup.remove(group);
+    disposeFurnitureGroup(group);
+    objectGroups.delete(id);
+  });
+
+  if (!state.objects3d.some((item) => item.id === state.selected3dObjectId)) state.selected3dObjectId = null;
+  let selectedGroup = null;
+
+  state.objects3d.forEach((item) => {
+    const w = Math.max(Number(item.width) || 350, 80);
+    const d = Math.max(Number(item.depth) || 350, 20);
+    const h = Math.max(Number(item.height) || 350, 80);
+    const signature = furnitureRenderSignature(item);
+    let group = objectGroups.get(item.id);
+    if (!group || group.userData.renderSignature !== signature) {
+      if (group) {
+        dimensionManager?.detach(group);
+        furnitureGroup.remove(group);
+        disposeFurnitureGroup(group);
+      }
+      const texturePreset = resolveTexturePreset(item);
+      const materialSet = createFurnitureMaterialSet(item, texturePreset);
+      const placement = migrateLegacyObject(item);
+      if ((placement.rendererMode === "gltf" || placement.rendererMode === "hybrid") && placement.modelAssetKey) {
+        group = new THREE.Group();
+        const placeholder = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshStandardMaterial({ color: 0xb8c0c8, wireframe: true, transparent: true, opacity: 0.45 }));
+        placeholder.position.y = h / 2; group.add(placeholder);
+        const targetGroup = group;
+        modelAssetLoader.load(placement.modelAssetKey, placement.modelVersion).then((model) => {
+          if (state.three?.objectGroups.get(item.id) !== targetGroup) return;
+          targetGroup.remove(placeholder); placeholder.geometry.dispose(); placeholder.material.dispose();
+          const box = new THREE.Box3().setFromObject(model); const size = box.getSize(new THREE.Vector3());
+          const native = placement.configuration.nativeDimensions || [size.x, size.y, size.z];
+          const scale = Math.min(w / Math.max(native[0],1), h / Math.max(native[1],1), d / Math.max(native[2],1));
+          model.scale.setScalar(scale); model.position.y -= box.min.y * scale; targetGroup.add(model); requestRoom3DRender({ shadows: true });
+        }).catch((error) => { targetGroup.userData.assetError = error.message; console.error("GLB model load failed", error); requestRoom3DRender(); });
+      } else group = window.Texture3D?.buildFurnitureGroup
+        ? furnitureRegistry.buildGeometry(placement, {
+            buildLegacy: (normalized) => window.Texture3D.buildFurnitureGroup(toLegacyObject(normalized), w, h, d, materialSet),
+          })
+        : (() => {
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), materialSet.body);
+            mesh.position.y = h / 2;
+            return mesh;
+          })();
+      group.traverse((child) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      group.userData.kind = "furniture";
+      group.userData.objectId = item.id;
+      group.userData.renderSignature = signature;
+      group.userData.dimensions = { width: w, height: h, depth: d };
+      furnitureGroup.add(group);
+      objectGroups.set(item.id, group);
+    }
+    group.position.set(roomUnitToWorldX(item.x), Number(item.y) || 0, roomUnitToWorldZ(item.z));
+    group.rotation.y = -((Number(item.rotationY) || 0) * Math.PI) / 180;
+    if (item.id === state.selected3dObjectId) selectedGroup = group;
+  });
+  // Shadow-map rendering repeats every mesh. Keep detailed shadows for normal scenes and
+  // automatically drop furniture casters in large plans, where the extra pass is most costly.
+  const castFurnitureShadows = state.objects3d.length <= 12;
+  furnitureGroup.traverse((child) => {
+    if (child.isMesh) child.castShadow = castFurnitureShadows;
+  });
+  dimensionManager?.clear();
+  if (selectedGroup?.userData?.dimensions) dimensionManager?.attach(selectedGroup, selectedGroup.userData.dimensions);
+  dimensionManager?.setSelected(selectedGroup);
+  updateTransformGizmo();
+  requestRoom3DRender();
+}
+
+function updateFurnitureTransform(item) {
+  if (!state.three || !item) return;
+  const group = state.three.furnitureGroup.children.find((child) => child.userData.objectId === item.id);
+  if (!group) return;
+  group.position.set(roomUnitToWorldX(item.x), Number(item.y) || 0, roomUnitToWorldZ(item.z));
+  group.rotation.y = -((Number(item.rotationY) || 0) * Math.PI) / 180;
+  group.updateMatrixWorld(true);
+  updateTransformGizmo();
+  requestRoom3DRender();
+}
+
+function renderRoomTopView() {
+  const host = document.getElementById("roomPlan");
+  if (!host) return;
+  const { width, length } = state.roomConfig;
+  const finish = state.roomFinish || {};
+  host.style.background = finish.useCustomColors && finish.floorColor ? normalizeColorHex(finish.floorColor) : "";
+  const metrics = layoutRoomPlan(host, width, length);
+  if (!metrics) return;
+  const { scale } = metrics;
+
+  host.innerHTML = state.objects3d
+    .map((item) => {
+      const { planW, planD } = getObjectPlanSize(item);
+      const left = (item.x - planW / 2) * scale;
+      const top = (item.z - planD / 2) * scale;
+      const chipW = Math.max(item.width * scale, 1);
+      const chipH = Math.max(item.depth * scale, 1);
+      const rotation = normalizeAngle(item.rotationY);
+      const texturePreset = resolveTexturePreset(item);
+      const deleteBtn =
+        APP_MODE === "admin"
+          ? ""
+          : `<button type="button" class="furniture-delete-handle" data-delete-id="${item.id}" title="Удалить">×</button>`;
+      return `
+        <div class="furniture-chip-wrap" style="left:${left}px; top:${top}px; width:${Math.max(planW * scale, 1)}px; height:${Math.max(planD * scale, 1)}px;">
+          <div class="furniture-chip ${item.id === state.selected3dObjectId ? "is-selected" : ""}" data-drag-id="${item.id}" title="${escapeHtml(item.name)} · ${Math.round(item.width)}×${Math.round(item.depth)} мм" style="cursor:grab; left:50%; top:50%; width:${chipW}px; height:${chipH}px; background:${texturePreset.color}; transform: translate(-50%, -50%) rotate(${rotation}deg);">
+            ${deleteBtn}
+            ${chipW >= 60 && chipH >= 22 ? `<span class="furniture-chip-label">${escapeHtml(item.name)}</span>` : ""}
+            <button type="button" class="furniture-rotate-handle" data-rotate-id="${item.id}" title="Удерживайте и вращайте">↻</button>
+          </div>
+        </div>`;
+    })
+    .join("");
+
+  host.querySelectorAll("[data-drag-id]").forEach((el) => {
+    el.addEventListener("pointerdown", (ev) => {
+      if (ev.target.closest("[data-rotate-id], [data-delete-id]")) return;
+      beginDrag(ev, el.dataset.dragId);
+    });
+  });
+  host.querySelectorAll("[data-rotate-id]").forEach((el) => {
+    el.addEventListener("pointerdown", (ev) => beginRotate(ev, el.dataset.rotateId));
+  });
+  host.querySelectorAll("[data-delete-id]").forEach((el) => {
+    el.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      removeObject3D(el.dataset.deleteId);
+    });
+  });
+}
+
+function layoutRoomPlan(host, roomWidth = state.roomConfig.width, roomLength = state.roomConfig.length) {
+  if (!host || !roomWidth || !roomLength || host.getClientRects().length === 0) return null;
+  const parentWidth = host.parentElement?.clientWidth || 0;
+  if (parentWidth <= 0) return null;
+  const style = getComputedStyle(host);
+  const borderLeft = parseFloat(style.borderLeftWidth) || 0;
+  const borderRight = parseFloat(style.borderRightWidth) || 0;
+  const borderTop = parseFloat(style.borderTopWidth) || 0;
+  const borderBottom = parseFloat(style.borderBottomWidth) || 0;
+  const borderX = borderLeft + borderRight;
+  const borderY = borderTop + borderBottom;
+  const maxContentWidth = Math.max(160, parentWidth - borderX);
+  const maxContentHeight = Math.max(280, Math.min(620, window.innerHeight * 0.64) - borderY);
+  const requestedScale = Math.min(maxContentWidth / roomWidth, maxContentHeight / roomLength);
+  host.style.aspectRatio = "auto";
+  host.style.minHeight = "0";
+  host.style.width = `${Math.round(roomWidth * requestedScale + borderX)}px`;
+  host.style.height = `${Math.round(roomLength * requestedScale + borderY)}px`;
+  const scale = Math.min(host.clientWidth / roomWidth, host.clientHeight / roomLength);
+  const rect = host.getBoundingClientRect();
+  return { scale, originX: rect.left + borderLeft, originY: rect.top + borderTop, borderLeft, borderTop };
+}
+
+function getRoomPlanScale(host) {
+  return layoutRoomPlan(host)?.scale || 1;
+}
+
+function setRoomPlanSelection(id) {
+  const host = document.getElementById("roomPlan");
+  if (!host) return;
+  host.querySelectorAll("[data-drag-id]").forEach((chip) => chip.classList.toggle("is-selected", chip.dataset.dragId === id));
+}
+
+function updateRoomPlanChipDom(item, scale, wrapEl, chipEl) {
+  if (!item || !wrapEl || !chipEl) return;
+  const { planW, planD } = getObjectPlanSize(item);
+  const left = (item.x - planW / 2) * scale;
+  const top = (item.z - planD / 2) * scale;
+  wrapEl.style.left = `${left}px`;
+  wrapEl.style.top = `${top}px`;
+  wrapEl.style.width = `${Math.max(planW * scale, 1)}px`;
+  wrapEl.style.height = `${Math.max(planD * scale, 1)}px`;
+  chipEl.style.width = `${Math.max(item.width * scale, 1)}px`;
+  chipEl.style.height = `${Math.max(item.depth * scale, 1)}px`;
+  chipEl.style.transform = `translate(-50%, -50%) rotate(${normalizeAngle(item.rotationY)}deg)`;
+}
+
+function beginDrag(ev, id) {
+  if (APP_MODE === "admin") return;
+  if (state.rotate.active) return;
+  const item = state.objects3d.find((obj) => obj.id === id);
+  if (!item) return;
+  state.selected3dObjectId = id;
+  setRoomPlanSelection(id);
+  state.three?.dimensionManager?.setSelected(
+    state.three.furnitureGroup.children.find((child) => child.userData.objectId === id) || null
+  );
+  state.drag.active = true;
+  state.drag.historyBefore = plannerSnapshot();
+  state.drag.id = id;
+  state.drag.startX = ev.clientX;
+  state.drag.startY = ev.clientY;
+  state.drag.baseX = item.x;
+  state.drag.baseZ = item.z;
+  const host = document.getElementById("roomPlan");
+  const scale = host ? getRoomPlanScale(host) : 1;
+  state.drag.scale = scale || 1;
+  state.drag.chipEl = ev.currentTarget;
+  state.drag.wrapEl = ev.currentTarget.closest(".furniture-chip-wrap");
+  if (state.drag.wrapEl) state.drag.wrapEl.style.willChange = "left, top, width, height";
+  if (state.drag.chipEl) state.drag.chipEl.style.willChange = "transform, width, height";
+  ev.currentTarget.setPointerCapture(ev.pointerId);
+  ev.preventDefault();
+}
+
+function beginRotate(ev, id) {
+  if (APP_MODE === "admin") return;
+  ev.stopPropagation();
+  ev.preventDefault();
+  const item = state.objects3d.find((obj) => obj.id === id);
+  if (!item) return;
+  state.selected3dObjectId = id;
+  setRoomPlanSelection(id);
+  state.three?.dimensionManager?.setSelected(
+    state.three.furnitureGroup.children.find((child) => child.userData.objectId === id) || null
+  );
+  const host = document.getElementById("roomPlan");
+  const metrics = layoutRoomPlan(host);
+  const scale = metrics?.scale || 1;
+  const centerX = (metrics?.originX || host.getBoundingClientRect().left) + item.x * scale;
+  const centerY = (metrics?.originY || host.getBoundingClientRect().top) + item.z * scale;
+  state.rotate.active = true;
+  state.rotate.historyBefore = plannerSnapshot();
+  state.rotate.id = id;
+  state.rotate.centerX = centerX;
+  state.rotate.centerY = centerY;
+  state.rotate.startAngle = Math.atan2(ev.clientY - centerY, ev.clientX - centerX);
+  state.rotate.baseRotation = normalizeAngle(item.rotationY);
+  state.rotate.scale = scale || 1;
+  state.rotate.chipEl = host.querySelector(`[data-drag-id="${CSS.escape(id)}"]`);
+  state.rotate.wrapEl = state.rotate.chipEl?.closest(".furniture-chip-wrap") || null;
+  if (state.rotate.wrapEl) state.rotate.wrapEl.style.willChange = "left, top, width, height";
+  if (state.rotate.chipEl) state.rotate.chipEl.style.willChange = "transform, width, height";
+  ev.currentTarget.setPointerCapture(ev.pointerId);
+}
+
+function handleDragMove(ev) {
+  if (state.rotate.active) {
+    handleRotateMove(ev);
+    return;
+  }
+  if (!state.drag.active) return;
+  const { width, length } = state.roomConfig;
+  const scale = state.drag.scale || 1;
+
+  const dx = (ev.clientX - state.drag.startX) / scale;
+  const dz = (ev.clientY - state.drag.startY) / scale;
+  const item = state.objects3d.find((obj) => obj.id === state.drag.id);
+  if (!item) return;
+
+  item.x = state.drag.baseX + dx;
+  item.z = state.drag.baseZ + dz;
+  snapObjectPosition(item, width, length);
+  clampObjectPosition(item, width, length);
+  const collisions = findCollisions(item, state.objects3d, ev.altKey ? 0 : 2);
+  state.drag.chipEl?.classList.toggle("has-collision", collisions.length > 0);
+  state.drag.chipEl?.setAttribute("aria-invalid", String(collisions.length > 0));
+  updateRoomPlanChipDom(item, scale, state.drag.wrapEl, state.drag.chipEl);
+  updateFurnitureTransform(item);
+  ev.preventDefault();
+}
+
+function handleRotateMove(ev) {
+  const item = state.objects3d.find((obj) => obj.id === state.rotate.id);
+  if (!item) return;
+  const angle = Math.atan2(ev.clientY - state.rotate.centerY, ev.clientX - state.rotate.centerX);
+  const delta = ((angle - state.rotate.startAngle) * 180) / Math.PI;
+  item.rotationY = Math.round(normalizeAngle(state.rotate.baseRotation + delta) * 10) / 10;
+  clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
+  updateRoomPlanChipDom(item, state.rotate.scale || 1, state.rotate.wrapEl, state.rotate.chipEl);
+  updateFurnitureTransform(item);
+  ev.preventDefault();
+}
+
+function endDrag() {
+  if (state.rotate.active) {
+    const before = state.rotate.historyBefore;
+    state.rotate.active = false;
+    state.rotate.id = null;
+    state.rotate.wrapEl = null;
+    state.rotate.chipEl = null;
+    state.rotate.historyBefore = null;
+    if (before) plannerHistory.record(before, plannerSnapshot(), "rotate");
+    renderRoomTopView();
+    renderBom();
+    requestRoom3DRender({ shadows: true });
+    return;
+  }
+  const before = state.drag.historyBefore;
+  state.drag.active = false;
+  state.drag.id = null;
+  state.drag.wrapEl = null;
+  state.drag.chipEl = null;
+  state.drag.historyBefore = null;
+  if (before) plannerHistory.record(before, plannerSnapshot(), "move");
+  requestRoom3DRender({ shadows: true });
+}
+
+function applyRoomSize() {
+  const widthInput = document.getElementById("roomWidth");
+  const lengthInput = document.getElementById("roomLength");
+  const heightInput = document.getElementById("roomHeight");
+  if (!widthInput || !lengthInput || !heightInput) return;
+  const width = Number(widthInput.value);
+  const length = Number(lengthInput.value);
+  const height = Number(heightInput.value);
+  if (![width, length, height].every(Number.isFinite) || width < 2000 || length < 2000 || height < 2000) {
+    toast("Размеры комнаты должны быть не менее 2000 мм", false);
+    return;
+  }
+  const tooLarge = state.objects3d.some((item) => {
+    const footprint = getObjectPlanSize(item);
+    return footprint.planW > width || footprint.planD > length || item.height > height;
+  });
+  if (tooLarge) { toast("В комнате таких размеров не помещается добавленная мебель", false); return; }
+  const before = plannerSnapshot();
+  state.roomConfig = { width, length, height };
+  for (const item of state.objects3d) {
+    clampObjectPosition(item, width, length);
+  }
+  rebuildRoomGeometry();
+  renderRoomTopView();
+  renderRoom3D();
+  plannerHistory.record(before, plannerSnapshot(), "room-size");
+  toast("Размеры комнаты применены");
+}
+
+function addObject3DFromForm() {
+  const before = plannerSnapshot();
+  const type = document.getElementById("objType").value;
+  const texture = document.getElementById("objTexture").value;
+  const name = document.getElementById("objName").value.trim() || "Новый объект";
+  const width = Number(document.getElementById("objW").value);
+  const depth = Number(document.getElementById("objD").value);
+  const height = Number(document.getElementById("objH").value);
+  if (![width, depth, height].every(Number.isFinite) || width <= 0 || depth <= 0 || height <= 0) {
+    toast("Габариты объекта должны быть > 0 мм", false);
+    return;
+  }
+  const { planW, planD } = getObjectPlanSize({ width, depth, height, rotationY: 0 });
+  if (planW > state.roomConfig.width || planD > state.roomConfig.length || height > state.roomConfig.height) {
+    toast("Предмет не помещается в комнате. Уменьшите габариты или увеличьте комнату", false);
+    return;
+  }
+  const defaults = furnitureAccessoryDefaults(type);
+  const useCustomColor = document.getElementById("objUseCustomColor")?.checked;
+  const customColor = useCustomColor ? normalizeColorHex(document.getElementById("objCustomColor")?.value) : "";
+  const countertopType = document.getElementById("objCountertopType")?.value || "";
+  const millingAllowed = texture === "mdf_film_matte" || texture === "mdf_film_gloss";
+  const milling = millingAllowed ? !!document.getElementById("objMilling")?.checked : false;
+  const item = {
+    id: makeId(),
+    type,
+    texture,
+    customColor,
+    section: state.objectEditor?.section || "living",
+    y: Number(state.objectEditor?.elevation) || 0,
+    countertopType,
+    milling,
+    drawers: state.objectEditor?.drawers ?? defaults.drawers,
+    handles: state.objectEditor?.handles ?? defaults.handles,
+    variant: state.objectEditor?.variant || "",
+    name,
+    width,
+    depth,
+    height,
+    x: Math.min(Math.max(state.roomConfig.width * 0.5, planW / 2), state.roomConfig.width - planW / 2),
+    z: Math.min(Math.max(state.roomConfig.length * 0.5, planD / 2), state.roomConfig.length - planD / 2),
+    rotationY: 0,
+  };
+  clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
+  state.objects3d.push(item);
+  state.selected3dObjectId = item.id;
+  plannerHistory.record(before, plannerSnapshot(), "add");
+  renderObjects3dList();
+  renderRoomTopView();
+  renderRoom3D();
+  toast("Объект добавлен в сцену");
+}
+
+function buildBomFromObjects() {
+  const parts = [];
+  const assembly = [];
+  const pushPart = (name, width, height, quantity, options = {}) => {
+    const multiplier = Number(options.costMultiplier) || 1;
+    const role = String(options.role || "");
+    const milling = Boolean(options.milling);
+    const key = `${name}_${width}_${height}_${multiplier}_${role}_${milling ? 1 : 0}`;
+    const existing = parts.find((part) => part.key === key);
+    if (existing) {
+      existing.quantity += quantity;
+    } else {
+      parts.push({ key, name, width, height, quantity, cost_multiplier: multiplier, role, milling });
+    }
+  };
+
+  for (const item of state.objects3d) {
+    const { width: w, depth: d, height: h } = getObjectManufacturingSize(item);
+    const facadeMultiplier =
+      item.milling && (item.texture === "mdf_film_matte" || item.texture === "mdf_film_gloss") ? 1.3 : 1;
+
+    const definition = furnitureRegistry.get(item.type);
+    if (definition && (definition.category === "kitchen" || definition.category === "wardrobe")) {
+      const production = definition.buildBom(migrateLegacyObject(item));
+      production.parts.forEach((part) => pushPart(part.id, part.dimensions.width, part.dimensions.height, part.quantity || 1, {
+        costMultiplier: part.role === "facade" ? facadeMultiplier : 1,
+        role: part.role,
+        milling: part.role === "facade" && Boolean(item.milling),
+      }));
+      assembly.push(...(production.assembly || []).map((step) => `${item.name}: ${step}`));
+      continue;
+    }
+
+    if (item.type === "shelf") {
+      pushPart("Боковина", d, h, 2);
+      pushPart("Крышка/дно", w, d, 2);
+      pushPart("Полка", Math.max(w - 36, 100), d, Math.max(2, Math.round(h / 500)));
+      pushPart("Задняя стенка", w, h, 1);
+      if (["wardrobe", "wardrobe_sliding", "wardrobe_corner"].includes(item.type)) pushPart("Фасад дверцы", Math.round(w / 2), h, 2, { costMultiplier: facadeMultiplier, role: "facade", milling: Boolean(item.milling) });
+      assembly.push(`Собрать корпус "${item.name}": стяжки 8 шт, конфирматы 16 шт, петли 4 шт`);
+    } else if (item.type === "table") {
+      pushPart("Столешница", w, d, 1);
+      pushPart("Опора", 80, h - 40, 4);
+      assembly.push(`Собрать стол "${item.name}": болты 8 шт, шайбы 8 шт`);
+    } else if (item.type === "cabinet" || item.type === "bath_vanity") {
+      pushPart("Боковина", d, h, 2);
+      pushPart("Крышка/дно", w, d, 2);
+      pushPart("Фасад", w, h, 1, { costMultiplier: facadeMultiplier, role: "facade", milling: Boolean(item.milling) });
+      if (item.countertopType) {
+        pushPart("Столешница", w, d, 1);
+      }
+      assembly.push(`Собрать тумбу "${item.name}": направляющие 2 шт, ручка 1 шт`);
+    } else if (item.type === "sofa" || item.type === "armchair" || item.type === "chair") {
+      pushPart("Каркас сиденья", w, d, 1);
+      pushPart("Спинка", w, Math.round(h * 0.6), 1);
+    } else if (item.type === "bed") {
+      pushPart("Боковина кровати", d, Math.max(180, Math.round(h * 0.3)), 2);
+      pushPart("Изголовье", w, h, 1);
+      pushPart("Основание", w, d, 1);
+      assembly.push(`Собрать кровать "${item.name}": основание, царги и изголовье`);
+    }
+  }
+
+  return {
+    parts: parts.map(({ key, ...rest }) => rest),
+    assembly,
+  };
+}
+
+function renderBom() {
+  const host = document.getElementById("bomList");
+  const bom = buildBomFromObjects();
+  if (!bom.parts.length) {
+    if (host) host.innerHTML = `<div class="text-muted">Добавьте объекты в 3D, чтобы получить детали и сборку.</div>`;
+    renderCostEstimate(bom);
+    return bom;
+  }
+  if (host) {
+    host.innerHTML = `
+      <div class="mb-2"><strong>Детали для изготовления:</strong></div>
+      <ul class="mb-3">${bom.parts.map((part) => `<li>${escapeHtml(part.name)} — ${part.width}×${part.height} мм × ${part.quantity}</li>`).join("")}</ul>
+      <div class="mb-2"><strong>Черновой список сборки:</strong></div>
+      <ul>${bom.assembly.map((row) => `<li>${escapeHtml(row)}</li>`).join("")}</ul>`;
+  }
+  renderCostEstimate(bom);
+  return bom;
+}
+
+const LDSP_PRICE_M2 = 3200;
+const EDGE_PRICE_M = 180;
+const RETAIL_MULTIPLIER = 2.2;
+
+function edgeMetersFromBom(bom) {
+  let meters = 0;
+  for (const part of bom.parts || []) {
+    const mult = Number(part.cost_multiplier) || 1;
+    meters += (((part.width + part.height) * 2 * part.quantity) / 1000) * mult;
+  }
+  return meters;
+}
+
+function estimateProjectCost(bom, cutting = null) {
+  const sheetW = Number(cutting?.sheet_width) || Number(document.getElementById("sheetW")?.value) || 2800;
+  const sheetH = Number(cutting?.sheet_height) || Number(document.getElementById("sheetH")?.value) || 2070;
+  let materialCost = 0;
+  let edgeCost = 0;
+  for (const part of bom.parts) {
+    const mult = Number(part.cost_multiplier) || 1;
+    const areaM2 = (part.width * part.height * part.quantity) / 1_000_000;
+    materialCost += areaM2 * LDSP_PRICE_M2 * mult;
+    edgeCost += (((part.width + part.height) * 2 * part.quantity) / 1000) * EDGE_PRICE_M * mult;
+  }
+  const sheets = Number(cutting?.total_sheets) || 0;
+  if (sheets > 0) {
+    materialCost = sheets * ((sheetW * sheetH) / 1_000_000) * LDSP_PRICE_M2;
+  }
+  const procurementCost = Math.round(materialCost + edgeCost);
+  const total = Math.round(procurementCost * RETAIL_MULTIPLIER);
+  return {
+    materialCost: Math.round(materialCost),
+    edgeCost: Math.round(edgeCost),
+    procurementCost,
+    total,
+    sheets,
+    fromCutting: sheets > 0,
+  };
+}
+
+function hardwareQualityFactor() {
+  const values = HARDWARE_SLIDERS.map((item) => Number(state.hardwareLevels?.[item.key] ?? 50));
+  const avg = values.reduce((sum, value) => sum + value, 0) / values.length;
+  return 0.82 + (avg / 100) * 0.36;
+}
+
+function estimateTierPrices(cost, bom = null) {
+  const config = state.pricingConfig || DEFAULT_SPREADSHEET_PRICING;
+  const rows = estimateSpreadsheetPrices({
+    procurementCost: cost.procurementCost,
+    quantities: quantitiesFromScene(state.objects3d, bom || { parts: [] }),
+    config,
+  });
+  return Object.fromEntries(rows.map((row) => [row.key, row.price]));
+}
+
+function cuttingPartsSignature(parts) {
+  return JSON.stringify(normalizePartsForCutting(parts));
+}
+
+let costQuoteTimer = 0;
+const costQuotes = new CostQuoteController(async (_key, payload) => {
+  const data = await api("POST", "/cutting/quote", payload);
+  return { ...data, sheet_width: payload.sheet_width, sheet_height: payload.sheet_height };
+});
+
+function cuttingQuoteInput(bom) {
+  if (!bom?.parts?.length) return null;
+  const sheet_width = Number(document.getElementById("sheetW")?.value) || 2800;
+  const sheet_height = Number(document.getElementById("sheetH")?.value) || 2070;
+  const parts = normalizePartsForCutting(bom.parts);
+  return { key: `${sheet_width}x${sheet_height}:${cuttingPartsSignature(parts)}`, payload: { sheet_width, sheet_height, parts } };
+}
+
+async function quoteCuttingForBom(bom) {
+  const input = cuttingQuoteInput(bom);
+  if (!input) return null;
+  try {
+    const data = await costQuotes.request(input.key, input.payload);
+    state.cuttingQuoteCache = { key: input.key, data };
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function tierTitle(key) {
+  return state.pricingConfig?.tiers?.find((tier) => tier.key === key)?.title
+    || PRICING_TIERS.find((tier) => tier.key === key)?.title
+    || key;
+}
+
+function orderSelectedPrice(order) {
+  const tier = order.selected_tier || "standard";
+  return order[`price_${tier}`];
+}
+
+function selectTier(key) {
+  if (!PRICING_TIERS.some((tier) => tier.key === key)) return;
+  state.selectedTier = key;
+  renderCostEstimate();
+  const hint = document.getElementById("plannerHint");
+  if (hint && customerName()) {
+    hint.textContent = `Выбрана комплектация «${tierTitle(key)}». Сохраните или отправьте проект в работу.`;
+  }
+}
+
+function bindTierCardSelection(host) {
+  if (!host || APP_MODE === "admin") return;
+  host.querySelectorAll("[data-tier-select]").forEach((card) => {
+    card.addEventListener("click", () => selectTier(card.dataset.tierSelect));
+    card.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectTier(card.dataset.tierSelect);
+      }
+    });
+  });
+}
+
+function renderTierCards(tiers) {
+  const tierMeta = {
+    standard: { badge: "bg-secondary", hint: "Базовые материалы и фурнитура" },
+    comfort: { badge: "bg-primary", hint: "Улучшенные фасады и направляющие" },
+    premium: { badge: "bg-warning text-dark", hint: "Премиум фурнитура и отделка" },
+    luxury: { badge: "bg-dark", hint: "Эмаль и премиальная фурнитура" },
+  };
+  const selected = state.selectedTier || "standard";
+  return `<div class="row g-3">${PRICING_TIERS.map((tier) => {
+    const meta = tierMeta[tier.key];
+    const profile = TIER_MATERIAL_PROFILES[tier.key];
+    const active = tier.key === selected ? "border-primary border-2 shadow-sm" : "";
+    const selectable = APP_MODE !== "admin";
+    const title = tierTitle(tier.key);
+    return `<div class="col-md-3">
+      <div class="p-3 border rounded h-100 bg-white ${active} ${selectable ? "tier-select-card" : ""}"
+        ${selectable ? `data-tier-select="${tier.key}" role="button" tabindex="0" style="cursor:pointer"` : ""}>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="fw-semibold">${escapeHtml(title)}</span>
+          <span class="badge ${meta.badge}">${escapeHtml(title)}</span>
+        </div>
+        <div class="cost-highlight" data-tier-price="${tier.key}">${money(tiers[tier.key])}</div>
+        <div class="small text-muted mt-1">${meta.hint}</div>
+        ${profile ? `<ul class="small text-muted mt-2 mb-0 ps-3">${profile.specs.map((spec) => `<li>${escapeHtml(spec)}</li>`).join("")}</ul>` : ""}
+        ${tier.key === selected && selectable ? `<div class="small text-primary fw-semibold mt-2">Выбрано</div>` : ""}
+      </div>
+    </div>`;
+  }).join("")}</div>`;
+}
+
+function renderHardwareConstructor() {
+  return `<div class="hardware-constructor" id="hardwareConstructor">
+      <datalist id="hardwareSliderStops"><option value="0"></option><option value="50"></option><option value="100"></option></datalist>
+      <div class="hardware-constructor-head">
+        <strong>Конструктор комплектующих</strong>
+        <p>Три положения: слева доступный вариант, по центру средний, справа более качественный. Цена всех комплектаций меняется вместе.</p>
+      </div>
+      ${HARDWARE_SLIDERS.map((item) => {
+        const value = Number(state.hardwareLevels?.[item.key] ?? 50);
+        return `<label class="hardware-slider">
+          <span class="hardware-slider-title">${escapeHtml(item.title)}</span>
+          <span class="hardware-slider-scale"><span>${escapeHtml(item.cheap)}</span><span>Средние</span><span>${escapeHtml(item.quality)}</span></span>
+          <input type="range" min="0" max="100" step="50" list="hardwareSliderStops" value="${value}" data-hardware-key="${item.key}" aria-label="${escapeHtml(item.title)}: три положения">
+        </label>`;
+      }).join("")}
+    </div>`;
+}
+
+function snapHardwareLevel(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 25) return 0;
+  if (n < 75) return 50;
+  return 100;
+}
+
+function bindHardwareConstructor(host) {
+  host.querySelectorAll("[data-hardware-key]").forEach((input) => {
+    const apply = () => {
+      if (!state.hardwareLevels) state.hardwareLevels = { hinges: 50, slides: 50, facades: 50, handles: 50 };
+      const snapped = snapHardwareLevel(input.value);
+      input.value = String(snapped);
+      state.hardwareLevels[input.dataset.hardwareKey] = snapped;
+      refreshCostAmounts(host);
+    };
+    input.addEventListener("input", apply);
+    input.addEventListener("change", apply);
+  });
+}
+
+function refreshCostAmounts(host) {
+  const data = buildBomFromObjects();
+  if (!data.parts.length && !state.objects3d.length) return;
+  const quote = cuttingQuoteInput(data);
+  const tiers = estimateTierPrices(estimateProjectCost(data, quote ? costQuotes.get(quote.key) : null), data);
+  const selectedTotal = tiers[state.selectedTier] || tiers.comfort;
+  const totalEl = host.querySelector(".estimate-total");
+  if (totalEl) totalEl.textContent = `от ${money(selectedTotal)}`;
+  host.querySelectorAll("[data-tier-price]").forEach((el) => {
+    const key = el.dataset.tierPrice;
+    if (tiers[key] != null) el.textContent = money(tiers[key]);
+  });
+}
+
+function renderCostEstimate(bom = null) {
+  const host = document.getElementById("costEstimate");
+  if (!host) return;
+  const data = bom || buildBomFromObjects();
+  window.clearTimeout(costQuoteTimer);
+  const input = cuttingQuoteInput(data);
+  const generation = costQuotes.begin(input?.key || "empty");
+  host.setAttribute("aria-busy", "false");
+  if (!data.parts.length && !state.objects3d.length) {
+    host.innerHTML = `<div class="estimate-empty"><div><span class="estimate-empty-icon">₽</span><h3>Расчёт появится здесь</h3><p class="estimate-note">Добавьте хотя бы один предмет мебели, чтобы увидеть ориентировочную стоимость.</p><button class="btn btn-secondary" type="button" data-open-furniture>Добавить мебель</button></div></div>`;
+    host.querySelector("[data-open-furniture]")?.addEventListener("click", () => document.getElementById("btnOpenObjectPicker")?.click());
+    return;
+  }
+  if (!data.parts.length) {
+    host.innerHTML = `<div class="estimate-empty"><div><span class="estimate-empty-icon">₽</span><h3>Мебель для расчёта не выбрана</h3><p class="estimate-note">Техника и декор не входят в расчёт изготовления. Добавьте корпусную мебель, чтобы получить ориентир.</p><button class="btn btn-secondary" type="button" data-open-furniture>Добавить мебель</button></div></div>`;
+    host.querySelector("[data-open-furniture]")?.addEventListener("click", () => document.getElementById("btnOpenObjectPicker")?.click());
+    return;
+  }
+  paintCostEstimate(host, data, costQuotes.get(input.key));
+  host.setAttribute("aria-busy", "true");
+  costQuoteTimer = window.setTimeout(async () => {
+    const cutting = await quoteCuttingForBom(data);
+    if (document.getElementById("costEstimate") === host && costQuotes.isCurrent(generation)) {
+      paintCostEstimate(host, data, cutting);
+      host.setAttribute("aria-busy", "false");
+    }
+  }, 280);
+}
+
+function paintCostEstimate(host, data, cutting) {
+  const cost = estimateProjectCost(data, cutting);
+  const tiers = estimateTierPrices(cost, data);
+  const cuttingNote = cost.fromCutting
+    ? `Цена по раскрою: ${cost.sheets} лист(ов) ${cutting?.sheet_width || 2800}×${cutting?.sheet_height || 2070} мм`
+    : "Предварительно по площади деталей, затем уточняется раскроем";
+  if (APP_MODE !== "admin") {
+    const selectedTotal = tiers[state.selectedTier] || tiers.comfort;
+    host.innerHTML = `
+      <div class="estimate-card">
+        <div class="estimate-kicker">Ориентировочная стоимость</div>
+        <div class="estimate-total">от ${money(selectedTotal)}</div>
+        <div class="small text-muted mt-1 mb-2">${escapeHtml(cuttingNote)}</div>
+        <button class="btn btn-primary" type="button" data-exact-quote>Получить точный расчёт</button>
+      </div>
+      <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
+      ${renderTierCards(tiers)}
+      <div class="small text-muted mt-3">Цена рассчитана по четырём вариантам из таблицы и количествам, полученным из 3D-проекта.</div>`;
+
+    bindTierCardSelection(host);
+    host.querySelector("[data-exact-quote]")?.addEventListener("click", () => {
+      const contact = document.getElementById("customerName");
+      contact?.scrollIntoView({ behavior: "smooth", block: "center" });
+      window.setTimeout(() => contact?.focus(), 300);
+    });
+    return;
+  }
+  host.innerHTML = `
+    <div class="row g-3">
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Листы по раскрою</div><div class="fw-semibold">${cost.fromCutting ? `${cost.sheets} шт` : "—"}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Материалы (ЛДСП)</div><div class="fw-semibold">${money(cost.materialCost)}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Кромка</div><div class="fw-semibold">${money(cost.edgeCost)}</div></div></div>
+      <div class="col-sm-6"><div class="p-3 bg-light rounded"><div class="small text-muted">Закупочная сумма</div><div class="fw-semibold">${money(cost.procurementCost)}</div></div></div>
+    </div>
+    <div class="small text-muted mt-2">${escapeHtml(cuttingNote)}</div>
+    <div class="mt-3">${renderTierCards(tiers)}</div>
+    <div class="small text-muted mt-3">Цена рассчитана по четырём вариантам из таблицы и количествам, полученным из 3D-проекта.</div>
+    <div class="mt-3 p-3 border rounded bg-white">
+      <div class="small text-muted">Базовая сумма (стандарт)</div>
+      <div class="cost-highlight">${money(tiers.standard)}</div>
+    </div>`;
+}
+
+async function ensureCategoriesLoaded() {
+  if (state.categories.length) return;
+  state.categories = (await api("GET", "/catalog/categories")).filter((cat) => !isLikelyCorruptCategoryName(cat.name));
+}
+
+function populateProductCategoryDatalist() {
+  const list = document.getElementById("categoryNameList");
+  if (!list) return;
+  list.innerHTML = visibleCategories()
+    .map((cat) => `<option value="${escapeHtml(cat.name)}"></option>`)
+    .join("");
+}
+
+function categoryInputValue(categoryId) {
+  if (!categoryId) return "";
+  const cat = visibleCategories().find((c) => c.id === categoryId);
+  return cat?.name || categoryName(categoryId);
+}
+
+async function resolveCategoryIdByName(name, options = { reload: true }) {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Укажите категорию");
+  if (isLikelyCorruptCategoryName(trimmed)) throw new Error("Некорректное название категории");
+  const existing = visibleCategories().find((cat) => cat.name.toLowerCase() === trimmed.toLowerCase());
+  if (existing) return existing.id;
+  const created = await api("POST", "/catalog/categories", { name: trimmed }, true);
+  state.categories.push(created);
+  state.categories.sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  if (options.reload !== false) populateProductCategoryDatalist();
+  return created.id;
+}
+
+function resetProductEditorPhotos() {
+  productEditorPhotos.pending.forEach((item) => {
+    if (item.preview?.startsWith("blob:")) URL.revokeObjectURL(item.preview);
+  });
+  productEditorPhotos.existing = [];
+  productEditorPhotos.pending = [];
+  productEditorPhotos.removed = [];
+  const input = document.getElementById("editProductPhotos");
+  if (input) input.value = "";
+}
+
+async function loadProductEditorPhotos(product) {
+  resetProductEditorPhotos();
+  if (!product?.photos?.length) {
+    renderProductEditorPhotosPreview();
+    return;
+  }
+  productEditorPhotos.existing = product.photos.map((photo) => ({
+    ...photo,
+    preview: assetObjectUrl(photo.object_key),
+  }));
+  renderProductEditorPhotosPreview();
+}
+
+function renderProductEditorPhotosPreview() {
+  const host = document.getElementById("editProductPhotosPreview");
+  if (!host) return;
+  const items = [
+    ...productEditorPhotos.existing.map((photo) => ({
+      key: `existing-${photo.id}`,
+      preview: photo.preview,
+      remove: () => {
+        productEditorPhotos.removed.push(photo.id);
+        productEditorPhotos.existing = productEditorPhotos.existing.filter((row) => row.id !== photo.id);
+        renderProductEditorPhotosPreview();
+      },
+    })),
+    ...productEditorPhotos.pending.map((photo, index) => ({
+      key: `pending-${index}`,
+      preview: photo.preview,
+      remove: () => {
+        if (photo.preview?.startsWith("blob:")) URL.revokeObjectURL(photo.preview);
+        productEditorPhotos.pending.splice(index, 1);
+        renderProductEditorPhotosPreview();
+      },
+    })),
+  ];
+  host.innerHTML = items.length
+    ? items
+        .map(
+          (item) => `<div class="product-photo-thumb position-relative">
+            ${item.preview ? `<img src="${item.preview}" alt="">` : `<div class="border rounded p-2 small">фото</div>`}
+            <button type="button" class="btn btn-sm btn-danger position-absolute top-0 end-0" data-remove-photo="${item.key}">×</button>
+          </div>`
+        )
+        .join("")
+    : `<div class="small text-muted">Фото не прикреплены</div>`;
+  host.querySelectorAll("[data-remove-photo]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const item = items.find((row) => row.key === btn.dataset.removePhoto);
+      item?.remove();
+    });
+  });
+}
+
+function handleProductPhotosSelected(event) {
+  for (const file of Array.from(event.target.files || [])) {
+    productEditorPhotos.pending.push({
+      file,
+      preview: URL.createObjectURL(file),
+    });
+  }
+  renderProductEditorPhotosPreview();
+  event.target.value = "";
+}
+
+async function uploadAssetFile(file, objectKey) {
+  const form = new FormData();
+  form.append("object_key", objectKey);
+  form.append("file", file);
+  const headers = { Accept: "application/json" };
+  if (token()) headers.Authorization = `Bearer ${token()}`;
+  const response = await fetch(`${apiBase()}/assets/upload`, { method: "POST", headers, body: form });
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = text;
+  }
+  if (!response.ok) {
+    const detail = payload?.detail;
+    throw new Error(typeof detail === "string" ? detail : "Не удалось загрузить файл");
+  }
+  return payload?.object_key || objectKey;
+}
+
+function assetObjectUrl(objectKey) {
+  const parts = String(objectKey).split("/").map((part) => encodeURIComponent(part));
+  return `${apiBase()}/assets/objects/${parts.join("/")}`;
+}
+
+async function syncProductEditorPhotos(productId) {
+  for (const photoId of productEditorPhotos.removed) {
+    await requestNoBody("DELETE", `/catalog/products/${productId}/photos/${photoId}`, true);
+  }
+  let order = productEditorPhotos.existing.length;
+  for (const item of productEditorPhotos.pending) {
+    const ext = (item.file.name.split(".").pop() || "jpg").toLowerCase();
+    const objectKey = `products/${productId}/${Date.now()}-${order}.${ext}`;
+    await uploadAssetFile(item.file, objectKey);
+    await api(
+      "POST",
+      `/catalog/products/${productId}/photos`,
+      { object_key: objectKey, sort_order: order },
+      true
+    );
+    order += 1;
+  }
+}
+
+async function hydrateProductPhotoUrls(products) {
+  state.productPhotoUrls = {};
+  state.productPhotoGalleries = {};
+  for (const product of products) {
+    const urls = (product.photos || [])
+      .map((photo) => photo?.object_key)
+      .filter(Boolean)
+      .map((key) => assetObjectUrl(key));
+    if (urls.length) {
+      state.productPhotoGalleries[product.id] = urls;
+      state.productPhotoUrls[product.id] = urls[0];
+    }
+  }
+}
+
+function productGalleryUrls(product) {
+  if (!product) return [];
+  if (state.productPhotoGalleries[product.id]?.length) return state.productPhotoGalleries[product.id];
+  return (product.photos || [])
+    .map((photo) => photo?.object_key)
+    .filter(Boolean)
+    .map((key) => assetObjectUrl(key));
+}
+
+function openProductCard(productId) {
+  const product = state.products.find((p) => p.id === productId);
+  const modal = document.getElementById("productCardModal");
+  if (!product || !modal) return;
+  const title = displayProductTitle(product);
+  const urls = productGalleryUrls(product);
+  const meta = demoMeta(product);
+  document.getElementById("productCardTitle").textContent = title;
+  document.getElementById("productCardCategory").textContent = categoryName(product.category_id);
+  document.getElementById("productCardBrand").textContent = displayProductBrand(product);
+  document.getElementById("productCardDesc").textContent = displayProductDescription(product) || "Практичное мебельное решение для дома.";
+  document.getElementById("productCardPrice").textContent = money(Number(product.price));
+  const stockEl = document.getElementById("productCardStock");
+  const outOfStock = Number(product.stock) <= 0;
+  stockEl.textContent = outOfStock ? "Нет в наличии" : `В наличии: ${product.stock}`;
+  stockEl.classList.toggle("is-empty", outOfStock);
+  const gallery = document.getElementById("productCardGallery");
+  if (urls.length) {
+    gallery.innerHTML = `
+      <div class="product-card-hero">
+        <img id="productCardHero" src="${urls[0]}" alt="${escapeHtml(title)}" />
+      </div>
+      ${urls.length > 1 ? `<div class="product-card-thumbs">${urls.map((url, index) => `
+        <button type="button" class="product-card-thumb ${index === 0 ? "is-active" : ""}" data-product-photo="${index}">
+          <img src="${url}" alt="">
+        </button>`).join("")}</div>` : ""}`;
+    gallery.querySelectorAll("[data-product-photo]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const index = Number(btn.dataset.productPhoto);
+        const hero = document.getElementById("productCardHero");
+        if (hero) hero.src = urls[index];
+        gallery.querySelectorAll(".product-card-thumb").forEach((thumb) => thumb.classList.toggle("is-active", thumb === btn));
+      });
+    });
+  } else {
+    gallery.innerHTML = `<div class="product-art product-card-placeholder" style="background:${meta.gradient}" role="img" aria-label="${escapeHtml(title)}">${meta.icon}</div>`;
+  }
+  const actions = document.getElementById("productCardActions");
+  if (APP_MODE === "admin") {
+    actions.innerHTML = `
+      <button type="button" class="btn btn-quiet" data-bs-dismiss="modal">Закрыть</button>
+      <button type="button" class="btn btn-primary" id="productCardEdit">Изменить</button>`;
+    document.getElementById("productCardEdit")?.addEventListener("click", () => {
+      bootstrap.Modal.getInstance(modal)?.hide();
+      openProductEditor(product.id);
+    });
+  } else {
+    const inCart = state.cart.some((item) => item.id === product.id);
+    const wished = state.wishlistIds.has(product.id);
+    actions.innerHTML = `
+      <button type="button" class="btn btn-quiet" data-bs-dismiss="modal">Закрыть</button>
+      <button type="button" class="btn btn-quiet wishlist-button ${wished ? "is-active" : ""}" id="productCardWish">${wished ? "♥ В избранном" : "♡ В избранное"}</button>
+      <button type="button" class="btn btn-primary" id="productCardCart" ${outOfStock ? "disabled" : ""}>${inCart ? "✓ В корзине" : outOfStock ? "Нет в наличии" : "В корзину"}</button>`;
+    document.getElementById("productCardWish")?.addEventListener("click", (event) => toggleWishlist(product.id, event.currentTarget));
+    document.getElementById("productCardCart")?.addEventListener("click", (event) => addToCart(product.id, event.currentTarget));
+  }
+  bootstrap.Modal.getOrCreateInstance(modal).show();
+}
+
+async function openProductEditor(productId) {
+  const product = state.products.find((p) => p.id === productId);
+  if (!product) return;
+  populateProductCategoryDatalist();
+  document.getElementById("editProductId").value = product.id;
+  document.getElementById("editProductName").value = displayProductTitle(product);
+  document.getElementById("editProductSku").value = product.sku;
+  document.getElementById("editProductBrand").value = displayProductBrand(product);
+  document.getElementById("editProductPrice").value = product.price;
+  document.getElementById("editProductStock").value = product.stock;
+  document.getElementById("editProductDesc").value = displayProductDescription(product) || "";
+  document.getElementById("editProductCategory").value = categoryInputValue(product.category_id);
+  await loadProductEditorPhotos(product);
+  document.getElementById("productEditorTitle").textContent = "Редактировать товар";
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("productEditorModal")).show();
+}
+
+async function openNewProductEditor() {
+  await ensureCategoriesLoaded();
+  populateProductCategoryDatalist();
+  document.getElementById("editProductId").value = "";
+  document.getElementById("editProductName").value = "";
+  document.getElementById("editProductSku").value = `SKU-${Date.now()}`;
+  document.getElementById("editProductBrand").value = "";
+  document.getElementById("editProductPrice").value = "10000";
+  document.getElementById("editProductStock").value = "5";
+  document.getElementById("editProductDesc").value = "";
+  document.getElementById("editProductCategory").value = visibleCategories()[0]?.name || "";
+  resetProductEditorPhotos();
+  renderProductEditorPhotosPreview();
+  document.getElementById("productEditorTitle").textContent = "Новый товар";
+  bootstrap.Modal.getOrCreateInstance(document.getElementById("productEditorModal")).show();
+}
+
+async function saveProductEditor() {
+  const id = document.getElementById("editProductId").value;
+  const categoryNameInput = document.getElementById("editProductCategory").value;
+  const payload = {
+    name: document.getElementById("editProductName").value.trim(),
+    sku: document.getElementById("editProductSku").value.trim(),
+    brand: document.getElementById("editProductBrand").value.trim(),
+    description: document.getElementById("editProductDesc").value.trim(),
+    price: Number(document.getElementById("editProductPrice").value),
+    stock: Number(document.getElementById("editProductStock").value),
+    is_active: true,
+  };
+  if (!payload.name || !payload.sku || payload.price <= 0) {
+    toast("Заполните название, SKU и цену", false);
+    return;
+  }
+  try {
+    const categoryId = await resolveCategoryIdByName(categoryNameInput);
+    payload.category_id = categoryId;
+    let productId = id ? Number(id) : null;
+    if (productId) {
+      await api("PATCH", `/catalog/products/${productId}`, payload, true);
+      toast("Товар обновлён");
+    } else {
+      const created = await api("POST", "/catalog/products", payload, true);
+      productId = created.id;
+      toast("Товар добавлен");
+    }
+    await syncProductEditorPhotos(productId);
+    bootstrap.Modal.getInstance(document.getElementById("productEditorModal")).hide();
+    await loadCatalog();
+    renderAdminCatalogTable();
+  } catch (error) {
+    toast(`Ошибка сохранения: ${formatApiError(error)}`, false);
+  }
+}
+
+async function deactivateProduct(productId) {
+  if (!confirm("Скрыть товар из каталога?")) return;
+  try {
+    await api("PATCH", `/catalog/products/${productId}`, { is_active: false }, true);
+    toast("Товар скрыт");
+    await loadCatalog();
+    renderAdminCatalogTable();
+  } catch (error) {
+    toast(`Ошибка: ${formatApiError(error)}`, false);
+  }
+}
+
+function renderAdminCatalogTable() {
+  const host = document.getElementById("adminCatalogTable");
+  if (!host) return;
+  host.innerHTML = `
+    <div class="table-responsive">
+      <table class="table table-sm admin-table mb-0">
+        <thead><tr><th>ID</th><th>Название</th><th>SKU</th><th>Цена</th><th>Склад</th><th></th></tr></thead>
+        <tbody>
+          ${filteredProducts().map((p) => `
+            <tr>
+              <td>${p.id}</td>
+              <td>${escapeHtml(displayProductTitle(p))}</td>
+              <td class="small text-muted">${escapeHtml(p.sku)}</td>
+              <td>${money(Number(p.price))}</td>
+              <td>${p.stock}</td>
+              <td class="text-end text-nowrap">
+                <button class="btn btn-sm btn-outline-secondary" data-open-product="${p.id}">Карточка</button>
+                <button class="btn btn-sm btn-outline-primary" data-edit="${p.id}">Изменить</button>
+                <button class="btn btn-sm btn-outline-danger" data-del="${p.id}">Скрыть</button>
+              </td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
+    </div>`;
+  host.querySelectorAll("[data-open-product]").forEach((btn) => btn.addEventListener("click", () => openProductCard(Number(btn.dataset.openProduct))));
+  host.querySelectorAll("[data-edit]").forEach((btn) => btn.addEventListener("click", () => openProductEditor(Number(btn.dataset.edit))));
+  host.querySelectorAll("[data-del]").forEach((btn) => btn.addEventListener("click", () => deactivateProduct(Number(btn.dataset.del))));
+}
+
+async function renderCuttingJobs() {
+  const host = document.getElementById("cuttingJobsList");
+  if (!host) return;
+  try {
+    const jobs = await api("GET", "/cutting/jobs");
+    if (!jobs.length) {
+      host.innerHTML = `<div class="text-muted small">История раскроев пуста.</div>`;
+      return;
+    }
+    host.innerHTML = `
+      <div class="table-responsive">
+      <table class="table table-sm admin-table mb-0">
+        <thead><tr><th>#</th><th>Дата</th><th>Лист</th><th>Деталей</th><th>Загрузка</th><th></th></tr></thead>
+        <tbody>${jobs
+          .map((job) => {
+            const active = state.selectedCutJobId === job.id ? "table-primary" : "";
+            const created = job.created_at ? new Date(job.created_at).toLocaleString("ru-RU") : "—";
+            const viewBtn = job.has_result
+              ? `<button class="btn btn-sm btn-outline-primary py-0" data-view-cut="${job.id}">Схема</button>`
+              : `<span class="text-muted">—</span>`;
+            return `<tr class="${active}">
+              <td>${job.id}</td>
+              <td class="small">${escapeHtml(created)}</td>
+              <td>${job.sheet_width}×${job.sheet_height} мм</td>
+              <td>${job.placed_count}/${job.parts_count}</td>
+              <td>${job.utilization_percent}%</td>
+              <td>${viewBtn}</td>
+            </tr>`;
+          })
+          .join("")}</tbody>
+      </table>
+      </div>`;
+    host.querySelectorAll("[data-view-cut]").forEach((button) => {
+      button.addEventListener("click", () => viewCuttingJob(Number(button.dataset.viewCut)));
+    });
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+async function viewCuttingJob(jobId) {
+  try {
+    const job = await api("GET", `/cutting/jobs/${jobId}`);
+    if (!job.result) {
+      toast("Для этого раскроя нет сохранённой схемы", false);
+      return;
+    }
+    state.selectedCutJobId = job.id;
+    state.lastCutResult = job.result;
+    const stats = document.getElementById("cutStats");
+    if (stats) {
+      stats.textContent = `${job.result.placed_count}/${job.result.requested_count} деталей, ${job.result.total_sheets} лист(ов), ${job.result.utilization_percent}%`;
+    }
+    renderCutView(job.sheet_width, job.sheet_height, job.result.sheets || []);
+    renderCutExtra(job.result);
+    await renderCuttingJobs();
+    toast(`Показан раскрой #${job.id}`);
+  } catch (error) {
+    toast(`Не удалось открыть раскрой: ${formatApiError(error)}`, false);
+  }
+}
+
+async function clearCuttingJobs() {
+  if (!window.confirm("Очистить всю историю раскроев?")) return;
+  try {
+    await api("DELETE", "/cutting/jobs", undefined, true);
+    state.selectedCutJobId = null;
+    state.lastCutResult = null;
+    const stats = document.getElementById("cutStats");
+    if (stats) stats.textContent = "готово";
+    const view = document.getElementById("cutView");
+    if (view) view.innerHTML = `<span class="text-muted">Схема появится после расчёта</span>`;
+    const extra = document.getElementById("cutExtraInfo");
+    if (extra) extra.textContent = "";
+    await renderCuttingJobs();
+    toast("История раскроев очищена");
+  } catch (error) {
+    toast(`Не удалось очистить историю: ${formatApiError(error)}`, false);
+  }
+}
+
+function removeObject3D(id) {
+  const before = plannerSnapshot();
+  const index = state.objects3d.findIndex((obj) => obj.id === id);
+  if (index < 0) return;
+  const [removed] = state.objects3d.splice(index, 1);
+  if (state.selected3dObjectId === removed.id) state.selected3dObjectId = null;
+  plannerHistory.record(before, plannerSnapshot(), "delete");
+  renderObjects3dList();
+  renderRoomTopView();
+  renderRoom3D();
+  renderBom();
+  toast(`Удалён: ${removed.name}`);
+}
+
+function render3DTransformCollisionStatus(item, snap = null) {
+  const status = document.getElementById("selectedObjectTransformStatus");
+  if (!status) return;
+  if (!item) {
+    status.textContent = "Выберите предмет в сцене";
+    status.classList.remove("has-collision", "is-snapped");
+    return;
+  }
+  // Touching faces is a valid magnetic placement; only real overlap is a collision.
+  const collisions = findCollisions(item, state.objects3d, 0);
+  status.classList.toggle("has-collision", collisions.length > 0);
+  status.classList.toggle("is-snapped", !collisions.length && Boolean(snap?.snapped));
+  if (collisions.length) {
+    status.textContent = `Пересечение: ${collisions.map((candidate) => candidate.name).join(", ")}`;
+    return;
+  }
+  if (snap?.snapped) {
+    const targetItem = snap.targetId ? state.objects3d.find((candidate) => candidate.id === snap.targetId) : null;
+    const roomTarget = snap.axis === "y"
+      ? (snap.target === "room-min" ? "полу" : "потолку")
+      : "стене";
+    status.textContent = `Магнит ${snap.axis.toUpperCase()}: прикреплено к ${targetItem?.name || roomTarget}`;
+    return;
+  }
+  status.textContent = "Положение допустимо · магнит включён";
+}
+
+function syncSelectedObjectControls() {
+  const item = state.objects3d.find((candidate) => candidate.id === state.selected3dObjectId);
+  const panel = document.getElementById("selectedObjectTransform");
+  const title = document.getElementById("selectedObjectTitle");
+  const inputs = {
+    x: document.getElementById("selectedObjectX"),
+    y: document.getElementById("selectedObjectY"),
+    z: document.getElementById("selectedObjectZ"),
+    rotationY: document.getElementById("selectedObjectRotation"),
+  };
+  panel?.classList.toggle("is-empty", !item);
+  if (title) title.textContent = item ? item.name : "Предмет не выбран";
+  Object.values(inputs).forEach((input) => { if (input) input.disabled = !item; });
+  document.querySelectorAll("[data-selected-object-action]").forEach((button) => { button.disabled = !item; });
+  if (!item) {
+    Object.values(inputs).forEach((input) => { if (input) input.value = ""; });
+    render3DTransformCollisionStatus(null);
+    return;
+  }
+  if (inputs.x) inputs.x.value = String(Math.round(Number(item.x) || 0));
+  if (inputs.y) inputs.y.value = String(Math.round(Number(item.y) || 0));
+  if (inputs.z) inputs.z.value = String(Math.round(Number(item.z) || 0));
+  if (inputs.rotationY) inputs.rotationY.value = String(Math.round(normalizeAngle(item.rotationY) * 10) / 10);
+  render3DTransformCollisionStatus(item);
+}
+
+function updateSelectedObjectFromControls() {
+  const item = state.objects3d.find((candidate) => candidate.id === state.selected3dObjectId);
+  if (!item) return;
+  const before = plannerSnapshot();
+  const x = Number(document.getElementById("selectedObjectX")?.value);
+  const y = Number(document.getElementById("selectedObjectY")?.value);
+  const z = Number(document.getElementById("selectedObjectZ")?.value);
+  const rotation = Number(document.getElementById("selectedObjectRotation")?.value);
+  if (Number.isFinite(x)) item.x = x;
+  if (Number.isFinite(y)) item.y = y;
+  if (Number.isFinite(z)) item.z = z;
+  if (Number.isFinite(rotation)) item.rotationY = normalizeAngle(rotation);
+  clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
+  plannerHistory.record(before, plannerSnapshot(), "transform-3d-input");
+  updateFurnitureTransform(item);
+  syncSelectedObjectControls();
+  renderObjects3dList();
+  renderBom();
+}
+
+function init3DTransformControls() {
+  ["selectedObjectX", "selectedObjectY", "selectedObjectZ", "selectedObjectRotation"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", updateSelectedObjectFromControls);
+  });
+  document.querySelectorAll("[data-selected-object-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const item = state.objects3d.find((candidate) => candidate.id === state.selected3dObjectId);
+      if (!item) return;
+      const before = plannerSnapshot();
+      if (button.dataset.selectedObjectAction === "rotate") {
+        item.rotationY = normalizeAngle((Number(item.rotationY) || 0) + Number(button.dataset.delta || 0));
+        clampObjectPosition(item, state.roomConfig.width, state.roomConfig.length);
+      }
+      if (button.dataset.selectedObjectAction === "floor") item.y = 0;
+      plannerHistory.record(before, plannerSnapshot(), button.dataset.selectedObjectAction || "transform-3d");
+      updateFurnitureTransform(item);
+      syncSelectedObjectControls();
+      renderObjects3dList();
+      renderBom();
+    });
+  });
+  syncSelectedObjectControls();
+}
+
+function renderObjects3dList() {
+  const host = document.getElementById("objects3dList");
+  if (!host || APP_MODE === "admin") return;
+  updatePlannerProgress();
+  if (!state.objects3d.length) {
+    host.innerHTML = `<div class="text-muted">Объектов в комнате пока нет.</div>`;
+    syncSelectedObjectControls();
+    return;
+  }
+  host.innerHTML = state.objects3d
+    .map(
+      (item) => `<div class="d-flex justify-content-between align-items-center gap-2 border rounded px-2 py-1 mb-1 ${item.id === state.selected3dObjectId ? "border-primary bg-light" : ""}" data-select-object="${item.id}" role="button" tabindex="0">
+        <span>${escapeHtml(item.name)} <span class="text-muted">(${Math.round(item.width)}×${Math.round(item.depth)}×${Math.round(item.height)})</span></span>
+        <button type="button" class="btn btn-sm btn-outline-danger py-0" data-delete-object="${item.id}">Удалить</button>
+      </div>`
+    )
+    .join("");
+  host.querySelectorAll("[data-delete-object]").forEach((button) => {
+    button.addEventListener("click", (event) => { event.stopPropagation(); removeObject3D(button.dataset.deleteObject); });
+  });
+  host.querySelectorAll("[data-select-object]").forEach((row) => row.addEventListener("click", () => {
+    select3DObject(row.dataset.selectObject); renderRoom3D();
+  }));
+  syncSelectedObjectControls();
+}
+
+
+const CRM_ADMIN_SCALAR_FIELDS = [
+  { key: "title", label: "Название заказа", type: "text", required: true },
+  { key: "customer_full_name", label: "ФИО", type: "text" },
+  { key: "signature_date", label: "Дата подписи", type: "date" },
+  { key: "delivery_date", label: "Дата сдачи", type: "date" },
+  { key: "price_admin", label: "Цена", type: "number" },
+  { key: "advance_paid", label: "Аванс внесенный", type: "number" },
+  { key: "balance_due", label: "Остаток", type: "number" },
+  { key: "email", label: "Почта", type: "email" },
+  { key: "phone", label: "Телефон", type: "text" },
+  { key: "install_address", label: "Адрес монтажа", type: "text" },
+  { key: "status", label: "Статус", type: "status" },
+  { key: "notes", label: "Заметки", type: "textarea" },
+];
+
+const CRM_DICT_FIELD_KEYS = [
+  "color_corpus", "color_facade_1", "color_facade_2", "color_facade_3",
+  "visible_parts", "guides", "hinges", "mirror", "countertop", "apron",
+  "gola_profile", "plinth", "false_panel", "light_inset", "light_overlay",
+  "euro_cut", "cutlery_tray", "vent_grille", "handles",
+];
+
+function crmDictLabel(fieldKey) {
+  const found = (state.crm.dictionaries || []).find((d) => d.field_key === fieldKey);
+  return found?.label || fieldKey;
+}
+
+function crmDictOptions(fieldKey) {
+  const found = (state.crm.dictionaries || []).find((d) => d.field_key === fieldKey);
+  return found?.options || [];
+}
+
+function buildCrmOrderEditorHtml(order) {
+  const o = order || {};
+  const scalar = CRM_ADMIN_SCALAR_FIELDS.map((field) => {
+    const val = o[field.key] ?? (field.key === "status" ? "черновой замер" : "");
+    if (field.type === "status") {
+      return `<div class="col-md-6"><label class="form-label small">${escapeHtml(field.label)}</label>
+        <select class="form-select" id="crmField_${field.key}">
+          ${crmStatusOptions(val).map((s) => `<option value="${escapeHtml(s)}" ${s === val ? "selected" : ""}>${escapeHtml(s)}</option>`).join("")}
+        </select></div>`;
+    }
+    if (field.type === "textarea") {
+      return `<div class="col-12"><label class="form-label small">${escapeHtml(field.label)}</label>
+        <textarea class="form-control" id="crmField_${field.key}" rows="2">${escapeHtml(val || "")}</textarea></div>`;
+    }
+    return `<div class="col-md-6"><label class="form-label small">${escapeHtml(field.label)}${field.required ? " *" : ""}</label>
+      <input class="form-control" id="crmField_${field.key}" type="${field.type}" value="${escapeHtml(val == null ? "" : String(val))}" /></div>`;
+  }).join("");
+  const dicts = (state.crm.dictionaries || []).map((dict) => {
+    const key = dict.field_key;
+    const options = dict.options || [];
+    const current = dict.builtin ? (o[key] || "") : ((o.custom_fields || {})[key] || "");
+    const opts = [`<option value="">—</option>`]
+      .concat(options.map((opt) => `<option value="${escapeHtml(opt.value)}" ${opt.value === current ? "selected" : ""}>${escapeHtml(opt.value)}</option>`));
+    if (current && !options.some((opt) => opt.value === current)) {
+      opts.push(`<option value="${escapeHtml(current)}" selected>${escapeHtml(current)} (текущее)</option>`);
+    }
+    return `<div class="col-md-6"><label class="form-label small">${escapeHtml(dict.label || crmDictLabel(key))}</label>
+      <select class="form-select" id="crmField_${key}">${opts.join("")}</select></div>`;
+  }).join("");
+  const stages = buildStageWorkdaysHtml(o);
+  return scalar + dicts + stages;
+}
+
+function buildStageWorkdaysHtml(order) {
+  const saved = order?.stage_workdays || {};
+  const fields = CRM_STATUSES.map((status) => {
+    const value = saved[status];
+    return `<div class="stage-days-cell">
+      <label class="form-label small" for="crmStageDays_${CRM_STATUSES.indexOf(status)}">${escapeHtml(status)}</label>
+      <input class="form-control" id="crmStageDays_${CRM_STATUSES.indexOf(status)}" type="number" min="1" max="366" step="1" inputmode="numeric" data-stage-days="${escapeHtml(status)}" value="${value == null || value === "" ? "" : escapeHtml(String(value))}" placeholder="—" />
+    </div>`;
+  }).join("");
+  return `<div class="col-12 mt-2">
+    <div class="fw-semibold">Срок каждого этапа, рабочие дни</div>
+    <p class="text-muted small mb-2">От даты создания заказа, по производственному календарю России. Выходные и праздники в срок не входят. Пустое поле — этот этап без напоминания.</p>
+    <div class="stage-days-grid">${fields}</div>
+  </div>`;
+}
+
+function readCrmOrderEditorPayload() {
+  const get = (key) => document.getElementById(`crmField_${key}`)?.value ?? "";
+  const num = (key) => {
+    const raw = get(key).trim();
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  const dateOrNull = (key) => {
+    const raw = get(key).trim();
+    return raw || null;
+  };
+  const title = get("title").trim();
+  if (title.length < 2) throw new Error("Укажите название заказа");
+  const payload = {
+    title,
+    customer: get("customer_full_name").trim(),
+    customer_full_name: get("customer_full_name").trim(),
+    signature_date: dateOrNull("signature_date"),
+    delivery_date: dateOrNull("delivery_date"),
+    price_admin: num("price_admin"),
+    advance_paid: num("advance_paid"),
+    balance_due: num("balance_due"),
+    email: get("email").trim(),
+    phone: get("phone").trim(),
+    install_address: get("install_address").trim(),
+    status: get("status"),
+    notes: get("notes"),
+  };
+  const customFields = {};
+  (state.crm.dictionaries || []).forEach((dict) => {
+    const value = get(dict.field_key).trim();
+    if (dict.builtin) payload[dict.field_key] = value;
+    else customFields[dict.field_key] = value;
+  });
+  payload.custom_fields = customFields;
+  const stageWorkdays = {};
+  document.querySelectorAll("[data-stage-days]").forEach((input) => {
+    const raw = input.value.trim();
+    if (!raw) return;
+    const days = Number(raw);
+    if (!Number.isInteger(days) || days < 1 || days > 366) {
+      throw new Error(`Срок этапа «${input.dataset.stageDays}» — целое число рабочих дней от 1 до 366`);
+    }
+    stageWorkdays[input.dataset.stageDays] = days;
+  });
+  payload.stage_workdays = stageWorkdays;
+  if (payload.price_admin != null && payload.advance_paid != null && payload.balance_due == null) {
+    payload.balance_due = payload.price_admin - payload.advance_paid;
+  }
+  return payload;
+}
+
+async function openCrmOrderEditor(orderId) {
+  if (!canManageCatalog()) return;
+  try {
+    state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+  } catch (error) {
+    toast(formatApiError(error), false);
+    return;
+  }
+  let order = null;
+  if (orderId) {
+    order = state.crm.orders.find((o) => o.id === orderId) || null;
+    if (!order) {
+      try {
+        order = await api("GET", `/catalog/crm/orders/${orderId}`, undefined, true);
+      } catch (error) {
+        toast(formatApiError(error), false);
+        return;
+      }
+    }
+  }
+  state.crm.editingOrderId = order?.id || null;
+  const idInput = document.getElementById("crmEditOrderId");
+  const title = document.getElementById("crmOrderEditorTitle");
+  const fields = document.getElementById("crmOrderEditorFields");
+  if (idInput) idInput.value = order?.id ? String(order.id) : "";
+  if (title) title.textContent = order ? `Редактирование заказа #${order.id}` : "Новый заказ";
+  if (fields) fields.innerHTML = buildCrmOrderEditorHtml(order);
+  const modalEl = document.getElementById("crmOrderEditorModal");
+  if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+async function saveCrmOrderFromEditor() {
+  try {
+    const payload = readCrmOrderEditorPayload();
+    const id = document.getElementById("crmEditOrderId")?.value;
+    if (id) {
+      await api("PATCH", `/catalog/crm/orders/${id}`, payload, true);
+      toast("Заказ обновлён");
+    } else {
+      await api("POST", "/catalog/crm/orders", payload, true);
+      toast("Заказ создан");
+    }
+    const modalEl = document.getElementById("crmOrderEditorModal");
+    bootstrap.Modal.getInstance(modalEl)?.hide();
+    await loadCrm();
+  } catch (error) {
+    toast(error?.message || formatApiError(error), false);
+  }
+}
+
+function renderCrmDictionariesPanel() {
+  const host = document.getElementById("crmDictionariesPanel");
+  if (!host) return;
+  const canDelete = canDeleteRecords();
+  if (!state.crm.dictionaries?.length) {
+    host.innerHTML = `<div class="text-muted">Справочники пусты</div>`;
+    return;
+  }
+  host.innerHTML = state.crm.dictionaries.map((dict) => `
+    <div class="border rounded-3 p-3 mb-3" data-dict-key="${escapeHtml(dict.field_key)}">
+      <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+        <div class="fw-semibold">${escapeHtml(dict.label)}</div>
+        ${dict.builtin ? "" : `<button type="button" class="btn btn-outline-danger btn-sm py-0" data-dict-remove-field="${escapeHtml(dict.field_key)}">Удалить поле</button>`}
+      </div>
+      <div class="d-flex flex-wrap gap-2 mb-2">
+        ${(dict.options || []).map((opt) => `
+          <span class="badge text-bg-light border d-inline-flex align-items-center gap-1">
+            ${escapeHtml(opt.value)}
+            ${canDelete ? `<button type="button" class="btn-close" style="font-size:0.55rem" data-dict-delete="${opt.id}" aria-label="Удалить"></button>` : ""}
+          </span>
+        `).join("") || `<span class="text-muted">Нет значений</span>`}
+      </div>
+      <div class="input-group input-group-sm" style="max-width:420px">
+        <input class="form-control" placeholder="Новое значение" data-dict-input="${escapeHtml(dict.field_key)}" />
+        <button class="btn btn-outline-primary" type="button" data-dict-add="${escapeHtml(dict.field_key)}">Добавить</button>
+      </div>
+    </div>
+  `).join("");
+  host.querySelectorAll("[data-dict-add]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const key = button.dataset.dictAdd;
+      const input = host.querySelector(`[data-dict-input="${key}"]`);
+      const value = (input?.value || "").trim();
+      if (!value) return;
+      try {
+        await api("POST", "/catalog/crm/field-options", { field_key: key, value }, true);
+        if (input) input.value = "";
+        state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+        renderCrmDictionariesPanel();
+        toast("Значение добавлено");
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+  host.querySelectorAll("[data-dict-remove-field]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!confirm("Удалить это поле из справочника и из карточки заказа?")) return;
+      try {
+        await api("DELETE", `/catalog/crm/field-dictionaries/${encodeURIComponent(button.dataset.dictRemoveField)}`, undefined, true);
+        state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+        renderCrmDictionariesPanel();
+        toast("Поле удалено");
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+  host.querySelectorAll("[data-dict-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      if (!confirm("Удалить значение из справочника?")) return;
+      try {
+        await api("DELETE", `/catalog/crm/field-options/${button.dataset.dictDelete}`, undefined, true);
+        state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+        renderCrmDictionariesPanel();
+        toast("Значение удалено");
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+}
+
+async function addCrmDictionaryField() {
+  const input = document.getElementById("crmNewFieldLabel");
+  const label = (input?.value || "").trim();
+  if (label.length < 2) {
+    toast("Укажите название поля", false);
+    return;
+  }
+  try {
+    await api("POST", "/catalog/crm/field-dictionaries", { label }, true);
+    if (input) input.value = "";
+    state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+    renderCrmDictionariesPanel();
+    toast("Поле добавлено. Оно появится в карточке заказа");
+  } catch (error) {
+    toast(formatApiError(error), false);
+  }
+}
+
+async function openCrmDictionariesModal() {
+  if (!canEditCrmDicts()) return;
+  try {
+    state.crm.dictionaries = await api("GET", "/catalog/crm/field-dictionaries", undefined, true);
+    renderCrmDictionariesPanel();
+    const modalEl = document.getElementById("crmDictionariesModal");
+    if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  } catch (error) {
+    toast(formatApiError(error), false);
+  }
+}
+
+async function loadStageAlertSettings() {
+  const card = document.getElementById("crmStageAlertCard");
+  if (!card) return;
+  card.classList.toggle("d-none", !isSuperAdmin());
+  if (!isSuperAdmin()) return;
+  const data = await api("GET", "/catalog/crm/stage-alert-settings", undefined, true);
+  const input = document.getElementById("crmStageAlertLead");
+  if (input && document.activeElement !== input) input.value = data.lead_days ?? 2;
+}
+
+async function saveStageAlertSettings() {
+  const input = document.getElementById("crmStageAlertLead");
+  const lead = Number(input?.value);
+  if (!Number.isInteger(lead) || lead < 0 || lead > 90) {
+    toast("Укажите число дней от 0 до 90", false);
+    return;
+  }
+  try {
+    await api("PUT", "/catalog/crm/stage-alert-settings", { lead_days: lead }, true);
+    toast("Срок напоминания сохранён");
+  } catch (error) {
+    toast(formatApiError(error), false);
+  }
+}
+
+async function loadCrm() {
+  if (APP_MODE !== "admin" || (!canManageCatalog() && !canEditCrmOrders())) return;
+  try {
+    const [warehouse, orders, dictionaries, movements] = await Promise.all([
+      api("GET", "/catalog/crm/warehouse", undefined, true),
+      api("GET", "/catalog/crm/orders", undefined, true),
+      api("GET", "/catalog/crm/field-dictionaries", undefined, true),
+      api("GET", "/catalog/crm/warehouse/movements", undefined, true).catch(() => []),
+    ]);
+    state.crm.warehouse = warehouse;
+    state.crm.orders = orders;
+    state.crm.dictionaries = dictionaries;
+    state.crm.movements = movements;
+    renderCrmPanel();
+    renderOrderCalendar();
+    await loadStageAlertSettings();
+  } catch (error) {
+    const wh = document.getElementById("crmWarehouseTable");
+    const orders = document.getElementById("crmOrdersPanel");
+    const msg = `<div class="text-danger">${escapeHtml(formatApiError(error))}</div>`;
+    if (wh) wh.innerHTML = msg;
+    if (orders) orders.innerHTML = msg;
+  }
+}
+
+const WH_ISSUE_STATUSES = new Set([
+  "технолог",
+  "распил-фасады-фурнитура",
+  "доставлено",
+  "собрано",
+  "готово",
+  "готова",
+]);
+
+function formatQty(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "0";
+  return String(Math.round(n * 100) / 100);
+}
+
+function movementKindLabel(kind) {
+  if (kind === "purchase") return "Закупка";
+  if (kind === "consume") return "Списание";
+  return "Правка";
+}
+
+function renderCrmWarehouse() {
+  const host = document.getElementById("crmWarehouseTable");
+  if (!host) return;
+  document.querySelectorAll("[data-wh-tab]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.whTab === state.crm.whTab);
+  });
+  if (state.crm.whTab === "purchase") host.innerHTML = renderWarehousePurchase();
+  else if (state.crm.whTab === "issue") host.innerHTML = renderWarehouseIssue();
+  else host.innerHTML = renderWarehouseStock();
+  bindWarehousePanel(host);
+}
+
+function renderWarehouseStock() {
+  const canEdit = canEditCrmOrders();
+  const rows = state.crm.warehouse || [];
+  const body = rows.length
+    ? rows.map((row) => {
+        const low = Number(row.quantity) < 0;
+        return `<tr>
+          <td>${escapeHtml(row.material_name)}</td>
+          <td>${escapeHtml(row.unit)}</td>
+          <td>${money(row.purchase_price_rub || 0)}</td>
+          <td class="${low ? "text-danger fw-semibold" : ""}">${formatQty(row.quantity)} ${escapeHtml(row.unit)}</td>
+          ${canEdit ? `<td>
+            <div class="d-flex flex-wrap gap-1 align-items-center">
+              <input class="form-control form-control-sm" style="width:88px" type="number" min="0" step="0.01" value="${formatQty(row.quantity)}" data-wh-qty="${row.material_id}" />
+              <button type="button" class="btn btn-sm btn-outline-primary" data-wh-save="${row.material_id}">Записать</button>
+              <input class="form-control form-control-sm" style="width:76px" type="number" step="0.01" placeholder="±" data-wh-delta="${row.material_id}" />
+              <button type="button" class="btn btn-sm btn-outline-secondary" data-wh-adjust="${row.material_id}">±</button>
+              <button type="button" class="btn btn-sm btn-outline-danger" data-wh-del="${row.material_id}">Удалить</button>
+            </div>
+          </td>` : ""}
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="${canEdit ? 5 : 4}" class="text-muted">На складе пока нет материалов. Добавьте вид материала или проведите закупку.</td></tr>`;
+  const movements = (state.crm.movements || []).slice(0, 8);
+  const movementRows = movements.length
+    ? movements.map((row) => {
+        const sign = Number(row.delta) > 0 ? "+" : "";
+        return `<tr>
+          <td class="text-muted">${escapeHtml((row.created_at || "").slice(0, 16).replace("T", " "))}</td>
+          <td>${escapeHtml(movementKindLabel(row.kind))}</td>
+          <td>${escapeHtml(row.material_name)}</td>
+          <td class="${Number(row.delta) < 0 ? "text-danger" : "text-success"}">${sign}${formatQty(row.delta)} ${escapeHtml(row.unit)}</td>
+          <td>${formatQty(row.quantity_after)}</td>
+          <td class="text-muted">${escapeHtml(row.note || "")}</td>
+        </tr>`;
+      }).join("")
+    : `<tr><td colspan="6" class="text-muted">Движений ещё нет.</td></tr>`;
+  return `
+    ${canEdit ? `<form class="row g-2 align-items-end mb-3" id="whNewMaterialForm">
+      <div class="col-md-4"><label class="form-label small">Новый материал</label><input class="form-control form-control-sm" id="whNewName" placeholder="Например, Петля мебельная" required /></div>
+      <div class="col-md-2"><label class="form-label small">Ед.</label><input class="form-control form-control-sm" id="whNewUnit" value="шт" /></div>
+      <div class="col-md-2"><label class="form-label small">Цена, ₽</label><input class="form-control form-control-sm" id="whNewPrice" type="number" min="0" step="1" value="0" /></div>
+      <div class="col-md-2"><label class="form-label small">Стартовый остаток</label><input class="form-control form-control-sm" id="whNewQty" type="number" min="0" step="0.01" value="0" /></div>
+      <div class="col-md-2"><button class="btn btn-primary btn-sm w-100" type="submit">Добавить</button></div>
+    </form>` : ""}
+    <div class="table-responsive">
+      <table class="table table-sm admin-table align-middle mb-0">
+        <thead><tr><th>Материал</th><th>Ед.</th><th>Цена</th><th>Остаток</th>${canEdit ? "<th>Правка</th>" : ""}</tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    <div class="mt-4">
+      <div class="small fw-semibold mb-2">Последние движения</div>
+      <div class="table-responsive">
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Когда</th><th>Тип</th><th>Материал</th><th>Изменение</th><th>Стало</th><th>Комментарий</th></tr></thead>
+          <tbody>${movementRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderWarehousePurchase() {
+  if (!state.crm.purchaseDraft.length) {
+    state.crm.purchaseDraft = [{ material_id: "", quantity: 1, unit_price_rub: "" }];
+  }
+  const options = [`<option value="">Новый материал</option>`]
+    .concat((state.crm.warehouse || []).map((row) => `<option value="${row.material_id}">${escapeHtml(row.material_name)} (${escapeHtml(row.unit)})</option>`))
+    .join("");
+  const lines = state.crm.purchaseDraft.map((line, index) => `
+    <div class="row g-2 align-items-end mb-2" data-wh-buy-line="${index}">
+      <div class="col-md-4">
+        <label class="form-label small">Материал</label>
+        <select class="form-select form-select-sm" data-wh-buy-id>${options.replace(`value="${line.material_id}"`, `value="${line.material_id}" selected`)}</select>
+        <input class="form-control form-control-sm mt-1 ${line.material_id ? "d-none" : ""}" data-wh-buy-name placeholder="Название нового" value="${escapeHtml(line.material_name || "")}" />
+      </div>
+      <div class="col-md-2"><label class="form-label small">Ед.</label><input class="form-control form-control-sm" data-wh-buy-unit value="${escapeHtml(line.unit || "шт")}" ${line.material_id ? "disabled" : ""} /></div>
+      <div class="col-md-2"><label class="form-label small">Кол-во</label><input class="form-control form-control-sm" type="number" min="0.01" step="0.01" data-wh-buy-qty value="${line.quantity}" /></div>
+      <div class="col-md-2"><label class="form-label small">Цена, ₽</label><input class="form-control form-control-sm" type="number" min="0" step="1" data-wh-buy-price value="${line.unit_price_rub}" /></div>
+      <div class="col-md-2"><button type="button" class="btn btn-sm btn-outline-danger w-100" data-wh-buy-remove="${index}">Убрать строку</button></div>
+    </div>`).join("");
+  return `
+    <p class="text-muted small">Укажите, что пришло на склад. Количество прибавится к остатку, цена материала обновится.</p>
+    <div id="whPurchaseLines">${lines}</div>
+    <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="whAddPurchaseLine">+ Строка</button>
+    <div class="row g-2 align-items-end">
+      <div class="col-md-8"><label class="form-label small">Комментарий</label><input class="form-control form-control-sm" id="whPurchaseNote" placeholder="Накладная, поставщик" /></div>
+      <div class="col-md-4"><button type="button" class="btn btn-primary btn-sm w-100" id="whSubmitPurchase">Провести закупку</button></div>
+    </div>`;
+}
+
+function renderWarehouseIssue() {
+  const orders = (state.crm.orders || []).filter((order) => (order.materials || []).length);
+  if (!orders.length) {
+    return `<div class="text-muted">В заказах пока нет затрат материалов. Когда заказ дойдёт до статуса «технолог», нужное количество спишется со склада.</div>`;
+  }
+  return `
+    <p class="text-muted small mb-3">Со статуса «технолог» склад списывает количество из колонки «нужно» у заказа. Если состав заказа меняется, списывается только разница. Ручная правка остатка на вкладке «Остатки» по-прежнему доступна.</p>
+    ${orders.map((order) => {
+      const active = WH_ISSUE_STATUSES.has(order.status);
+      const lines = (order.materials || []).map((line) => `
+        <tr>
+          <td>${escapeHtml(line.material_name)}</td>
+          <td>${formatQty(line.required_qty)} ${escapeHtml(line.unit || "")}</td>
+          <td>${formatQty(line.issued_qty || 0)} ${escapeHtml(line.unit || "")}</td>
+        </tr>`).join("");
+      return `<div class="border rounded-3 p-3 mb-3">
+        <div class="d-flex justify-content-between gap-2 mb-2">
+          <strong>${escapeHtml(order.title)}</strong>
+          <span class="badge ${active ? "text-bg-primary" : "text-bg-secondary"}">${escapeHtml(order.status)}${active ? " · списывается" : " · ещё не списывается"}</span>
+        </div>
+        <table class="table table-sm mb-0">
+          <thead><tr><th>Материал</th><th>Нужно на заказ</th><th>Уже списано</th></tr></thead>
+          <tbody>${lines}</tbody>
+        </table>
+      </div>`;
+    }).join("")}`;
+}
+
+function readPurchaseDraft(host) {
+  return [...host.querySelectorAll("[data-wh-buy-line]")].map((row) => ({
+    material_id: row.querySelector("[data-wh-buy-id]")?.value || "",
+    material_name: row.querySelector("[data-wh-buy-name]")?.value.trim() || "",
+    unit: row.querySelector("[data-wh-buy-unit]")?.value.trim() || "шт",
+    quantity: Number(row.querySelector("[data-wh-buy-qty]")?.value || 0),
+    unit_price_rub: row.querySelector("[data-wh-buy-price]")?.value,
+  }));
+}
+
+function bindWarehousePanel(host) {
+  document.querySelectorAll("[data-wh-tab]").forEach((btn) => {
+    btn.onclick = () => {
+      state.crm.whTab = btn.dataset.whTab;
+      renderCrmWarehouse();
+    };
+  });
+  host.querySelector("#whNewMaterialForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const name = document.getElementById("whNewName")?.value.trim();
+    const unit = document.getElementById("whNewUnit")?.value.trim() || "шт";
+    const price = Number(document.getElementById("whNewPrice")?.value || 0);
+    const qty = Number(document.getElementById("whNewQty")?.value || 0);
+    if (!name) return;
+    try {
+      const created = await api("POST", "/catalog/crm/materials", { name, unit, purchase_price_rub: price }, true);
+      if (qty > 0) {
+        await api("PUT", `/catalog/crm/warehouse/${created.id}`, { quantity: qty }, true);
+      }
+      toast("Материал добавлен");
+      await loadCrm();
+    } catch (error) {
+      toast(formatApiError(error), false);
+    }
+  });
+  host.querySelectorAll("[data-wh-save]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.whSave;
+      const qty = Number(host.querySelector(`[data-wh-qty="${id}"]`)?.value);
+      if (!Number.isFinite(qty) || qty < 0) {
+        toast("Остаток не может быть отрицательным. Для списания используйте поле ±", false);
+        return;
+      }
+      try {
+        await api("PUT", `/catalog/crm/warehouse/${id}`, { quantity: qty }, true);
+        toast("Остаток записан");
+        await loadCrm();
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+  host.querySelectorAll("[data-wh-adjust]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.whAdjust;
+      const delta = Number(host.querySelector(`[data-wh-delta="${id}"]`)?.value);
+      if (!Number.isFinite(delta) || delta === 0) {
+        toast("Укажите, на сколько изменить остаток", false);
+        return;
+      }
+      try {
+        await api("POST", `/catalog/crm/warehouse/${id}/adjust`, { delta, note: "Ручная корректировка" }, true);
+        toast("Остаток изменён");
+        await loadCrm();
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+  host.querySelectorAll("[data-wh-del]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = Number(btn.dataset.whDel);
+      const row = state.crm.warehouse.find((item) => item.material_id === id);
+      if (!window.confirm(`Удалить материал «${row?.material_name || id}»? Это нельзя сделать, если он есть в заказах.`)) return;
+      try {
+        await api("DELETE", `/catalog/crm/materials/${id}`, undefined, true);
+        toast("Материал удалён");
+        await loadCrm();
+      } catch (error) {
+        toast(formatApiError(error), false);
+      }
+    });
+  });
+  host.querySelector("#whAddPurchaseLine")?.addEventListener("click", () => {
+    state.crm.purchaseDraft = readPurchaseDraft(host);
+    state.crm.purchaseDraft.push({ material_id: "", material_name: "", unit: "шт", quantity: 1, unit_price_rub: "" });
+    renderCrmWarehouse();
+  });
+  host.querySelectorAll("[data-wh-buy-remove]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const draft = readPurchaseDraft(host);
+      draft.splice(Number(btn.dataset.whBuyRemove), 1);
+      state.crm.purchaseDraft = draft.length ? draft : [{ material_id: "", quantity: 1, unit_price_rub: "" }];
+      renderCrmWarehouse();
+    });
+  });
+  host.querySelectorAll("[data-wh-buy-id]").forEach((select) => {
+    select.addEventListener("change", () => {
+      state.crm.purchaseDraft = readPurchaseDraft(host);
+      renderCrmWarehouse();
+    });
+  });
+  host.querySelector("#whSubmitPurchase")?.addEventListener("click", async () => {
+    const draft = readPurchaseDraft(host);
+    const note = document.getElementById("whPurchaseNote")?.value.trim() || "";
+    const lines = [];
+    for (const line of draft) {
+      if (!line.quantity || line.quantity <= 0) {
+        toast("В каждой строке укажите количество больше нуля", false);
+        return;
+      }
+      const payload = { quantity: line.quantity };
+      if (line.unit_price_rub !== "" && line.unit_price_rub != null) payload.unit_price_rub = Number(line.unit_price_rub);
+      if (line.material_id) payload.material_id = Number(line.material_id);
+      else {
+        if (!line.material_name) {
+          toast("Для нового материала укажите название", false);
+          return;
+        }
+        payload.material_name = line.material_name;
+        payload.unit = line.unit || "шт";
+      }
+      lines.push(payload);
+    }
+    try {
+      await api("POST", "/catalog/crm/warehouse/purchases", { note, lines }, true);
+      state.crm.purchaseDraft = [{ material_id: "", quantity: 1, unit_price_rub: "" }];
+      toast("Закупка проведена, остатки обновлены");
+      await loadCrm();
+    } catch (error) {
+      toast(formatApiError(error), false);
+    }
+  });
+}
+
+async function renderCrmOrderProcurement(orderId) {
+  const host = document.getElementById(`crm-proc-${orderId}`);
+  if (!host) return;
+  host.innerHTML = `<span class="text-muted">Считаем...</span>`;
+  try {
+    const data = await api("GET", `/catalog/crm/orders/${orderId}/procurement`, undefined, true);
+    state.crm.procurementByOrder[orderId] = data;
+    host.innerHTML = renderCrmProcurementTable(orderId, data);
+    bindCrmProcurementTable(host, orderId);
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+function numOrZero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function crmProcurementOverspend(toBuyQty, purchasedQty, unitPrice) {
+  return Math.max(0, purchasedQty - toBuyQty) * unitPrice;
+}
+
+function renderCrmProcurementRow(line = {}) {
+  const materialId = Number(line.material_id || 0);
+  const isNew = !materialId;
+  const toBuy = numOrZero(line.to_buy_qty);
+  const unitPrice = numOrZero(line.unit_price_rub);
+  const lineTotal = numOrZero(line.line_total_rub) || toBuy * unitPrice;
+  const purchasedQty = numOrZero(line.purchased_qty);
+  const isPurchased = !!line.is_purchased;
+  const overspend = numOrZero(line.overspend_rub) || crmProcurementOverspend(toBuy, purchasedQty, unitPrice);
+  const unit = line.unit || "шт";
+  const required = numOrZero(line.required_qty) || (isNew ? 1 : 0);
+  return `<tr data-crm-proc-row="${materialId}" ${isNew ? 'data-crm-proc-new="1"' : ""}>
+    <td>
+      <input class="form-control form-control-sm" data-crm-proc-name value="${escapeHtml(line.material_name || "")}" placeholder="Название материала" />
+      <input class="form-control form-control-sm mt-1" data-crm-proc-unit value="${escapeHtml(unit)}" placeholder="ед." />
+    </td>
+    <td>
+      <input class="form-control form-control-sm" type="number" min="0" step="0.01" value="${required}" data-crm-proc-required />
+    </td>
+    <td>${isNew ? "—" : `${numOrZero(line.in_stock_qty)} ${escapeHtml(unit)}`}</td>
+    <td>
+      <input class="form-control form-control-sm" type="number" min="0" step="0.01" value="${toBuy}" data-crm-proc-to-buy />
+    </td>
+    <td>
+      <input class="form-control form-control-sm" type="number" min="0" step="1" value="${unitPrice}" data-crm-proc-unit-price />
+    </td>
+    <td class="fw-semibold"><span data-crm-proc-line-total>${money(lineTotal)}</span></td>
+    <td class="text-danger"><span data-crm-proc-overspend>${money(overspend)}</span></td>
+    <td>
+      <div class="d-flex align-items-center gap-2">
+        <input class="form-check-input mt-0" type="checkbox" ${isPurchased ? "checked" : ""} data-crm-proc-done />
+        <input class="form-control form-control-sm" style="max-width:110px" type="number" min="0" step="0.01"
+          value="${purchasedQty}" ${isPurchased ? "disabled" : ""} data-crm-proc-purchased-qty />
+      </div>
+      <div class="small text-muted mt-1"><span data-crm-proc-purchased-total>${money(numOrZero(line.purchased_total_rub))}</span></div>
+    </td>
+    <td>${isNew ? `<button type="button" class="btn btn-sm btn-outline-danger" data-crm-proc-remove-row>×</button>` : ""}</td>
+  </tr>`;
+}
+
+function renderCrmProcurementTable(orderId, data) {
+  const hasPrices = (data.lines || []).some((l) => numOrZero(l.unit_price_rub) > 0);
+  const progressText = `${money(numOrZero(data.purchased_sum_rub))} / ${money(numOrZero(data.procurement_sum_rub))} · ${Math.round(
+    numOrZero(data.progress_percent)
+  )}%`;
+  const overspendSum = numOrZero(data.overspend_sum_rub) || (data.lines || []).reduce(
+    (sum, line) => sum + crmProcurementOverspend(numOrZero(line.to_buy_qty), numOrZero(line.purchased_qty), numOrZero(line.unit_price_rub)),
+    0
+  );
+
+  return `
+    <div data-crm-proc-wrapper="${orderId}">
+      <div class="table-responsive mt-2">
+        <table class="table table-sm table-bordered mb-0 align-middle crm-proc-table" data-crm-proc-table="${orderId}">
+          <thead class="table-light">
+            <tr>
+              <th style="min-width:220px">Материал</th>
+              <th style="min-width:110px">Нужно</th>
+              <th style="min-width:90px">Склад</th>
+              <th style="min-width:110px" class="text-danger">Купить</th>
+              <th style="min-width:110px">Цена, ₽</th>
+              <th style="min-width:110px">Итого, ₽</th>
+              <th style="min-width:110px">Перерасход</th>
+              <th style="min-width:170px">Закуплено</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${(data.lines || []).map((line) => renderCrmProcurementRow(line)).join("")}
+          </tbody>
+          <tfoot class="table-light">
+            <tr>
+              <th colspan="5" class="text-end">Закупочная сумма</th>
+              <th colspan="4"><span class="fw-bold" data-crm-proc-sum>${money(numOrZero(data.procurement_sum_rub))}</span></th>
+            </tr>
+            <tr>
+              <th colspan="5" class="text-end">Перерасход</th>
+              <th colspan="4"><span class="fw-semibold text-danger" data-crm-proc-overspend-sum>${money(overspendSum)}</span></th>
+            </tr>
+            <tr>
+              <th colspan="5" class="text-end">Уже закупили</th>
+              <th colspan="4"><span class="fw-semibold" data-crm-proc-progress>${progressText}</span></th>
+            </tr>
+            <tr class="table-success">
+              <th colspan="5" class="text-end">Итоговая сумма (закупка × ${RETAIL_MULTIPLIER})</th>
+              <th colspan="4"><span class="fw-bold" data-crm-proc-final-sum>${money(numOrZero(data.procurement_sum_rub) * RETAIL_MULTIPLIER)}</span></th>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div class="d-flex flex-wrap gap-2 mt-2 align-items-center">
+        <button type="button" class="btn btn-sm btn-outline-success" data-crm-proc-add="${orderId}">Добавить пункт</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-crm-proc-save="${orderId}">Сохранить закупку</button>
+        <button type="button" class="btn btn-sm btn-outline-dark" data-crm-pdf="${orderId}">PDF закупки</button>
+        <span class="small text-muted ms-auto">Прогресс: <strong data-crm-proc-progress-inline>${progressText}</strong></span>
+      </div>
+      ${
+        hasPrices
+          ? ""
+          : `<div class="small text-muted mt-2">Укажите цены закупки — тогда появится «Закупочная сумма» и прогресс закупки.</div>`
+      }
+    </div>
+  `;
+}
+
+function collectCrmProcurementEdits(table) {
+  return Array.from(table.querySelectorAll("[data-crm-proc-row]")).map((row) => {
+    const materialId = Number(row.dataset.crmProcRow);
+    const name = String(row.querySelector("[data-crm-proc-name]")?.value || "").trim();
+    const unit = String(row.querySelector("[data-crm-proc-unit]")?.value || "").trim() || "шт";
+    const toBuyQty = numOrZero(row.querySelector("[data-crm-proc-to-buy]")?.value);
+    const unitPrice = numOrZero(row.querySelector("[data-crm-proc-unit-price]")?.value);
+    const purchasedQty = numOrZero(row.querySelector("[data-crm-proc-purchased-qty]")?.value);
+    const requiredQty = numOrZero(row.querySelector("[data-crm-proc-required]")?.value);
+    const isPurchased = !!row.querySelector("[data-crm-proc-done]")?.checked;
+    return {
+      material_id: materialId || null,
+      material_name: name,
+      unit,
+      required_qty: requiredQty,
+      to_buy_qty: toBuyQty,
+      unit_price_rub: unitPrice,
+      purchased_qty: purchasedQty,
+      is_purchased: isPurchased,
+    };
+  }).filter((line) => line.material_id || line.material_name);
+}
+
+function recalcCrmProcurementTable(wrapper) {
+  const table = wrapper.querySelector("[data-crm-proc-table]");
+  if (!table) return;
+
+  let sum = 0;
+  let purchasedSum = 0;
+
+  let overspendSum = 0;
+  table.querySelectorAll("[data-crm-proc-row]").forEach((row) => {
+    const toBuyQty = numOrZero(row.querySelector("[data-crm-proc-to-buy]")?.value);
+    const unitPrice = numOrZero(row.querySelector("[data-crm-proc-unit-price]")?.value);
+    const purchasedQtyRaw = numOrZero(row.querySelector("[data-crm-proc-purchased-qty]")?.value);
+    const done = !!row.querySelector("[data-crm-proc-done]")?.checked;
+    const purchasedQty = done ? Math.max(toBuyQty, purchasedQtyRaw) : Math.max(0, purchasedQtyRaw);
+
+    const lineTotal = toBuyQty * unitPrice;
+    const purchasedTotal = purchasedQty * unitPrice;
+    const overspend = crmProcurementOverspend(toBuyQty, purchasedQty, unitPrice);
+    sum += lineTotal;
+    purchasedSum += purchasedTotal;
+    overspendSum += overspend;
+
+    const lineTotalEl = row.querySelector("[data-crm-proc-line-total]");
+    const purchasedTotalEl = row.querySelector("[data-crm-proc-purchased-total]");
+    const overspendEl = row.querySelector("[data-crm-proc-overspend]");
+    if (lineTotalEl) lineTotalEl.textContent = money(lineTotal);
+    if (purchasedTotalEl) purchasedTotalEl.textContent = money(purchasedTotal);
+    if (overspendEl) overspendEl.textContent = money(overspend);
+  });
+
+  const percent = sum > 0 ? Math.round((purchasedSum / sum) * 100) : 0;
+  const progressText = `${money(purchasedSum)} / ${money(sum)} · ${percent}%`;
+
+  wrapper.querySelector("[data-crm-proc-sum]").textContent = money(sum);
+  wrapper.querySelector("[data-crm-proc-progress]").textContent = progressText;
+  wrapper.querySelector("[data-crm-proc-progress-inline]").textContent = progressText;
+  const overspendSumEl = wrapper.querySelector("[data-crm-proc-overspend-sum]");
+  if (overspendSumEl) overspendSumEl.textContent = money(overspendSum);
+  const finalSumEl = wrapper.querySelector("[data-crm-proc-final-sum]");
+  if (finalSumEl) finalSumEl.textContent = money(sum * RETAIL_MULTIPLIER);
+}
+
+function bindCrmProcurementTable(host, orderId) {
+  const wrapper = host.querySelector(`[data-crm-proc-wrapper="${orderId}"]`);
+  const table = host.querySelector(`[data-crm-proc-table="${orderId}"]`);
+  if (!wrapper || !table) return;
+
+  const recalc = () => recalcCrmProcurementTable(wrapper);
+
+  const bindRowInputs = (row) => {
+    row.querySelectorAll("[data-crm-proc-to-buy],[data-crm-proc-unit-price],[data-crm-proc-purchased-qty],[data-crm-proc-required]").forEach((input) => {
+      input.addEventListener("input", recalc);
+      input.addEventListener("change", recalc);
+    });
+    row.querySelector("[data-crm-proc-done]")?.addEventListener("change", () => {
+      const purchasedInput = row.querySelector("[data-crm-proc-purchased-qty]");
+      const toBuyInput = row.querySelector("[data-crm-proc-to-buy]");
+      const checkbox = row.querySelector("[data-crm-proc-done]");
+      if (purchasedInput && toBuyInput && checkbox) {
+        if (checkbox.checked) {
+          if (numOrZero(purchasedInput.value) < numOrZero(toBuyInput.value)) {
+            purchasedInput.value = String(numOrZero(toBuyInput.value));
+          }
+          purchasedInput.disabled = true;
+        } else {
+          purchasedInput.disabled = false;
+        }
+      }
+      recalc();
+    });
+    row.querySelector("[data-crm-proc-remove-row]")?.addEventListener("click", () => {
+      row.remove();
+      recalc();
+    });
+  };
+
+  wrapper.querySelector(`[data-crm-proc-add="${orderId}"]`)?.addEventListener("click", () => {
+    const tbody = table.querySelector("tbody");
+    if (!tbody) return;
+    tbody.insertAdjacentHTML("beforeend", renderCrmProcurementRow());
+    bindRowInputs(tbody.lastElementChild);
+  });
+  table.querySelectorAll("[data-crm-proc-row]").forEach(bindRowInputs);
+
+  wrapper.querySelector(`[data-crm-proc-save="${orderId}"]`)?.addEventListener("click", async () => {
+    try {
+      const payload = collectCrmProcurementEdits(table);
+      const updated = await api("PUT", `/catalog/crm/orders/${orderId}/procurement`, payload, true);
+      state.crm.procurementByOrder[orderId] = updated;
+      host.innerHTML = renderCrmProcurementTable(orderId, updated);
+      bindCrmProcurementTable(host, orderId);
+      toast("Закупка сохранена");
+    } catch (error) {
+      toast(`Не удалось сохранить закупку: ${formatApiError(error)}`, false);
+    }
+  });
+
+  wrapper.querySelector(`[data-crm-pdf="${orderId}"]`)?.addEventListener("click", () => exportCrmProcurementPdf(orderId));
+
+  recalc();
+}
+
+function crmStatusOptions(current) {
+  if (!current || CRM_STATUSES.includes(current)) return CRM_STATUSES;
+  return [current, ...CRM_STATUSES];
+}
+
+function crmStatusBadge(status) {
+  const map = {
+    "черновой замер": "text-bg-secondary",
+    "чистовой замер": "text-bg-info",
+    "выбор цветов": "text-bg-info",
+    технолог: "text-bg-primary",
+    "распил-фасады-фурнитура": "text-bg-warning",
+    доставлено: "text-bg-warning",
+    собрано: "text-bg-success",
+    готово: "text-bg-dark",
+    конструктор: "text-bg-info",
+    закупка: "text-bg-warning",
+    сборка: "text-bg-success",
+    готова: "text-bg-dark",
+  };
+  return map[status] || "text-bg-secondary";
+}
+
+function crmOrdersForTab(tab = state.crm.tab) {
+  if (tab === "archive") {
+    return state.crm.orders.filter((order) => CRM_STATUS_DONE_ALIASES.has(order.status));
+  }
+  return state.crm.orders.filter((order) => !CRM_STATUS_DONE_ALIASES.has(order.status));
+}
+
+function renderCrmOrderCard(order) {
+  const phone = order.phone || order.customer_phone || "";
+  const email = order.email || order.customer_email || "";
+  const fio = order.customer_full_name || order.customer || "—";
+  const contacts = [];
+  if (phone) contacts.push(`Тел: ${phone}`);
+  if (email) contacts.push(`Email: ${email}`);
+  if (order.delivery_date) contacts.push(`Сдача: ${order.delivery_date}`);
+  if (order.install_address) contacts.push(`Адрес: ${order.install_address}`);
+  const contactsHtml = contacts.length
+    ? `<div class="small text-muted mb-1">${contacts.map((c) => escapeHtml(c)).join(" · ")}</div>`
+    : "";
+  const moneyBits = [
+    order.price_admin != null ? `Цена ${money(order.price_admin)}` : null,
+    order.advance_paid != null ? `Аванс ${money(order.advance_paid)}` : null,
+    order.balance_due != null ? `Остаток ${money(order.balance_due)}` : null,
+  ].filter(Boolean).join(" · ");
+
+  return `
+    <div class="border rounded p-3 mb-3" data-order-card="${order.id}">
+      <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
+        <div>
+          <strong>${escapeHtml(order.title)}</strong>
+          <span class="badge ${crmStatusBadge(order.status)} ms-2">${escapeHtml(order.status)}</span>
+          ${order.planner_project_id ? `<span class="badge text-bg-light ms-1">проект #${order.planner_project_id}</span>` : ""}
+        </div>
+        <span class="text-muted small">${escapeHtml(fio)}</span>
+      </div>
+      ${contactsHtml}
+      ${moneyBits ? `<div class="small mb-1">${escapeHtml(moneyBits)}</div>` : ""}
+      ${order.notes ? `<div class="small text-muted mb-2">${escapeHtml(order.notes)}</div>` : ""}
+      ${order.selected_tier ? `<div class="small mb-2"><span class="badge bg-info text-dark">Комплектация: ${escapeHtml(tierTitle(order.selected_tier))}</span> · <strong>${money(orderSelectedPrice(order))}</strong></div>` : ""}
+      ${order.materials?.length ? `<div class="small mb-2"><strong>Материалы:</strong> ${order.materials.map((line) => `${escapeHtml(line.material_name)} — ${line.required_qty} ${escapeHtml(line.unit)}`).join("; ")}</div>` : ""}
+      ${order.price_standard ? `<div class="small text-muted mb-2">Все цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
+      <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+        ${canChangeCrmStatus() ? `<select class="form-select form-select-sm" style="max-width:280px" data-crm-status="${order.id}">
+          ${crmStatusOptions(order.status).map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
+        </select>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>` : `<span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(order.status)}</span>`}
+        ${canEditCrmOrders() ? `<button type="button" class="btn btn-sm btn-outline-dark" data-crm-edit="${order.id}">Редактировать</button>
+        <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
+        <button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>
+        <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>` : `<button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>`}
+        ${canDeleteCrmOrders() ? `<button type="button" class="btn btn-sm btn-outline-danger" data-crm-delete="${order.id}" title="Удалить заказ">Удалить</button>` : ""}
+      </div>
+      <div id="crm-proc-${order.id}"></div>
+      <div id="crm-receipts-${order.id}" class="mt-2"></div>
+      <div id="crm-photos-${order.id}" class="mt-2"></div>
+    </div>`;
+}
+
+function bindCrmOrderPanel(host) {
+  // Существующие обработчики
+  host.querySelectorAll("[data-crm-order]").forEach((btn) => {
+    btn.addEventListener("click", () => renderCrmOrderProcurement(Number(btn.dataset.crmOrder)));
+  });
+  
+  host.querySelectorAll("[data-crm-save-status]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const orderId = Number(btn.dataset.crmSaveStatus);
+      const select = host.querySelector(`[data-crm-status="${orderId}"]`);
+      updateCrmOrderStatus(orderId, select?.value || "черновой замер");
+    });
+  });
+
+  host.querySelectorAll("[data-crm-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => openCrmOrderEditor(Number(btn.dataset.crmEdit)));
+  });
+  
+  host.querySelectorAll("[data-crm-photo]").forEach((btn) => {
+    btn.addEventListener("click", () => uploadCrmOrderPhoto(Number(btn.dataset.crmPhoto)));
+  });
+  
+  host.querySelectorAll("[data-crm-receipt-upload]").forEach((btn) => {
+    btn.addEventListener("click", () => uploadCrmOrderReceipt(Number(btn.dataset.crmReceiptUpload)));
+  });
+  
+  host.querySelectorAll("[data-crm-receipt-view]").forEach((btn) => {
+    btn.addEventListener("click", () => toggleCrmOrderReceipts(Number(btn.dataset.crmReceiptView), btn));
+  });
+
+  // Обработчик для кнопки удаления
+  host.querySelectorAll("[data-crm-delete]").forEach((btn) => {
+    btn.addEventListener("click", function(event) {
+      event.stopPropagation();
+      const orderId = Number(this.dataset.crmDelete);
+      const order = state.crm.orders.find(o => o.id === orderId);
+      if (!order) {
+        toast('Заказ не найден', false);
+        return;
+      }
+      
+      // Заполняем модальное окно
+      const titleEl = document.getElementById("deleteOrderTitle");
+      const idEl = document.getElementById("deleteOrderId");
+      if (titleEl) titleEl.textContent = `"${escapeHtml(order.title)}" (№${order.id})`;
+      if (idEl) idEl.value = orderId;
+      
+      // Показываем модальное окно
+      const modalElement = document.getElementById("deleteOrderModal");
+      if (modalElement) {
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+      } else {
+        // Если модального окна нет, используем confirm
+        if (confirm(`Удалить заказ "${order.title}" (№${order.id})? Это действие нельзя отменить!`)) {
+          deleteCrmOrder(orderId);
+        }
+      }
+    });
+  });
+}
+
+function renderCrmPanel() {
+  renderCrmWarehouse();
+  const host = document.getElementById("crmOrdersPanel");
+  if (!host) return;
+  
+  // Подсчет количества заказов
+  const activeCount = state.crm.orders.filter((order) => !CRM_STATUS_DONE_ALIASES.has(order.status)).length;
+  const archiveCount = state.crm.orders.filter((order) => CRM_STATUS_DONE_ALIASES.has(order.status)).length;
+  const orders = crmOrdersForTab(state.crm.tab);
+  
+  // HTML для вкладок
+  const tabs = `
+    <ul class="nav nav-pills mb-3" role="tablist">
+      <li class="nav-item" role="presentation">
+        <button class="nav-link ${state.crm.tab === "active" ? "active" : ""}" 
+                data-crm-tab="active" 
+                type="button" 
+                role="tab">
+          Активные <span class="badge bg-secondary">${activeCount}</span>
+        </button>
+      </li>
+      <li class="nav-item" role="presentation">
+        <button class="nav-link ${state.crm.tab === "archive" ? "active" : ""}" 
+                data-crm-tab="archive" 
+                type="button" 
+                role="tab">
+          Архив <span class="badge bg-secondary">${archiveCount}</span>
+        </button>
+      </li>
+    </ul>
+  `;
+  
+  // Если нет заказов
+  if (!orders.length) {
+    host.innerHTML = `
+      ${tabs}
+      <div class="text-muted py-3">
+        ${state.crm.tab === "archive" 
+          ? "В архиве пока нет завершённых проектов." 
+          : "Нет активных заказов. Нажмите «Загрузить демо CRM» или дождитесь отправки проекта клиентом."}
+      </div>
+    `;
+    
+    // Привязываем обработчики для вкладок
+    host.querySelectorAll("[data-crm-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        state.crm.tab = btn.dataset.crmTab;
+        renderCrmPanel();
+      });
+    });
+    return;
+  }
+  
+  // Отображаем заказы
+  host.innerHTML = `
+    ${tabs}
+    ${orders.map((order) => renderCrmOrderCard(order)).join("")}
+  `;
+  
+  // Привязываем обработчики для вкладок
+  host.querySelectorAll("[data-crm-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.crm.tab = btn.dataset.crmTab;
+      renderCrmPanel();
+    });
+  });
+  
+  // Привязываем обработчики для кнопок в карточках
+  bindCrmOrderPanel(host);
+  
+  // Загружаем фото для каждого заказа
+  orders.forEach((order) => renderCrmOrderPhotos(order.id));
+}
+
+async function updateCrmOrderStatus(orderId, status) {
+  try {
+    await api("PATCH", `/catalog/crm/orders/${orderId}/status`, { status }, true);
+    if (CRM_STATUS_DONE_ALIASES.has(status)) {
+      state.crm.tab = "archive";
+    }
+    await loadCrm();
+    renderOrderCalendar();
+    toast(CRM_STATUS_DONE_ALIASES.has(status) ? "Проект завершён и перемещён в архив" : `Статус заказа: ${status}`);
+  } catch (error) {
+    toast(`Не удалось обновить статус: ${formatApiError(error)}`, false);
+  }
+}
+
+async function uploadCrmOrderPhoto(orderId) {
+  const caption = window.prompt("Подпись к фото", "Этап изготовления") || "";
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = "image/*";
+  input.onchange = async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const objectKey = `orders/${orderId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
+    try {
+      await uploadAssetFile(file, objectKey);
+      await api("POST", `/catalog/crm/orders/${orderId}/photos`, { object_key: objectKey, caption }, true);
+      await loadCrm();
+      toast("Фото добавлено к заказу");
+    } catch (error) {
+      toast(`Фото: ${formatApiError(error)}`, false);
+    }
+  };
+  input.click();
+}
+
+async function getPhotoViewUrl(objectKey) {
+  if (!objectKey) return "";
+  return assetObjectUrl(objectKey);
+}
+
+// Позволяет одному админу сфотографировать чек закупки, а другому — посмотреть,
+// что и на какую сумму уже куплено по заказу.
+// Важно: не используем window.prompt + input.click() — после prompt браузер
+// часто блокирует выбор файла («чек через раз»).
+function openCrmReceiptModal(orderId) {
+  const order = state.crm.orders.find((row) => row.id === orderId);
+  const idInput = document.getElementById("crmReceiptOrderId");
+  const title = document.getElementById("crmReceiptModalTitle");
+  const note = document.getElementById("crmReceiptNote");
+  const amount = document.getElementById("crmReceiptAmount");
+  const file = document.getElementById("crmReceiptFile");
+  const preview = document.getElementById("crmReceiptPreview");
+  const previewImg = document.getElementById("crmReceiptPreviewImg");
+  const err = document.getElementById("crmReceiptError");
+  const saveBtn = document.getElementById("btnCrmReceiptSave");
+  if (!idInput || !file) {
+    toast("Форма загрузки чека не найдена — обновите страницу", false);
+    return;
+  }
+  idInput.value = String(orderId);
+  if (title) title.textContent = order ? `Чек · заказ #${order.id}` : `Чек · заказ #${orderId}`;
+  if (note) note.value = "";
+  if (amount) amount.value = "";
+  file.value = "";
+  if (preview) preview.classList.add("d-none");
+  if (previewImg) {
+    if (previewImg.dataset.objectUrl) URL.revokeObjectURL(previewImg.dataset.objectUrl);
+    previewImg.removeAttribute("src");
+    delete previewImg.dataset.objectUrl;
+  }
+  if (err) {
+    err.textContent = "";
+    err.classList.add("d-none");
+  }
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "Сохранить чек";
+  }
+  const modalEl = document.getElementById("crmReceiptModal");
+  if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+  setTimeout(() => note?.focus(), 250);
+}
+
+function setCrmReceiptError(message) {
+  const err = document.getElementById("crmReceiptError");
+  if (!err) return;
+  if (!message) {
+    err.textContent = "";
+    err.classList.add("d-none");
+    return;
+  }
+  err.textContent = message;
+  err.classList.remove("d-none");
+}
+
+function previewCrmReceiptFile() {
+  const fileInput = document.getElementById("crmReceiptFile");
+  const preview = document.getElementById("crmReceiptPreview");
+  const previewImg = document.getElementById("crmReceiptPreviewImg");
+  if (!fileInput || !preview || !previewImg) return;
+  if (previewImg.dataset.objectUrl) {
+    URL.revokeObjectURL(previewImg.dataset.objectUrl);
+    delete previewImg.dataset.objectUrl;
+  }
+  const file = fileInput.files?.[0];
+  if (!file) {
+    preview.classList.add("d-none");
+    previewImg.removeAttribute("src");
+    return;
+  }
+  if (!String(file.type || "").startsWith("image/")) {
+    setCrmReceiptError("Нужен файл изображения (фото чека)");
+    fileInput.value = "";
+    preview.classList.add("d-none");
+    return;
+  }
+  setCrmReceiptError("");
+  const url = URL.createObjectURL(file);
+  previewImg.dataset.objectUrl = url;
+  previewImg.src = url;
+  preview.classList.remove("d-none");
+}
+
+async function saveCrmReceiptFromModal() {
+  const orderId = Number(document.getElementById("crmReceiptOrderId")?.value || 0);
+  const note = String(document.getElementById("crmReceiptNote")?.value || "").trim();
+  const amountRaw = String(document.getElementById("crmReceiptAmount")?.value || "").trim();
+  const amount = numOrZero(amountRaw);
+  const file = document.getElementById("crmReceiptFile")?.files?.[0];
+  const saveBtn = document.getElementById("btnCrmReceiptSave");
+  setCrmReceiptError("");
+  if (!orderId) {
+    setCrmReceiptError("Не выбран заказ");
+    return;
+  }
+  if (!note) {
+    setCrmReceiptError("Укажите описание");
+    document.getElementById("crmReceiptNote")?.focus();
+    return;
+  }
+  if (!amountRaw || amount <= 0) {
+    setCrmReceiptError("Укажите общую цену по чеку");
+    document.getElementById("crmReceiptAmount")?.focus();
+    return;
+  }
+  if (!file) {
+    setCrmReceiptError("Добавьте фото чека");
+    document.getElementById("crmReceiptFile")?.focus();
+    return;
+  }
+  if (!String(file.type || "").startsWith("image/")) {
+    setCrmReceiptError("Нужен файл изображения");
+    return;
+  }
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.textContent = "Загрузка...";
+  }
+  const ext = (file.name.split(".").pop() || "jpg").toLowerCase().replace(/[^\w]+/g, "") || "jpg";
+  const objectKey = `receipts/${orderId}/${Date.now()}.${ext}`;
+  try {
+    await uploadAssetFile(file, objectKey);
+    await api(
+      "POST",
+      `/catalog/crm/orders/${orderId}/receipts`,
+      {
+        object_key: objectKey,
+        note,
+        amount_rub: amount,
+        uploaded_by: customerName() || "admin",
+      },
+      true
+    );
+    toast("Чек загружен");
+    const modalEl = document.getElementById("crmReceiptModal");
+    bootstrap.Modal.getInstance(modalEl)?.hide();
+    const host = document.getElementById(`crm-receipts-${orderId}`);
+    if (host) host.dataset.open = "1";
+    const viewBtn = document.querySelector(`[data-crm-receipt-view="${orderId}"]`);
+    if (viewBtn) viewBtn.textContent = "Скрыть чеки";
+    await renderCrmOrderReceipts(orderId);
+  } catch (error) {
+    setCrmReceiptError(formatApiError(error));
+    toast(`Чек: ${formatApiError(error)}`, false);
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Сохранить чек";
+    }
+  }
+}
+
+function uploadCrmOrderReceipt(orderId) {
+  openCrmReceiptModal(orderId);
+}
+
+async function toggleCrmOrderReceipts(orderId, btn) {
+  const host = document.getElementById(`crm-receipts-${orderId}`);
+  if (!host) return;
+  if (host.dataset.open === "1") {
+    host.dataset.open = "0";
+    host.innerHTML = "";
+    if (btn) btn.textContent = "Посмотреть чеки";
+    return;
+  }
+  host.dataset.open = "1";
+  if (btn) btn.textContent = "Скрыть чеки";
+  await renderCrmOrderReceipts(orderId);
+}
+
+async function renderCrmOrderReceipts(orderId) {
+  const host = document.getElementById(`crm-receipts-${orderId}`);
+  if (!host) return;
+  host.innerHTML = `<span class="text-muted small">Загружаем чеки...</span>`;
+  try {
+    const receipts = await api("GET", `/catalog/crm/orders/${orderId}/receipts`, undefined, true);
+    if (!receipts.length) {
+      host.innerHTML = `<div class="small text-muted border rounded p-2">Чеков пока нет — нажмите «Загрузить чек», когда что-то купите.</div>`;
+      return;
+    }
+    const totalAmount = receipts.reduce((sum, r) => sum + numOrZero(r.amount_rub), 0);
+    const items = receipts
+      .map((receipt) => {
+        const url = assetObjectUrl(receipt.object_key);
+        const when = receipt.created_at ? new Date(receipt.created_at).toLocaleString("ru-RU") : "";
+        return `<div class="d-inline-block me-2 mb-2 text-center align-top" style="max-width:150px">
+          <a href="${url}" target="_blank" rel="noopener">
+            <img src="${url}" alt="Чек" class="img-fluid rounded border" style="max-height:120px" loading="lazy">
+          </a>
+          ${numOrZero(receipt.amount_rub) > 0 ? `<div class="small fw-semibold mt-1">${money(numOrZero(receipt.amount_rub))}</div>` : ""}
+          ${receipt.note ? `<div class="small text-muted">${escapeHtml(receipt.note)}</div>` : ""}
+          <div class="small text-muted">${escapeHtml(receipt.uploaded_by || "—")}${when ? ` · ${when}` : ""}</div>
+        </div>`;
+      })
+      .join("");
+    host.innerHTML = `<div class="border rounded p-2 bg-light">
+      <div class="d-flex justify-content-between align-items-center mb-1 flex-wrap gap-2">
+        <span class="small fw-semibold">Чеки закупки (${receipts.length})</span>
+        ${totalAmount > 0 ? `<span class="small fw-semibold">Сумма по чекам: ${money(totalAmount)}</span>` : ""}
+      </div>
+      ${items}
+    </div>`;
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+async function exportCrmProcurementPdf(orderId) {
+  const cached = state.crm.procurementByOrder[orderId];
+  if (!cached?.lines?.length) {
+    toast("Сначала нажмите «Рассчитать закупку»", false);
+    return;
+  }
+  if (!(await ensurePdfMake())) return;
+  const order = state.crm.orders.find((o) => o.id === orderId);
+  window.pdfMake
+    .createPdf({
+      pageSize: "A4",
+      pageMargins: [28, 28, 28, 28],
+      content: [
+        { text: "Закупка материалов", style: "title" },
+        { text: order ? `${order.title} · ${order.customer}` : `Заказ #${orderId}`, style: "meta" },
+        { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta" },
+        { text: `Закупочная сумма: ${money(Number(cached.procurement_sum_rub || 0))}`, style: "meta" },
+        { text: `Перерасход: ${money(Number(cached.overspend_sum_rub || 0))}`, style: "meta" },
+        {
+          text: `Закуплено: ${money(Number(cached.purchased_sum_rub || 0))} (${Math.round(Number(cached.progress_percent || 0))}%)`,
+          style: "meta",
+          margin: [0, 0, 0, 12],
+        },
+        {
+          table: {
+            widths: ["*", 52, 48, 52, 52, 55, 60],
+            body: [
+              [
+                { text: "Материал", style: "thead" },
+                { text: "Нужно", style: "thead" },
+                { text: "Склад", style: "thead" },
+                { text: "Купить", style: "thead" },
+                { text: "Цена", style: "thead" },
+                { text: "Итого", style: "thead" },
+                { text: "Перерасход", style: "thead" },
+              ],
+              ...cached.lines.map((line) => [
+                line.material_name,
+                `${line.required_qty} ${line.unit}`,
+                `${line.in_stock_qty}`,
+                line.to_buy_qty > 0 ? `${line.to_buy_qty} ${line.unit}` : "—",
+                money(Number(line.unit_price_rub || 0)),
+                money(Number(line.line_total_rub || 0)),
+                money(Number(line.overspend_rub || crmProcurementOverspend(numOrZero(line.to_buy_qty), numOrZero(line.purchased_qty), numOrZero(line.unit_price_rub)))),
+              ]),
+            ],
+          },
+          layout: "lightHorizontalLines",
+        },
+      ],
+      styles: {
+        title: { fontSize: 18, bold: true },
+        meta: { fontSize: 10, color: "#4b5563" },
+        thead: { bold: true, fillColor: "#eef2ff", fontSize: 10 },
+      },
+      defaultStyle: { font: "Roboto", fontSize: 10 },
+    })
+    .download(`procurement-order-${orderId}.pdf`);
+  toast("PDF закупки сохранён");
+}
+
+async function renderCrmOrderPhotos(orderId) {
+  const host = document.getElementById(`crm-photos-${orderId}`);
+  if (!host) return;
+  try {
+    const photos = await api("GET", `/catalog/crm/orders/${orderId}/photos`, undefined, true);
+    if (!photos.length) {
+      host.innerHTML = `<div class="small text-muted">Фото этапов пока нет.</div>`;
+      return;
+    }
+    const canDeletePhoto = canEditCrmOrders();
+    const items = await Promise.all(
+      photos.map(async (photo) => {
+        const url = await getPhotoViewUrl(photo.object_key);
+        const img = url
+          ? `<img src="${url}" alt="${escapeHtml(photo.caption || `Фото #${photo.id}`)}" class="img-fluid rounded border crm-photo-thumb" style="max-height:100px;cursor:zoom-in" data-lightbox-image loading="lazy">`
+          : `<div class="border rounded p-2 small">${escapeHtml(photo.object_key)}</div>`;
+        const del = canDeletePhoto
+          ? `<button type="button" class="btn btn-sm btn-outline-danger w-100 mt-1" data-crm-photo-del="${photo.id}" data-crm-photo-order="${orderId}">Удалить</button>`
+          : "";
+        return `<div class="d-inline-block me-2 mb-2 align-top" style="max-width:140px">
+          ${img}
+          <div class="small text-muted">${escapeHtml(photo.caption || "")}</div>
+          ${del}
+        </div>`;
+      })
+    );
+    host.innerHTML = `<div class="small fw-semibold mb-1">Фото производства</div>${items.join("")}`;
+    host.querySelectorAll("[data-crm-photo-del]").forEach((btn) => {
+      btn.addEventListener("click", async (event) => {
+        event.stopPropagation();
+        const photoId = Number(btn.dataset.crmPhotoDel);
+        const oid = Number(btn.dataset.crmPhotoOrder);
+        if (!window.confirm("Удалить это фото?")) return;
+        try {
+          await api("DELETE", `/catalog/crm/orders/${oid}/photos/${photoId}`, undefined, true);
+          toast("Фото удалено");
+          await renderCrmOrderPhotos(oid);
+        } catch (error) {
+          toast(`Не удалось удалить фото: ${formatApiError(error)}`, false);
+        }
+      });
+    });
+  } catch {
+    host.innerHTML = "";
+  }
+}
+
+function buildCrmMaterialsFromBom(bom, tier = state.selectedTier || "standard", cutting = null) {
+  const profile = TIER_MATERIAL_PROFILES[tier] || TIER_MATERIAL_PROFILES.standard;
+  let sheetArea = 0;
+  let edgeMeters = 0;
+  for (const part of bom.parts) {
+    sheetArea += (part.width * part.height * part.quantity) / 1_000_000;
+    edgeMeters += ((part.width + part.height) * 2 * part.quantity) / 1000;
+  }
+  const cabinetCount = state.objects3d.filter((o) => o.type === "cabinet" || o.type === "wardrobe").length;
+  const drawerCabinets = state.objects3d.filter((o) => o.type === "cabinet").length;
+  const qty = profile.qty;
+  const sheets = Math.max(1, Number(cutting?.total_sheets) || Math.ceil((sheetArea / 4.9) * qty.panel));
+  const lines = [
+    { material_name: "Лист ДСП 16мм", unit: "лист", required_qty: sheets },
+    { material_name: "Кромка ПВХ 2мм", unit: "м", required_qty: Math.max(1, Math.round(edgeMeters * qty.edge)) },
+  ];
+  if (cabinetCount) {
+    lines.push({ material_name: "Петля мебельная", unit: "шт", required_qty: Math.max(2, Math.round(cabinetCount * 4 * qty.hinges)) });
+  }
+  if (drawerCabinets) {
+    lines.push({ material_name: "Направляющая ящика", unit: "шт", required_qty: Math.max(1, Math.round(drawerCabinets * 2 * qty.slides)) });
+  }
+  lines.push({ material_name: "Саморез 4×16", unit: "шт", required_qty: Math.max(50, Math.round(bom.parts.length * 24 * qty.screws)) });
+  return lines;
+}
+
+function buildTierSubmissionNotes(tier, bom, tiers) {
+  const profile = TIER_MATERIAL_PROFILES[tier] || TIER_MATERIAL_PROFILES.standard;
+  const specs = profile.specs.join("; ");
+  const price = tiers?.[tier];
+  const priceText = price ? money(price) : "—";
+  const customerName = document.getElementById("customerName")?.value?.trim() || "Клиент";
+  const customerPhone = document.getElementById("customerPhone")?.value?.trim() || "";
+  const customerEmail = document.getElementById("customerEmail")?.value?.trim() || "";
+  const contacts = [];
+  if (customerPhone) contacts.push(`тел: ${customerPhone}`);
+  if (customerEmail) contacts.push(`email: ${customerEmail}`);
+  const contactsText = contacts.length ? `, контакты: ${contacts.join(", ")}` : "";
+  return `Комплектация: ${tierTitle(tier)} (${priceText}). Материалы: ${specs}. Комната ${state.roomConfig.width}×${state.roomConfig.length}×${state.roomConfig.height} мм, объектов: ${state.objects3d.length}, деталей: ${bom.parts.length}${contactsText}`;
+}
+
+// function buildTierSubmissionNotes(tier, bom, tiers) {
+//   const profile = TIER_MATERIAL_PROFILES[tier] || TIER_MATERIAL_PROFILES.standard;
+//   const specs = profile.specs.join("; ");
+//   const price = tiers?.[tier];
+//   const priceText = price ? money(price) : "—";
+//   return `Комплектация: ${tierTitle(tier)} (${priceText}). Материалы: ${specs}. Комната ${state.roomConfig.width}×${state.roomConfig.length}×${state.roomConfig.height} мм, объектов: ${state.objects3d.length}, деталей: ${bom.parts.length}`;
+// }
+
+async function submitProjectToWork() {
+  const customerName = document.getElementById("customerName")?.value?.trim();
+  const customerPhone = document.getElementById("customerPhone")?.value?.trim();
+  const customerEmail = document.getElementById("customerEmail")?.value?.trim();
+  if (!requireFormConsent("projectConsent", "Подтвердите согласие на обработку данных")) return;
+  
+  if (!customerName) {
+    toast("Укажите ваше имя перед отправкой", false);
+    document.getElementById("customerName")?.focus();
+    return;
+  }
+  
+  if (!customerPhone && !customerEmail) {
+    toast("Укажите телефон или email для связи", false);
+    return;
+  }
+  
+  if (!state.objects3d.length) {
+    toast("Добавьте мебель в комнату", false);
+    return;
+  }
+  
+  const selectedTier = state.selectedTier || "standard";
+  if (!PRICING_TIERS.some((tier) => tier.key === selectedTier)) {
+    toast("Выберите комплектацию на вкладке «Стоимость»", false);
+    document.querySelector('[data-bs-target="#costPane"]')?.click();
+    return;
+  }
+  
+  try {
+    const bom = buildBomFromObjects();
+    const cutting = await quoteCuttingForBom(bom);
+    const cost = estimateProjectCost(bom, cutting);
+    const tiers = estimateTierPrices(cost, bom);
+    const project = await savePlannerProject();
+    state.projectId = project.id;
+    state.plannerStep = 4;
+    updatePlannerProgress();
+    await syncPlannerObjectsToBackend();
+    
+    await api("POST", `/planner/projects/${state.projectId}/submit`, { 
+      selected_tier: selectedTier,
+      customer_name: customerName,
+      customer_phone: customerPhone,
+      customer_email: customerEmail,
+    }, true);
+    
+    const materials = buildCrmMaterialsFromBom(bom, selectedTier, cutting);
+    const projectName = `Проект ${customerName}`;
+    
+    await api(
+      "POST",
+      "/catalog/crm/orders/submit-project",
+      {
+        planner_project_id: state.projectId,
+        title: projectName,
+        customer: customerName,
+        customer_phone: customerPhone,
+        customer_email: customerEmail,
+        user_id: customerName,
+        pricing: tiers,
+        selected_tier: selectedTier,
+        materials,
+        cutting: cutting
+          ? { total_sheets: cutting.total_sheets, sheet_width: cutting.sheet_width, sheet_height: cutting.sheet_height }
+          : undefined,
+        notes: buildTierSubmissionNotes(selectedTier, bom, tiers),
+      },
+      true
+    );
+    
+    document.getElementById("plannerHint").textContent = `Проект №${state.projectId} отправлен в производство (${tierTitle(selectedTier)}, ${money(tiers[selectedTier])})`;
+    await loadUserOrders();
+    toast("Проект отправлен в работу — админ увидит расчёты");
+  } catch (error) {
+    toast(`Не удалось отправить: ${formatApiError(error)}`, false);
+  }
+}
+
+async function loadUserProjects() {
+  const host = document.getElementById("memberProjectsPanel") || document.getElementById("userProjectsPanel");
+  if (!host || !customerName()) return;
+  try {
+    state.userProjects = await api(
+      "GET",
+      `/planner/projects/user/${encodeURIComponent(customerName())}`,
+      undefined,
+      true
+    );
+    renderUserProjects();
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+function renderUserProjects() {
+  const host = document.getElementById("memberProjectsPanel") || document.getElementById("userProjectsPanel");
+  if (!host) return;
+  if (!state.userProjects.length) {
+    host.innerHTML = `<div class="text-muted">У вас пока нет сохранённых проектов. Спланируйте комнату и нажмите «Сохранить проект».</div>`;
+    return;
+  }
+  host.innerHTML = state.userProjects
+    .map((project) => {
+      const tier = project.selected_tier ? ` · ${tierTitle(project.selected_tier)}` : "";
+      const price = project[`price_${project.selected_tier || "standard"}`];
+      const priceText = price ? ` · ${money(price)}` : "";
+      const updated = project.updated_at || project.created_at;
+      return `<div class="account-record">
+        <div class="d-flex justify-content-between align-items-start gap-2">
+          <div>
+            <strong>${escapeHtml(project.name)}</strong>
+            <div class="small text-muted">${plannerStatusLabel(project.status)}${tier}${priceText}</div>
+            <div class="small">${Math.round(project.room_width)}×${Math.round(project.room_length)}×${Math.round(project.room_height)} мм</div>
+            ${project.location ? `<div class="small text-muted">${escapeHtml(project.location)}</div>` : ""}
+            ${updated ? `<div class="account-record-meta">Обновлён ${new Date(updated).toLocaleDateString("ru-RU")}</div>` : ""}
+          </div>
+          <button type="button" class="btn btn-sm btn-primary" data-open-user-project="${project.id}">Открыть</button>
+        </div>
+      </div>`;
+    })
+    .join("");
+  host.querySelectorAll("[data-open-user-project]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await openUserProject(Number(button.dataset.openUserProject));
+      } catch (error) {
+        toast(`Не удалось открыть проект: ${formatApiError(error)}`, false);
+      }
+    });
+  });
+}
+
+async function openUserProject(projectId) {
+  await loadPlannerProject(projectId);
+  const modal = document.getElementById("accountModal");
+  if (modal) bootstrap.Modal.getInstance(modal)?.hide();
+  document.getElementById("planner")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  toast("Проект загружен в планировщик");
+}
+
+async function loadUserOrders() {
+  const host = document.getElementById("memberOrdersPanel") || document.getElementById("userOrdersPanel");
+  if (!host || !customerName()) return;
+  try {
+    state.userOrders = await api("GET", `/catalog/crm/orders/user/${encodeURIComponent(customerName())}`, undefined, true);
+    await renderUserOrders();
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+async function renderUserOrders() {
+  const host = document.getElementById("memberOrdersPanel") || document.getElementById("userOrdersPanel");
+  if (!host) return;
+  if (!state.userOrders.length) {
+    host.innerHTML = `<div class="text-muted">У вас пока нет заказов в производстве. Спланируйте кухню и нажмите «Отправить в работу».</div>`;
+    return;
+  }
+  const cards = await Promise.all(
+    state.userOrders.map(async (order) => {
+      let photosHtml = "";
+      try {
+        const photos = await api("GET", `/catalog/crm/orders/${order.id}/photos`, undefined, true);
+        if (photos.length) {
+          const thumbs = await Promise.all(
+            photos.map(async (photo) => {
+              const url = await getPhotoViewUrl(photo.object_key);
+              return url
+                ? `<div class="me-2 mb-2 d-inline-block"><img src="${url}" class="rounded border" style="height:72px" loading="lazy" data-lightbox-image alt="${escapeHtml(photo.caption || order.title)}"><div class="small text-muted">${escapeHtml(photo.caption || "")}</div></div>`
+                : "";
+            })
+          );
+          photosHtml = `<div class="mt-2">${thumbs.join("")}</div>`;
+        }
+      } catch {
+        photosHtml = "";
+      }
+      const tier = order.selected_tier || "standard";
+      const price = orderSelectedPrice(order);
+      const prices = price
+        ? `<div class="small mt-1">Комплектация <strong>${escapeHtml(tierTitle(tier))}</strong> — ${money(price)}</div>`
+        : "";
+      const created = order.created_at ? new Date(order.created_at).toLocaleDateString("ru-RU") : "";
+      return `<div class="account-record">
+        <div class="d-flex justify-content-between gap-2">
+          <strong>${escapeHtml(order.title)}</strong>
+          <span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(order.status)}</span>
+        </div>
+        ${prices}
+        <div class="small text-muted">Заказ #${order.id}${order.planner_project_id ? ` · проект #${order.planner_project_id}` : ""}</div>
+        ${created ? `<div class="account-record-meta">Создан ${created}</div>` : ""}
+        ${photosHtml}
+      </div>`;
+    })
+  );
+  host.innerHTML = cards.join("");
+}
+
+function applyPlannerModeUi() {
+  if (APP_MODE === "admin") return;
+  document.getElementById("bomTabNav")?.classList.add("d-none");
+  document.getElementById("btnGenerateBom")?.classList.add("d-none");
+  ["btnExportAssemblyPdf", "btnExport3d", "btnExportDbs"].forEach((id) => {
+    document.getElementById(id)?.classList.add("d-none");
+  });
+}
+
+function plannerStatusLabel(status) {
+  if (status === "submitted") return "отправлен";
+  if (status === "draft") return "черновик";
+  return status || "—";
+}
+
+async function loadPlannerProject(projectId) {
+  let project;
+  if (APP_MODE === "admin") {
+    const projects = await api("GET", "/planner/projects");
+    project = projects.find((row) => row.id === projectId);
+  } else {
+    if (!customerName()) throw new Error("Войдите в аккаунт");
+    const projects = await api(
+      "GET",
+      `/planner/projects/user/${encodeURIComponent(customerName())}`,
+      undefined,
+      true
+    );
+    project = projects.find((row) => row.id === projectId);
+  }
+  if (!project) throw new Error("Проект не найден");
+
+  state.projectId = project.id;
+  state.sceneRevision = Number(project.scene_revision) || 0;
+  state.selectedTier = project.selected_tier || "standard";
+  const projectNameField = document.getElementById("projectName");
+  if (projectNameField) projectNameField.value = project.name || "";
+  state.roomConfig = {
+    width: Number(project.room_width) || 6000,
+    length: Number(project.room_length) || 5000,
+    height: Number(project.room_height) || 2800,
+  };
+
+  // 🔧 ЗАГРУЖАЕМ ДАННЫЕ В ПОЛЯ
+  const customerNameField = document.getElementById("customerName");
+  const customerPhoneField = document.getElementById("customerPhone");
+  const customerEmailField = document.getElementById("customerEmail");
+  const projectLocationField = document.getElementById("projectLocation");
+  
+  if (customerNameField && project.customer_name) {
+    customerNameField.value = project.customer_name;
+  }
+  if (customerPhoneField && project.customer_phone) {
+    customerPhoneField.value = project.customer_phone;
+  }
+  if (customerEmailField && project.customer_email) {
+    customerEmailField.value = project.customer_email;
+  }
+  if (projectLocationField && project.location) {
+    projectLocationField.value = project.location;
+  }
+
+  let scene;
+  try {
+    scene = migrateScene(await api("GET", `/planner/projects/${projectId}/scene`, undefined, true));
+  } catch (error) {
+    console.warn("Versioned scene unavailable; loading legacy placements", error);
+    scene = migrateScene({ placements: await api("GET", `/planner/projects/${projectId}/furniture`, undefined, true) });
+  }
+  state.sceneRevision = scene.revision;
+  if (scene.room) {
+    state.roomConfig = { width: Number(scene.room.width), length: Number(scene.room.length), height: Number(scene.room.height) };
+    state.roomFinish = { ...state.roomFinish, ...(scene.room.finish || {}) };
+    if (scene.room.finish?.hardwareLevels) state.hardwareLevels = { ...state.hardwareLevels, ...scene.room.finish.hardwareLevels };
+  }
+  state.objects3d = scene.placements.map(toLegacyObject);
+  state.selected3dObjectId = state.objects3d[0]?.id || null;
+  plannerHistory.clear();
+
+  if (project.bom_json) {
+    try {
+      state.lastCutResult = null;
+    } catch {
+      // ignore invalid bom cache
+    }
+  }
+
+  const roomWidth = document.getElementById("roomWidth");
+  const roomLength = document.getElementById("roomLength");
+  const roomHeight = document.getElementById("roomHeight");
+  if (roomWidth) roomWidth.value = state.roomConfig.width;
+  if (roomLength) roomLength.value = state.roomConfig.length;
+  if (roomHeight) roomHeight.value = state.roomConfig.height;
+
+  if (state.three) rebuildRoomGeometry();
+  renderObjects3dList();
+  renderRoomTopView();
+  renderRoom3D();
+  renderBom();
+  renderCostEstimate();
+  ensureRoom3D();
+
+  const hint = document.getElementById("plannerHint");
+  if (hint) {
+    const user = project.user_id ? ` · ${project.user_id}` : "";
+    const location = project.location ? ` · ${project.location}` : "";
+    hint.textContent = `Открыт проект №${project.id}: ${project.name}${user}${location} (${plannerStatusLabel(project.status)})`;
+  }
+}
+
+async function renderAdminPlannerProjects() {
+  const host = document.getElementById("adminProjectsList");
+  if (!host) return;
+  host.textContent = "Загрузка проектов...";
+  try {
+    const projects = await api("GET", "/planner/projects");
+    if (!projects.length) {
+      host.innerHTML = '<div class="text-muted">Сохранённых проектов пока нет.</div>';
+      return;
+    }
+    host.innerHTML = projects
+      .map((project) => {
+        const active = state.projectId === project.id ? "border-primary" : "";
+        const tier = project.selected_tier ? `<span class="badge bg-info text-dark ms-1">${escapeHtml(tierTitle(project.selected_tier))}</span>` : "";
+        const selectedPrice = project.selected_tier && project[`price_${project.selected_tier}`]
+          ? `<div class="small text-muted mt-1">${money(project[`price_${project.selected_tier}`])}</div>`
+          : project.price_standard
+            ? `<div class="small text-muted mt-1">от ${money(project.price_standard)}</div>`
+            : "";
+        return `<div class="border rounded p-3 mb-2 ${active}">
+          <div class="d-flex justify-content-between align-items-start gap-2">
+            <div>
+              <strong>#${project.id} ${escapeHtml(project.name)}</strong>${tier}
+              <div class="small text-muted">${escapeHtml(project.user_id || "—")} · ${escapeHtml(plannerStatusLabel(project.status))}</div>
+              <div class="small">${Math.round(project.room_width)}×${Math.round(project.room_length)}×${Math.round(project.room_height)} мм</div>
+              ${selectedPrice}
+            </div>
+            <button class="btn btn-sm btn-primary" data-open-project="${project.id}">Открыть</button>
+          </div>
+        </div>`;
+      })
+      .join("");
+
+    host.querySelectorAll("[data-open-project]").forEach((button) => {
+      button.addEventListener("click", async () => {
+        try {
+          await loadPlannerProject(Number(button.dataset.openProject));
+          await renderAdminPlannerProjects();
+          toast("Проект загружен");
+        } catch (error) {
+          toast(`Не удалось открыть проект: ${formatApiError(error)}`, false);
+        }
+      });
+    });
+  } catch (error) {
+    host.innerHTML = `<div class="text-warning">Не удалось загрузить проекты: ${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+function appNowParts() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: APP_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const get = (type) => Number(parts.find((part) => part.type === type)?.value);
+  return { year: get("year"), month: get("month"), day: get("day") };
+}
+
+function dateKeyInAppTz(iso) {
+  if (!iso) return "";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: APP_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(iso));
+}
+
+function formatAppDateTime(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleString("ru-RU", {
+    timeZone: APP_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function orderCalendarDate(order) {
+  return order.status_changed_at || order.created_at;
+}
+
+function ensureCalendarMonth() {
+  if (state.calendar.year && state.calendar.month) return;
+  const now = appNowParts();
+  state.calendar.year = now.year;
+  state.calendar.month = now.month;
+}
+
+function shiftCalendarMonth(delta) {
+  ensureCalendarMonth();
+  const date = new Date(Date.UTC(state.calendar.year, state.calendar.month - 1 + delta, 1));
+  state.calendar.year = date.getUTCFullYear();
+  state.calendar.month = date.getUTCMonth() + 1;
+  renderOrderCalendar();
+}
+
+function openCalendarOrder(orderId) {
+  const order = state.crm.orders.find((row) => row.id === orderId);
+  if (!order) {
+    toast("Заказ не найден", false);
+    return;
+  }
+  const host = document.getElementById("calendarOrderBody");
+  if (host) host.innerHTML = renderCrmOrderCard(order);
+  const modalEl = document.getElementById("calendarOrderModal");
+  if (modalEl) {
+    if (host) bindCrmOrderPanel(host);
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    return;
+  }
+  document.getElementById("crm")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector(`[data-order-card="${orderId}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function renderOrderCalendar() {
+  const host = document.getElementById("orderCalendar");
+  if (!host) return;
+  ensureCalendarMonth();
+  const year = state.calendar.year;
+  const month = state.calendar.month;
+  const first = new Date(Date.UTC(year, month - 1, 1));
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const weekday = (first.getUTCDay() + 6) % 7;
+  const monthLabel = first.toLocaleDateString("ru-RU", { month: "long", year: "numeric", timeZone: "UTC" });
+  const now = appNowParts();
+  const grouped = new Map();
+  const pushCal = (key, entry) => {
+    if (!key) return;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(entry);
+  };
+  for (const order of state.crm.orders) {
+    pushCal(dateKeyInAppTz(orderCalendarDate(order)), { ...order, calendar_kind: "status" });
+    if (order.delivery_date) {
+      pushCal(String(order.delivery_date).slice(0, 10), { ...order, calendar_kind: "delivery" });
+    }
+  }
+  const cells = [];
+  for (let i = 0; i < weekday; i += 1) cells.push(`<div class="prod-cal-cell is-empty"></div>`);
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const key = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dayOrders = grouped.get(key) || [];
+    const isToday = now.year === year && now.month === month && now.day === day;
+    cells.push(`<div class="prod-cal-cell ${isToday ? "is-today" : ""}">
+      <div class="prod-cal-day">${day}</div>
+      <div class="prod-cal-events">
+        ${dayOrders.map((order) => {
+          const isDelivery = order.calendar_kind === "delivery";
+          const label = isDelivery ? "Сдача" : escapeHtml(order.status);
+          const subtitle = isDelivery
+            ? (order.install_address || order.customer_full_name || order.customer || "—")
+            : (order.customer_full_name || order.customer || "—");
+          return `<button type="button" class="prod-cal-event" data-cal-order="${order.id}">
+          <span class="prod-cal-status">${label}</span>
+          <strong>${escapeHtml(order.title)}</strong>
+          <span>${escapeHtml(subtitle)}</span>
+        </button>`;
+        }).join("")}
+      </div>
+    </div>`);
+  }
+  const weekdays = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"].map((d) => `<div class="prod-cal-weekday">${d}</div>`).join("");
+  const agenda = [...grouped.entries()]
+    .filter(([key]) => key.startsWith(`${year}-${String(month).padStart(2, "0")}`))
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([key, orders]) => {
+      const [, , d] = key.split("-");
+      return `<section class="prod-cal-agenda-day">
+        <h3>${Number(d)} ${monthLabel}</h3>
+        ${orders.map((order) => {
+          const isDelivery = order.calendar_kind === "delivery";
+          const badge = isDelivery ? "Сдача" : escapeHtml(order.status);
+          const badgeClass = isDelivery ? "text-bg-warning" : crmStatusBadge(order.status);
+          const sub = isDelivery
+            ? escapeHtml(order.install_address || order.customer_full_name || order.customer || "—")
+            : `${escapeHtml(order.customer_full_name || order.customer || "—")} · ${formatAppDateTime(orderCalendarDate(order))}`;
+          return `<button type="button" class="prod-cal-agenda-item" data-cal-order="${order.id}">
+          <span class="badge ${badgeClass}">${badge}</span>
+          <div>
+            <strong>${escapeHtml(order.title)}</strong>
+            <div class="small text-muted">${sub}</div>
+          </div>
+        </button>`;
+        }).join("")}
+      </section>`;
+    })
+    .join("");
+  host.innerHTML = `
+    <div class="prod-cal">
+      <div class="prod-cal-toolbar">
+        <div>
+          <div class="muted-title">Календарь заказов</div>
+          <h2 class="section-title h4 mb-0 text-capitalize">${escapeHtml(monthLabel)}</h2>
+          <p class="small text-muted mb-0">Время UTC+4. Статус — по дате смены статуса; сдача и адрес монтажа — по дате сдачи.</p>
+        </div>
+        <div class="prod-cal-nav">
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-cal-shift="-1">←</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-cal-today>Сегодня</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-cal-shift="1">→</button>
+        </div>
+      </div>
+      <div class="prod-cal-weekdays">${weekdays}</div>
+      <div class="prod-cal-grid">${cells.join("")}</div>
+      <div class="prod-cal-agenda">${agenda || `<div class="text-muted">В этом месяце заказов нет.</div>`}</div>
+    </div>`;
+  host.querySelector("[data-cal-today]")?.addEventListener("click", () => {
+    const current = appNowParts();
+    state.calendar.year = current.year;
+    state.calendar.month = current.month;
+    renderOrderCalendar();
+  });
+  host.querySelectorAll("[data-cal-shift]").forEach((btn) => {
+    btn.addEventListener("click", () => shiftCalendarMonth(Number(btn.dataset.calShift)));
+  });
+  host.querySelectorAll("[data-cal-order]").forEach((btn) => {
+    btn.addEventListener("click", () => openCalendarOrder(Number(btn.dataset.calOrder)));
+  });
+}
+
+const STAFF_DEFAULT_PERMISSIONS = [
+  "catalog:write",
+  "planner:write",
+  "cutting:run",
+  "assets:write",
+  "crm:orders:write",
+  "crm:orders:status",
+  "crm:dicts:write",
+];
+
+async function ensureStaffPermissionCatalog() {
+  if (state.staffPermissionCatalog?.length) return state.staffPermissionCatalog;
+  state.staffPermissionCatalog = await api("GET", "/auth/permission-catalog", undefined, true);
+  return state.staffPermissionCatalog;
+}
+
+function renderStaffPermissionToggles(hostId, selectedRoles, idPrefix) {
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  const catalog = state.staffPermissionCatalog || [];
+  const selected = new Set(selectedRoles || []);
+  const groups = {};
+  catalog.forEach((item) => {
+    if (!groups[item.group]) groups[item.group] = [];
+    groups[item.group].push(item);
+  });
+  host.innerHTML = Object.entries(groups).map(([group, items]) => `
+    <div class="staff-perm-group mb-3">
+      <div class="text-muted text-uppercase mb-2" style="font-size:.68rem;letter-spacing:.04em">${escapeHtml(group)}</div>
+      ${items.map((item) => `
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" role="switch"
+            id="${idPrefix}_${item.code.replace(/:/g, "_")}"
+            data-staff-perm="${escapeHtml(item.code)}"
+            ${selected.has(item.code) ? "checked" : ""}>
+          <label class="form-check-label" for="${idPrefix}_${item.code.replace(/:/g, "_")}">${escapeHtml(item.label)}</label>
+        </div>`).join("")}
+    </div>`).join("");
+}
+
+function collectStaffPermissions(hostId) {
+  const host = document.getElementById(hostId);
+  if (!host) return [];
+  return [...host.querySelectorAll("[data-staff-perm]:checked")].map((el) => el.dataset.staffPerm);
+}
+
+function formatStaffRolesSummary(roles) {
+  const list = roles || [];
+  if (list.includes("superadmin")) return "Главный админ";
+  const catalog = state.staffPermissionCatalog || [];
+  const labels = catalog.filter((p) => list.includes(p.code)).map((p) => p.label);
+  if (!labels.length) return "Только вход в панель";
+  return labels.join("; ");
+}
+
+async function loadStaffDirectory() {
+  const host = document.getElementById("staffDirectory");
+  const wrap = document.getElementById("staff-admin");
+  if (!wrap) return;
+  wrap.classList.toggle("d-none", !isSuperAdmin());
+  if (!host || !isSuperAdmin()) return;
+  try {
+    await ensureStaffPermissionCatalog();
+    renderStaffPermissionToggles("staffCreatePermissions", STAFF_DEFAULT_PERMISSIONS, "staffCreate");
+    state.staff = await api("GET", "/auth/admins", undefined, true);
+    host.innerHTML = `
+      <div class="table-responsive">
+        <table class="table table-sm admin-table mb-0">
+          <thead><tr><th>Логин</th><th>Почта</th><th>Права</th><th></th></tr></thead>
+          <tbody>
+            ${state.staff.map((user) => {
+              const superUser = (user.roles || []).includes("superadmin");
+              return `<tr>
+                <td>${escapeHtml(user.username)}</td>
+                <td>${escapeHtml(user.email || "—")}${user.email && !user.email_verified ? ' <span class="badge text-bg-warning">не подтверждена</span>' : ""}</td>
+                <td class="small" style="max-width:360px">${escapeHtml(formatStaffRolesSummary(user.roles))}</td>
+                <td class="text-end text-nowrap">
+                  ${superUser ? "" : `<button class="btn btn-sm btn-outline-primary" data-staff-edit="${user.id}">Изменить</button>
+                    <button class="btn btn-sm btn-outline-danger" data-staff-del="${user.id}">Удалить</button>`}
+                </td>
+              </tr>`;
+            }).join("")}
+          </tbody>
+        </table>
+      </div>`;
+    host.querySelectorAll("[data-staff-edit]").forEach((btn) => btn.addEventListener("click", () => editStaff(Number(btn.dataset.staffEdit))));
+    host.querySelectorAll("[data-staff-del]").forEach((btn) => btn.addEventListener("click", () => removeStaff(Number(btn.dataset.staffDel))));
+  } catch (error) {
+    host.innerHTML = `<div class="text-danger small">${escapeHtml(formatApiError(error))}</div>`;
+  }
+}
+
+async function createStaffFromForm() {
+  const username = document.getElementById("staffUsername")?.value.trim();
+  const password = document.getElementById("staffPassword")?.value;
+  const email = document.getElementById("staffEmail")?.value.trim();
+  if (!username || !password || password.length < 8) {
+    toast("Укажите логин и пароль от 8 символов", false);
+    return;
+  }
+  const roles = collectStaffPermissions("staffCreatePermissions");
+  try {
+    await api("POST", "/auth/admins", { username, password, email: email || undefined, roles }, true);
+    document.getElementById("staffUsername").value = "";
+    document.getElementById("staffPassword").value = "";
+    document.getElementById("staffEmail").value = "";
+    renderStaffPermissionToggles("staffCreatePermissions", STAFF_DEFAULT_PERMISSIONS, "staffCreate");
+    await loadStaffDirectory();
+    toast(email ? "Администратор создан. Письмо с подтверждением отправлено, если SMTP настроен." : "Администратор создан");
+  } catch (error) {
+    toast(`Не удалось создать администратора: ${formatApiError(error)}`, false);
+  }
+}
+
+async function editStaff(userId) {
+  const user = state.staff.find((row) => row.id === userId);
+  if (!user) return;
+  await ensureStaffPermissionCatalog();
+  document.getElementById("staffEditId").value = String(user.id);
+  document.getElementById("staffEditUsername").value = user.username;
+  document.getElementById("staffEditPassword").value = "";
+  document.getElementById("staffEditEmail").value = user.email || "";
+  renderStaffPermissionToggles("staffEditPermissions", user.roles || [], "staffEdit");
+  const modalEl = document.getElementById("staffEditModal");
+  if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+async function saveStaffEdit() {
+  const userId = Number(document.getElementById("staffEditId")?.value);
+  const username = document.getElementById("staffEditUsername")?.value.trim();
+  const password = document.getElementById("staffEditPassword")?.value;
+  const email = document.getElementById("staffEditEmail")?.value.trim();
+  if (!userId || !username) {
+    toast("Укажите логин", false);
+    return;
+  }
+  const payload = {
+    username,
+    email: email || null,
+    roles: collectStaffPermissions("staffEditPermissions"),
+  };
+  if (password) payload.password = password;
+  try {
+    await api("PATCH", `/auth/admins/${userId}`, payload, true);
+    bootstrap.Modal.getInstance(document.getElementById("staffEditModal"))?.hide();
+    await loadStaffDirectory();
+    toast("Данные администратора обновлены");
+  } catch (error) {
+    toast(`Не удалось изменить администратора: ${formatApiError(error)}`, false);
+  }
+}
+
+async function removeStaff(userId) {
+  if (!window.confirm("Удалить этого администратора?")) return;
+  try {
+    await api("DELETE", `/auth/admins/${userId}`, undefined, true);
+    await loadStaffDirectory();
+    toast("Администратор удалён");
+  } catch (error) {
+    toast(`Не удалось удалить: ${formatApiError(error)}`, false);
+  }
+}
+
+async function seedCrmDemo() {
+  toast("Демо-данные CRM отключены. Заказы появляются из реальных 3D-проектов.", false);
+}
+
+async function bootAdminPanel() {
+  const gate = document.getElementById("adminGate");
+  const content = document.getElementById("adminContent");
+  if (!gate || !content) return;
+  await refreshAuth();
+  const allowed = canAccessAdminPanel();
+  gate.classList.toggle("d-none", allowed);
+  content.classList.toggle("d-none", !allowed);
+  if (!allowed) return;
+  const clearJobs = document.getElementById("btnClearCuttingJobs");
+  if (clearJobs) clearJobs.classList.toggle("d-none", !canDeleteRecords());
+  document.getElementById("btnCrmNewOrder")?.classList.toggle("d-none", !canEditCrmOrders());
+  document.getElementById("btnCrmDictionaries")?.classList.toggle("d-none", !canEditCrmDicts());
+  document.getElementById("btnAddProduct")?.classList.toggle("d-none", !canManageCatalog());
+  document.getElementById("btnSaveDeliverySettings")?.classList.toggle("d-none", !canManageCatalog());
+  document.getElementById("btnSavePricingSettings")?.classList.toggle("d-none", !isSuperAdmin());
+  renderAdminCatalogTable();
+  await renderCuttingJobs();
+  await loadDeliverySettingsAdmin();
+  await loadPricingSettingsAdmin();
+  await loadCrm();
+  renderOrderCalendar();
+  await loadStaffDirectory();
+  await renderAdminPlannerProjects();
+  if (state.projectId) {
+    ensureRoom3D();
+  }
+}
+
+async function cutFrom3D() {
+  const bom = renderBom();
+  if (!bom.parts.length) {
+    toast("Нет объектов для расчета раскроя", false);
+    return;
+  }
+  const result = await optimizeCutting(bom.parts, true);
+  if (!result) {
+    toast("Не удалось выполнить раскрой из 3D", false);
+    return;
+  }
+  document.getElementById("plannerCutResult").textContent = `Раскрой из 3D: ${result.placed_count}/${result.requested_count} деталей, ${result.total_sheets} лист(ов), свободно ${result.total_unused_area} мм².`;
+  window.location.hash = "#cutting";
+  toast("Раскрой из 3D выполнен");
+}
+
+function sheetCanvasForPdfmake(sheet, sheetWidthMm, sheetHeightMm) {
+  const maxW = 220;
+  const maxH = 130;
+  const ratio = Math.min(maxW / sheetWidthMm, maxH / sheetHeightMm);
+  const width = Math.max(Math.round(sheetWidthMm * ratio), 1);
+  const height = Math.max(Math.round(sheetHeightMm * ratio), 1);
+  const colors = ["#a16207", "#7c3aed", "#0f766e", "#be123c", "#2563eb", "#65a30d"];
+  const canvas = [{ type: "rect", x: 0, y: 0, w: width, h: height, lineColor: "#8a8f98", lineWidth: 1.2 }];
+
+  (sheet.placements || []).forEach((placement, idx) => {
+    const x = placement.x * ratio;
+    const y = placement.y * ratio;
+    const w = Math.max(placement.width * ratio, 1.2);
+    const h = Math.max(placement.height * ratio, 1.2);
+    const color = colors[idx % colors.length];
+    canvas.push({ type: "rect", x, y, w, h, color, lineColor: "#ffffff", lineWidth: 0.4 });
+  });
+
+  return { canvas, width };
+}
+
+async function exportCutPdf() {
+  const result = state.lastCutResult;
+  if (!result) {
+    toast("Сначала выполните раскрой", false);
+    return;
+  }
+  if (!(await ensurePdfMake())) return;
+  const sheetW = Number(document.getElementById("sheetW").value);
+  const sheetH = Number(document.getElementById("sheetH").value);
+  const content = [
+    { text: "Карта раскроя", style: "title" },
+    { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta" },
+    {
+      text: `Размещено: ${result.placed_count}/${result.requested_count} · Листов: ${result.total_sheets} · Занято: ${result.total_used_area} мм² · Свободно: ${result.total_unused_area} мм²`,
+      style: "meta",
+      margin: [0, 0, 0, 10],
+    },
+  ];
+
+  (result.sheets || []).forEach((sheet, index) => {
+    const drawn = sheetCanvasForPdfmake(sheet, sheetW, sheetH);
+    const legendRows = (sheet.placements || []).map((p, i) => [
+      { text: `${i + 1}`, style: "small" },
+      { text: p.name, style: "small" },
+      { text: `${p.width}×${p.height} мм`, style: "small" },
+    ]);
+    content.push({
+      text: `Лист ${sheet.sheet_index + 1}: занято ${sheet.utilized_area ?? 0} мм² · свободно ${sheet.unused_area ?? 0} мм² · загрузка ${sheet.utilization_percent}%`,
+      style: "sheetTitle",
+      margin: [0, index ? 8 : 0, 0, 4],
+    });
+    content.push({
+      columns: [
+        { width: drawn.width + 10, stack: [{ canvas: drawn.canvas }] },
+        {
+          width: "*",
+          stack: legendRows.length
+            ? [{ table: { widths: [16, "*", 80], body: [[{ text: "№", style: "thead" }, { text: "Деталь", style: "thead" }, { text: "Размер", style: "thead" }], ...legendRows] }, layout: "lightHorizontalLines" }]
+            : [{ text: "На листе нет размещенных деталей", style: "small" }],
+        },
+      ],
+      columnGap: 12,
+      margin: [0, 0, 0, 6],
+    });
+  });
+
+  if (result.unplaced_parts?.length) {
+    content.push({ text: "Не размещено (деталь больше листа):", style: "sheetTitle", margin: [0, 8, 0, 4] });
+    content.push({
+      table: {
+        widths: [28, "*", 90, 50],
+        body: [
+          [{ text: "№", style: "thead" }, { text: "Деталь", style: "thead" }, { text: "Размер", style: "thead" }, { text: "Кол-во", style: "thead" }],
+          ...result.unplaced_parts.map((part, i) => [String(i + 1), part.name, `${part.width}×${part.height} мм`, String(part.quantity)]),
+        ],
+      },
+      layout: "lightHorizontalLines",
+    });
+  }
+
+  window.pdfMake
+    .createPdf({
+      pageSize: "A4",
+      pageMargins: [24, 24, 24, 24],
+      content,
+      styles: {
+        title: { fontSize: 20, bold: true, color: "#1f2937" },
+        meta: { fontSize: 10, color: "#4b5563" },
+        sheetTitle: { fontSize: 12, bold: true, color: "#111827" },
+        thead: { bold: true, fillColor: "#eef2ff", fontSize: 9 },
+        small: { fontSize: 9 },
+      },
+      defaultStyle: { font: "Roboto" },
+    })
+    .download("cutting-report.pdf");
+  toast("Карта раскроя сохранена");
+}
+
+function jsString(value) {
+  return JSON.stringify(String(value));
+}
+
+function buildBasisCabinetScript(item, offsetX, offsetZ) {
+  const { width: w, depth: d, height: h } = getObjectManufacturingSize(item);
+  const name = item.name.replace(/'/g, "\\'");
+  const lines = [
+    `  // ${name} (${w}×${d}×${h} мм)`,
+    `  (function() {`,
+    `    var ox = ${Math.round(offsetX)};`,
+    `    var oz = ${Math.round(offsetZ)};`,
+    `    var W = ${Math.round(w)};`,
+    `    var D = ${Math.round(d)};`,
+    `    var H = ${Math.round(h)};`,
+    `    var TH = ActiveMaterial.Thickness;`,
+  ];
+
+  if (["wardrobe", "wardrobe_sliding", "wardrobe_corner", "shelf", "cabinet", "bath_vanity"].includes(item.type)) {
+    const cabinetLike = item.type === "cabinet" || item.type === "bath_vanity";
+    const wardrobeLike = ["wardrobe", "wardrobe_sliding", "wardrobe_corner"].includes(item.type);
+    const shelfCount = cabinetLike ? 0 : Math.max(2, Math.round(h / 500));
+    const doorCount = wardrobeLike ? 2 : cabinetLike ? 1 : 0;
+    lines.push(
+      `    AddHorizPanel(ox, oz, ox + W, oz + D, 0).Name = ${jsString(name + " — дно")};`,
+      `    AddHorizPanel(ox, oz, ox + W, oz + D, H - TH).Name = ${jsString(name + " — крышка")};`,
+      `    AddVertPanel(oz, 0, oz + D, H, ox).Name = ${jsString(name + " — боковина левая")};`,
+      `    AddVertPanel(oz, 0, oz + D, H, ox + W - TH).Name = ${jsString(name + " — боковина правая")};`,
+      `    AddFrontPanel(ox, 0, ox + W, H, oz).Name = ${jsString(name + " — задняя стенка")};`
+    );
+    if (shelfCount > 0) {
+      lines.push(`    var gap = (H - 2 * TH) / (${shelfCount} + 1);`);
+      lines.push(`    for (var i = 1; i <= ${shelfCount}; i++) {`);
+      lines.push(`      var y = i * gap;`);
+      lines.push(`      AddHorizPanel(ox + TH, oz + TH, ox + W - TH, oz + D - TH, y).Name = ${jsString(name + " — полка")} + " " + i;`);
+      lines.push(`    }`);
+    }
+    if (doorCount === 1) {
+      lines.push(`    AddFrontPanel(ox, 0, ox + W, H - TH, oz + D - TH).Name = ${jsString(name + " — фасад")};`);
+    } else if (doorCount === 2) {
+      lines.push(`    var doorW = (W - TH) / 2;`);
+      lines.push(`    AddFrontPanel(ox, 0, ox + doorW, H - TH, oz + D - TH).Name = ${jsString(name + " — дверца 1")};`);
+      lines.push(`    AddFrontPanel(ox + doorW, 0, ox + W, H - TH, oz + D - TH).Name = ${jsString(name + " — дверца 2")};`);
+    }
+  } else if (item.type === "table") {
+    lines.push(
+      `    AddHorizPanel(ox, oz, ox + W, oz + D, H - TH).Name = ${jsString(name + " — столешница")};`,
+      `    AddVertPanel(oz, 0, oz + 80, H, ox + 40).Name = ${jsString(name + " — опора 1")};`,
+      `    AddVertPanel(oz, 0, oz + 80, H, ox + W - 40 - TH).Name = ${jsString(name + " — опора 2")};`,
+      `    AddVertPanel(oz + D - 80, 0, oz + D, H, ox + 40).Name = ${jsString(name + " — опора 3")};`,
+      `    AddVertPanel(oz + D - 80, 0, oz + D, H, ox + W - 40 - TH).Name = ${jsString(name + " — опора 4")};`
+    );
+  } else {
+    lines.push(
+      `    AddHorizPanel(ox, oz, ox + W, oz + D, 0).Name = ${jsString(name + " — основание")};`,
+      `    AddFrontPanel(ox, 0, ox + W, H, oz).Name = ${jsString(name + " — корпус")};`
+    );
+  }
+
+  lines.push(`  })();`);
+  return lines.join("\n");
+}
+
+function exportBasisB3d() {
+  if (!state.objects3d.length) {
+    toast("Добавьте объекты в планировщик для экспорта в Базис", false);
+    return;
+  }
+  const blocks = state.objects3d.map((item, index) => {
+    const offsetX = Math.round(item.x - getObjectManufacturingSize(item).width / 2);
+    const offsetZ = Math.round(item.z - getObjectManufacturingSize(item).depth / 2) + index * 120;
+    return buildBasisCabinetScript(item, offsetX, offsetZ);
+  });
+  const cutComment = state.lastCutResult
+    ? `\n// Раскрой: ${state.lastCutResult.placed_count}/${state.lastCutResult.requested_count} деталей, ${state.lastCutResult.total_sheets} лист(ов)\n`
+    : "\n// Раскрой ещё не рассчитан — запустите расчёт перед экспортом\n";
+
+  const script = [
+    "// WoodCraft Market → БАЗИС-Мебельщик: экспорт в .b3d",
+    "// Как использовать:",
+    "// 1) Откройте БАЗИС-Мебельщик",
+    "// 2) Скрипты → Выбрать этот файл → Запустить",
+    "// 3) После выполнения рядом появится файл .b3d (путь можно поменять в OUT_FILE ниже)",
+    "// Все размеры в миллиметрах",
+    cutComment,
+    "var OUT_FILE = 'woodcraft-export.b3d';",
+    "Undo.changing();",
+    "try {",
+    ...blocks,
+    "  if (typeof historyOperations !== 'undefined' && historyOperations.CommitCurrentChanges) {",
+    "    historyOperations.CommitCurrentChanges('WoodCraft export');",
+    "  }",
+    "  if (typeof modelIOOperations !== 'undefined' && modelIOOperations.SaveModelToFile) {",
+    "    modelIOOperations.SaveModelToFile(OUT_FILE);",
+    "  }",
+    "  alert('Экспорт завершён. Файл: ' + OUT_FILE);",
+    "} finally {",
+    "  Undo.commit();",
+    "}",
+  ].join("\n");
+
+  const blob = new Blob([script], { type: "text/javascript;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "woodcraft-basis-export-b3d.js";
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast("Скрипт сохранён — запустите в Базис, он сохранит .b3d");
+}
+
+function buildDbsDocument() {
+  const bom = buildBomFromObjects();
+  const cost = estimateProjectCost(bom);
+  const panels = bom.parts.map((part) => ({
+    name: part.name,
+    width_mm: part.width,
+    height_mm: part.height,
+    quantity: part.quantity,
+    area_mm2: part.width * part.height * part.quantity,
+  }));
+
+  return {
+    format: "woodcraft-dbs",
+    version: "1.0",
+    generated_at: new Date().toISOString(),
+    producer: "WoodCraft Market",
+    project: {
+      id: state.projectId,
+      title: "Комната WoodCraft",
+      units: "mm",
+    },
+    room: { ...state.roomConfig },
+    furniture: state.objects3d.map((item) => {
+      const preset = resolveTexturePreset(item);
+      return {
+        id: item.id,
+        name: item.name,
+        type: item.type,
+        texture: item.texture,
+        material: preset.material,
+        width_mm: item.width,
+        depth_mm: item.depth,
+        height_mm: item.height,
+        x_mm: item.x,
+        z_mm: item.z,
+        rotation_deg: item.rotationY || 0,
+      };
+    }),
+    bom: {
+      parts: bom.parts,
+      assembly: bom.assembly,
+      estimated_cost_rub: cost.total,
+    },
+    panels,
+    cutting: state.lastCutResult
+      ? {
+          placed_count: state.lastCutResult.placed_count,
+          requested_count: state.lastCutResult.requested_count,
+          total_sheets: state.lastCutResult.total_sheets,
+          utilization_percent: state.lastCutResult.utilization_percent,
+        }
+      : null,
+    exports: {
+      basis_script: "woodcraft-basis-import.js",
+      gltf: "room-scene.gltf",
+      note: "DBS — Design Bundle Specification для передачи в производство и CRM",
+    },
+  };
+}
+
+function exportDbsFile() {
+  if (!state.objects3d.length) {
+    toast("Добавьте объекты в планировщик для экспорта DBS", false);
+    return;
+  }
+  const doc = buildDbsDocument();
+  const blob = new Blob([JSON.stringify(doc, null, 2)], { type: "application/json;charset=utf-8" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = `woodcraft-project-${Date.now()}.dbs`;
+  link.click();
+  URL.revokeObjectURL(link.href);
+  toast("Файл DBS сохранён (спецификация для производства)");
+}
+
+async function exportAssemblyPdf() {
+  const bom = buildBomFromObjects();
+  if (!bom.parts.length) {
+    toast("Добавьте объекты, чтобы собрать инструкцию", false);
+    return;
+  }
+  if (!(await ensurePdfMake())) return;
+  const objectsTableBody = [
+    [{ text: "№", style: "thead" }, { text: "Объект", style: "thead" }, { text: "Тип", style: "thead" }, { text: "Габариты, мм", style: "thead" }, { text: "Текстура", style: "thead" }],
+    ...state.objects3d.map((item, idx) => {
+      const textureTitle = (texturePresets[item.texture] || {}).title || "По типу";
+      const typeTitle = (typePresets[item.type] || {}).title || item.type;
+      return [String(idx + 1), item.name, typeTitle, `${Math.round(item.width)}×${Math.round(item.depth)}×${Math.round(item.height)}`, textureTitle];
+    }),
+  ];
+
+  const partsTableBody = [
+    [{ text: "№", style: "thead" }, { text: "Деталь", style: "thead" }, { text: "Размер, мм", style: "thead" }, { text: "Кол-во", style: "thead" }],
+    ...bom.parts.map((part, idx) => [String(idx + 1), part.name, `${part.width}×${part.height}`, String(part.quantity)]),
+  ];
+
+  const content = [
+    { text: "Инструкция по сборке", style: "title" },
+    { text: `Комната: ${state.roomConfig.width} × ${state.roomConfig.length} × ${state.roomConfig.height} мм`, style: "meta" },
+    { text: `Дата: ${new Date().toLocaleString("ru-RU")}`, style: "meta", margin: [0, 0, 0, 10] },
+    { text: "1. Перечень объектов в проекте", style: "section" },
+    { table: { headerRows: 1, widths: [20, "*", 64, 78, 70], body: objectsTableBody }, layout: "lightHorizontalLines", margin: [0, 0, 0, 10] },
+    { text: "2. Детали для изготовления", style: "section" },
+    { table: { headerRows: 1, widths: [20, "*", 90, 50], body: partsTableBody }, layout: "lightHorizontalLines", margin: [0, 0, 0, 10] },
+    { text: "3. Порядок сборки", style: "section" },
+    {
+      ul: (bom.assembly.length ? bom.assembly : ["Подготовьте крепеж и выполняйте сборку по порядку объектов."]).map((row) => row),
+      margin: [0, 0, 0, 6],
+    },
+    { text: "Примечание: названия деталей/объектов служат только для идентификации и не влияют на геометрию раскроя.", style: "note" },
+  ];
+
+  window.pdfMake
+    .createPdf({
+      pageSize: "A4",
+      pageMargins: [24, 24, 24, 24],
+      content,
+      styles: {
+        title: { fontSize: 20, bold: true, color: "#1f2937" },
+        meta: { fontSize: 10, color: "#4b5563" },
+        section: { fontSize: 12, bold: true, color: "#111827", margin: [0, 6, 0, 4] },
+        thead: { bold: true, fillColor: "#eef2ff", fontSize: 9 },
+        note: { fontSize: 9, color: "#6b7280", italics: true },
+      },
+      defaultStyle: { font: "Roboto" },
+    })
+    .download("assembly-instruction.pdf");
+  toast("Инструкция по сборке сохранена");
+}
+
+function exportSceneGltf() {
+  if (!state.three || !window.THREE?.GLTFExporter) {
+    toast("GLTF exporter недоступен", false);
+    return;
+  }
+  const exporter = new THREE.GLTFExporter();
+  exporter.parse(state.three.scene, (result) => {
+    const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "room-scene.gltf";
+    link.click();
+    URL.revokeObjectURL(link.href);
+    toast("3D сцена экспортирована в GLTF");
+  });
+}
+
+function setBackendStatus(ok, message) {
+  const dot = document.getElementById("backendDot");
+  if (dot) {
+    dot.classList.toggle("ok", ok);
+    dot.classList.toggle("bad", !ok);
+  }
+  const statusEl = document.getElementById("backendStatus");
+  if (statusEl) statusEl.textContent = message;
+}
+
+function bindClick(id, handler) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener("click", async (event) => {
+    const result = handler(event);
+    if (!result || typeof result.then !== "function") return;
+    el.disabled = true;
+    el.setAttribute("aria-busy", "true");
+    try {
+      await result;
+    } finally {
+      el.disabled = false;
+      el.removeAttribute("aria-busy");
+    }
+  });
+}
+
+function updatePlannerProgress() {
+  const host = document.getElementById("plannerProgress");
+  if (!host) return;
+  const validRoom = state.roomConfig.width >= 2000 && state.roomConfig.length >= 2000;
+  const hasObjects = state.objects3d.length > 0;
+  const maxStep = state.projectId ? 4 : hasObjects ? 4 : validRoom ? 2 : 1;
+  if (state.projectId) state.plannerStep = 4;
+  else if (hasObjects && state.plannerStep < 3) state.plannerStep = 3;
+  else if (validRoom && state.plannerStep < 2) state.plannerStep = 2;
+  if (state.plannerStep > maxStep) state.plannerStep = maxStep;
+  host.querySelectorAll("[data-planner-step]").forEach((button) => {
+    const step = Number(button.dataset.plannerStep);
+    button.disabled = step > maxStep;
+    button.classList.toggle("active", step === state.plannerStep);
+    button.classList.toggle("completed", step < state.plannerStep || (step === 4 && Boolean(state.projectId)));
+    button.setAttribute("aria-current", step === state.plannerStep ? "step" : "false");
+  });
+}
+
+function goToPlannerStep(step) {
+  state.plannerStep = step;
+  updatePlannerProgress();
+  if (step === 1) document.getElementById("roomWidth")?.focus();
+  if (step === 2) document.getElementById("btnOpenObjectPicker")?.focus();
+  if (step === 3) {
+    document.getElementById("room3dPane")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    ensureRoom3D();
+  }
+  if (step === 4) document.getElementById("projectName")?.focus();
+}
+
+function initPlannerProgress() {
+  document.getElementById("plannerProgress")?.querySelectorAll("[data-planner-step]").forEach((button) => {
+    button.addEventListener("click", () => goToPlannerStep(Number(button.dataset.plannerStep)));
+  });
+  updatePlannerProgress();
+}
+
+function initPlannerShortcuts() {
+  document.addEventListener("keydown", (event) => {
+    if (APP_MODE === "admin" || /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName || "") || document.querySelector(".modal.show")) return;
+    const modifier = event.ctrlKey || event.metaKey;
+    if (modifier && event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? plannerHistory.redo() : plannerHistory.undo(); return; }
+    if (modifier && event.key.toLowerCase() === "y") { event.preventDefault(); plannerHistory.redo(); return; }
+    const selected = state.objects3d.find((item) => item.id === state.selected3dObjectId);
+    if (modifier && event.key.toLowerCase() === "d" && selected) {
+      event.preventDefault(); const before = plannerSnapshot(); const copy = structuredClone(selected);
+      copy.id = makeId(); copy.name = `${selected.name} (копия)`; copy.x += 100; copy.z += 100;
+      clampObjectPosition(copy, state.roomConfig.width, state.roomConfig.length); state.objects3d.push(copy); state.selected3dObjectId = copy.id;
+      plannerHistory.record(before, plannerSnapshot(), "duplicate"); applyPlannerSnapshot(plannerSnapshot()); return;
+    }
+    if (event.key === "Escape") { select3DObject(null); return; }
+    if (event.key === "Delete" && selected) { event.preventDefault(); if (window.confirm(`Удалить «${selected.name}»?`)) removeObject3D(selected.id); return; }
+    if (selected && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "PageUp", "PageDown"].includes(event.key)) {
+      event.preventDefault(); const before = plannerSnapshot(); const step = event.shiftKey ? 100 : 10;
+      if (event.key === "ArrowLeft") selected.x -= step; if (event.key === "ArrowRight") selected.x += step;
+      if (event.key === "ArrowUp") selected.z -= step; if (event.key === "ArrowDown") selected.z += step;
+      if (event.key === "PageUp") selected.y = (Number(selected.y) || 0) + step; if (event.key === "PageDown") selected.y = (Number(selected.y) || 0) - step;
+      clampObjectPosition(selected, state.roomConfig.width, state.roomConfig.length); plannerHistory.record(before, plannerSnapshot(), "nudge");
+      updateFurnitureTransform(selected); syncSelectedObjectControls();
+    }
+  });
+}
+
+function initProcessAnimation() {
+  const grid = document.querySelector(".process-grid");
+  if (!grid) return;
+  if (!window.IntersectionObserver) { grid.classList.add("is-visible"); return; }
+  const observer = new IntersectionObserver((entries) => {
+    if (!entries[0].isIntersecting) return;
+    grid.classList.add("is-visible");
+    observer.disconnect();
+  }, { threshold: 0.2 });
+  observer.observe(grid);
+}
+
+function isSceneImmersive() {
+  return document.getElementById("room3d")?.classList.contains("is-scene-immersive") || false;
+}
+
+function ensureSceneImmersiveChrome() {
+  let chrome = document.getElementById("sceneImmersiveChrome");
+  if (chrome) return chrome;
+  chrome = document.createElement("div");
+  chrome.id = "sceneImmersiveChrome";
+  chrome.className = "scene-immersive-chrome";
+  chrome.hidden = true;
+  chrome.innerHTML = `<button class="scene-exit-btn" id="btnSceneExit" type="button">✕ Выйти</button>`;
+  document.body.appendChild(chrome);
+  chrome.querySelector("#btnSceneExit")?.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setSceneImmersive(false);
+  });
+  return chrome;
+}
+
+function setSceneImmersive(active) {
+  const host = document.getElementById("room3d");
+  const enterBtn = document.getElementById("btnPlannerFullscreen");
+  const chrome = ensureSceneImmersiveChrome();
+  if (!host) return;
+  if (active && !host._immersiveParent) {
+    host._immersiveParent = host.parentElement;
+    host._immersiveNext = host.nextSibling;
+    document.body.appendChild(host);
+  }
+  if (!active && host._immersiveParent) {
+    const parent = host._immersiveParent;
+    const next = host._immersiveNext;
+    if (next && next.parentNode === parent) parent.insertBefore(host, next);
+    else parent.appendChild(host);
+    host._immersiveParent = null;
+    host._immersiveNext = null;
+  }
+  host.classList.toggle("is-scene-immersive", active);
+  document.documentElement.classList.toggle("is-scene-immersive", active);
+  document.body.classList.toggle("is-scene-immersive", active);
+  chrome.hidden = !active;
+  if (enterBtn) {
+    enterBtn.textContent = active ? "× Выйти из полного экрана" : "⛶ На весь экран";
+    enterBtn.setAttribute("aria-pressed", String(active));
+  }
+  requestAnimationFrame(refreshRoom3DLayout);
+}
+
+function initPlannerFullscreen() {
+  const button = document.getElementById("btnPlannerFullscreen");
+  const host = document.getElementById("room3d");
+  if (!button || !host) return;
+  ensureSceneImmersiveChrome();
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    setSceneImmersive(!isSceneImmersive());
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && isSceneImmersive()) setSceneImmersive(false);
+  });
+}
+
+function initLightbox() {
+  const root = document.getElementById("imageLightbox");
+  const image = document.getElementById("lightboxImage");
+  const caption = document.getElementById("lightboxCaption");
+  if (!root || !image || !caption) return;
+  let images = [];
+  let index = 0;
+  let returnFocus = null;
+  const eligible = ".product-art-photo img, .product-photo-thumb img, [data-lightbox-image]";
+  const show = (next) => {
+    if (!images.length) return;
+    index = (next + images.length) % images.length;
+    image.src = images[index].currentSrc || images[index].src;
+    image.alt = images[index].alt || "";
+    caption.textContent = images[index].alt || "Изображение";
+    root.querySelectorAll(".lightbox-nav").forEach((button) => button.classList.toggle("d-none", images.length < 2));
+  };
+  const close = () => {
+    root.hidden = true; root.setAttribute("aria-hidden", "true"); document.body.style.overflow = ""; image.src = ""; returnFocus?.focus();
+  };
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest?.(eligible);
+    if (!target) return;
+    images = [...document.querySelectorAll(eligible)].filter((item) => item.src);
+    index = images.indexOf(target); returnFocus = target; root.hidden = false; root.setAttribute("aria-hidden", "false"); document.body.style.overflow = "hidden"; show(index); root.querySelector("[data-lightbox-close]").focus();
+  });
+  root.addEventListener("click", (event) => { if (event.target === root || event.target.closest("[data-lightbox-close]")) close(); });
+  root.querySelector("[data-lightbox-prev]").addEventListener("click", () => show(index - 1));
+  root.querySelector("[data-lightbox-next]").addEventListener("click", () => show(index + 1));
+  document.addEventListener("keydown", (event) => {
+    if (root.hidden) return;
+    if (event.key === "Escape") close();
+    if (event.key === "ArrowLeft") show(index - 1);
+    if (event.key === "ArrowRight") show(index + 1);
+  });
+}
+
+function syncObjectEditorControls() {
+  const typeEl = document.getElementById("objType");
+  const textureEl = document.getElementById("objTexture");
+  const millingRow = document.getElementById("objMillingRow");
+  const millingEl = document.getElementById("objMilling");
+  const countertopRow = document.getElementById("objCountertopRow");
+  const countertopEl = document.getElementById("objCountertopType");
+
+  const type = typeEl?.value || "";
+  const previousTexture = textureEl?.value || "";
+  const allowedMaterials = allowedObjectMaterials(type);
+  if (textureEl) {
+    textureEl.innerHTML = allowedMaterials
+      .map((value) => `<option value="${value}">${escapeHtml(materialOptions[value] || value)}</option>`)
+      .join("");
+    textureEl.value = allowedMaterials.includes(previousTexture) ? previousTexture : allowedMaterials[0];
+  }
+  const texture = textureEl?.value || "";
+  const isAppliance = String(type).startsWith("appliance_");
+
+  const millingAllowed = texture === "mdf_film_matte" || texture === "mdf_film_gloss";
+  if (millingRow) millingRow.classList.toggle("d-none", !millingAllowed);
+  if (!millingAllowed && millingEl) millingEl.checked = false;
+
+  const showCountertop = type === "cabinet" || type === "wardrobe" || type === "table";
+  if (countertopRow) countertopRow.classList.toggle("d-none", !showCountertop);
+  if (showCountertop && countertopEl && !countertopEl.value) countertopEl.value = "skif";
+
+  const useCustomColorEl = document.getElementById("objUseCustomColor");
+  const customColorEl = document.getElementById("objCustomColor");
+  if (useCustomColorEl && customColorEl) {
+    const fixedFinish = isAppliance || bathroomFixtureTypes.has(type) || type === "bathroom_shower" || type === "bathroom_mirror";
+    useCustomColorEl.disabled = fixedFinish;
+    if (fixedFinish) {
+      useCustomColorEl.checked = false;
+      customColorEl.disabled = true;
+    } else {
+      customColorEl.disabled = !useCustomColorEl.checked;
+    }
+  }
+}
+
+function hardFurnitureIcon(type) {
+  if (type === "table") return "icon-desk";
+  if (type === "shelf") return "icon-shelf";
+  if (type === "wardrobe_sliding") return "icon-wardrobe-sliding";
+  if (type === "wardrobe_corner") return "icon-wardrobe-corner";
+  if (type === "wardrobe") return "icon-wardrobe";
+  return "icon-cabinet";
+}
+
+function renderHardFurnitureLibrary(accordion) {
+  if (!accordion || accordion.querySelector("[data-hard-furniture-category]")) return;
+  const targetByCategory = {
+    living: "#objectPickerLiving",
+    kitchen: "#objectPickerKitchen",
+    wardrobe: "#objectPickerWardrobe",
+    bathroom: "#objectPickerBathroom",
+    bedroom: "#objectPickerBedroom",
+    office: "#objectPickerOffice",
+  };
+  HARD_FURNITURE_CATEGORIES.forEach(([category]) => {
+    const items = HARD_FURNITURE_LIBRARY.filter((item) => item.category === category);
+    if (!items.length) return;
+    const body = accordion.querySelector(`${targetByCategory[category]} .accordion-body`);
+    if (!body) return;
+    const section = document.createElement("section");
+    section.className = "hard-furniture-extension";
+    section.dataset.hardFurnitureCategory = category;
+    section.innerHTML = `
+          <div class="object-library-section-title"><span>Дополнительные виды корпусной мебели</span><span class="object-library-category-count">${items.length}</span></div>
+          <div class="list-group object-library-list">
+            ${items.map((item) => {
+              const attributes = [
+                ["data-pick-object", ""], ["data-library-item", item.id], ["data-section", item.category],
+                ["data-type", item.type], ["data-name", item.name], ["data-w", item.width],
+                ["data-d", item.depth], ["data-h", item.height], ["data-texture", item.texture], ["data-variant", item.variant],
+              ];
+              [["data-y", item.y], ["data-drawers", item.drawers], ["data-handles", item.handles], ["data-countertop", item.countertop]]
+                .forEach(([name, value]) => { if (value !== undefined && value !== null) attributes.push([name, value]); });
+              const attrs = attributes.map(([name, value]) => value === "" ? name : `${name}="${escapeHtml(value)}"`).join(" ");
+              return `<button type="button" class="list-group-item list-group-item-action object-picker-item" ${attrs} data-search="${escapeHtml(item.name)}"><span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#${hardFurnitureIcon(item.type)}"></use></svg></span><span><strong>${escapeHtml(item.name)}</strong><small>${item.width}×${item.depth}×${item.height} мм${item.y ? ` · высота ${item.y} мм` : ""}</small></span></button>`;
+            }).join("")}
+          </div>`;
+    body.appendChild(section);
+  });
+}
+
+function initObjectPickerSearch(modalEl, accordion) {
+  const input = modalEl.querySelector("#objectPickerSearch");
+  const count = modalEl.querySelector("#objectPickerCount");
+  if (!input || input.dataset.bound === "true") return;
+  input.dataset.bound = "true";
+  const update = () => {
+    const query = normalizeSearch(input.value);
+    const buttons = [...accordion.querySelectorAll("[data-pick-object]")];
+    let visible = 0;
+    buttons.forEach((button) => {
+      const haystack = normalizeSearch(button.dataset.search || button.textContent);
+      const match = !query || haystack.includes(query);
+      button.hidden = !match;
+      if (match) visible += 1;
+    });
+    accordion.querySelectorAll(".accordion-item").forEach((section) => {
+      const hasMatch = [...section.querySelectorAll("[data-pick-object]")].some((button) => !button.hidden);
+      section.hidden = !hasMatch;
+      const collapse = section.querySelector(".accordion-collapse");
+      if (query && hasMatch) collapse?.classList.add("show");
+    });
+    if (count) count.textContent = query ? `Найдено: ${visible}` : `${HARD_FURNITURE_LIBRARY.length} новых видов`;
+  };
+  input.addEventListener("input", update);
+  modalEl.querySelector("[data-clear-object-search]")?.addEventListener("click", () => {
+    input.value = "";
+    update();
+    input.focus();
+  });
+  modalEl.addEventListener("shown.bs.modal", () => { if (!input.value) update(); }, { passive: true });
+  update();
+}
+
+function initObjectPicker() {
+  const modalEl = document.getElementById("objectPickerModal");
+  if (!modalEl) return;
+  const extraCategories = document.getElementById("extraObjectCategories");
+  const accordion = modalEl.querySelector("#objectPickerAccordion");
+  if (extraCategories?.content && accordion && !accordion.querySelector("#objectPickerWardrobe")) {
+    accordion.appendChild(extraCategories.content.cloneNode(true));
+  }
+  renderHardFurnitureLibrary(accordion);
+  initObjectPickerSearch(modalEl, accordion);
+  modalEl.addEventListener("click", (event) => {
+    const btn = event.target.closest?.("[data-pick-object]");
+    if (!btn) return;
+    const typeEl = document.getElementById("objType");
+    const nameEl = document.getElementById("objName");
+    const wEl = document.getElementById("objW");
+    const dEl = document.getElementById("objD");
+    const hEl = document.getElementById("objH");
+    const textureEl = document.getElementById("objTexture");
+    const countertopEl = document.getElementById("objCountertopType");
+
+    const type = btn.dataset.type || "cabinet";
+    const name = btn.dataset.name || (typePresets[type]?.title || "Новый объект");
+    const w = btn.dataset.w || "";
+    const d = btn.dataset.d || "";
+    const h = btn.dataset.h || "";
+    const texture = btn.dataset.texture || "";
+    const countertop = btn.dataset.countertop || "";
+    const section = btn.dataset.section || "living";
+    const elevation = Number(btn.dataset.y) || 0;
+    const drawers = btn.dataset.drawers === undefined ? null : Number(btn.dataset.drawers);
+    const handles = btn.dataset.handles === undefined ? null : Number(btn.dataset.handles);
+    const variant = btn.dataset.variant || "";
+
+    state.objectEditor.section = section;
+    state.objectEditor.elevation = elevation;
+    state.objectEditor.drawers = drawers;
+    state.objectEditor.handles = handles;
+    state.objectEditor.variant = variant;
+    if (typeEl) typeEl.value = type;
+    if (nameEl) nameEl.value = name;
+    if (wEl && w) wEl.value = w;
+    if (dEl && d) dEl.value = d;
+    if (hEl && h) hEl.value = h;
+    // Rebuild the permitted finishes for a type before setting a library item's finish.
+    syncObjectEditorControls();
+    if (textureEl && texture && [...textureEl.options].some((option) => option.value === texture)) textureEl.value = texture;
+    if (countertopEl) countertopEl.value = countertop;
+
+    const millingEl = document.getElementById("objMilling");
+    if (millingEl) millingEl.checked = false;
+
+    syncObjectEditorControls();
+    window.bootstrap?.Modal.getInstance(modalEl)?.hide();
+  });
+}
+
+async function deleteCrmOrder(orderId) {
+  try {
+    await requestNoBody("DELETE", `/catalog/crm/orders/${orderId}`, true);
+    // Удаляем заказ из state
+    state.crm.orders = state.crm.orders.filter(order => order.id !== orderId);
+    // Очищаем кеш закупок
+    delete state.crm.procurementByOrder[orderId];
+    // Обновляем отображение
+    renderCrmPanel();
+    toast("Заказ успешно удалён");
+  } catch (error) {
+    toast(`Не удалось удалить заказ: ${formatApiError(error)}`, false);
+  }
+}
+
+function initRoomFinishControls() {
+  const floorTextureEl = document.getElementById("roomFloorTexture");
+  const wallTextureEl = document.getElementById("roomWallTexture");
+  const useCustomEl = document.getElementById("roomUseCustomColors");
+  const floorColorEl = document.getElementById("roomFloorColor");
+  const wallColorEl = document.getElementById("roomWallColor");
+
+  if (!floorTextureEl || !wallTextureEl || !useCustomEl || !floorColorEl || !wallColorEl) return;
+
+  const syncInputsEnabled = () => {
+    floorColorEl.disabled = !useCustomEl.checked;
+    wallColorEl.disabled = !useCustomEl.checked;
+  };
+
+  const apply = () => {
+    state.roomFinish.floorTexture = floorTextureEl.value || "wood_oak";
+    state.roomFinish.wallTexture = wallTextureEl.value || "wall_default";
+    state.roomFinish.useCustomColors = !!useCustomEl.checked;
+    state.roomFinish.floorColor = normalizeColorHex(floorColorEl.value) || "#E9DCCB";
+    state.roomFinish.wallColor = normalizeColorHex(wallColorEl.value) || "#FAF7F2";
+    if (state.three) rebuildRoomGeometry();
+    if (document.getElementById("roomPlan")) renderRoomTopView();
+    renderRoom3D();
+  };
+
+  floorTextureEl.value = state.roomFinish.floorTexture || "wood_oak";
+  wallTextureEl.value = state.roomFinish.wallTexture || "wall_default";
+  useCustomEl.checked = !!state.roomFinish.useCustomColors;
+  floorColorEl.value = state.roomFinish.floorColor || "#E9DCCB";
+  wallColorEl.value = state.roomFinish.wallColor || "#FAF7F2";
+  syncInputsEnabled();
+
+  useCustomEl.addEventListener("change", () => {
+    syncInputsEnabled();
+    apply();
+  });
+  floorTextureEl.addEventListener("change", apply);
+  wallTextureEl.addEventListener("change", apply);
+  floorColorEl.addEventListener("input", apply);
+  wallColorEl.addEventListener("input", apply);
+}
+
+async function boot() {
+  applyTheme(document.documentElement.dataset.theme || "light");
+  initCookieConsent();
+  bindClick("themeToggle", toggleTheme);
+  bindClick("btnLogout", logoutCustomer);
+  const apiBaseInput = document.getElementById("apiBase");
+  if (apiBaseInput) apiBaseInput.value = localStorage.getItem(LS_API) || defaultApiBase();
+  bindClick("saveApiBase", () => {
+    localStorage.setItem(LS_API, document.getElementById("apiBase").value.trim());
+    location.reload();
+  });
+  const searchInput = document.getElementById("searchInput");
+  if (searchInput) {
+    let searchTimer = 0;
+    searchInput.addEventListener("input", (event) => {
+      clearTimeout(searchTimer);
+      const value = event.target.value;
+      document.getElementById("searchClear")?.classList.toggle("d-none", !value);
+      searchTimer = setTimeout(() => {
+        state.search = value;
+        if (APP_MODE === "admin") renderAdminCatalogTable();
+        else renderProducts();
+      }, 250);
+    });
+  }
+  bindClick("searchClear", () => {
+    if (searchInput) searchInput.value = "";
+    state.search = "";
+    document.getElementById("searchClear")?.classList.add("d-none");
+    if (APP_MODE === "admin") renderAdminCatalogTable();
+    else renderProducts();
+    searchInput?.focus();
+  });
+  initProcessAnimation();
+  initPlannerProgress();
+  initPlannerShortcuts();
+  initPlannerFullscreen();
+  init3DTransformControls();
+  initLightbox();
+  initObjectPicker();
+  initRoomFinishControls();
+
+  bindClick("btnOptimize", () => optimizeCutting());
+  bindClick("btnAddPart", addPartFromInputs);
+  bindClick("btnResetParts", resetPartsToDefault);
+  bindClick("btnApplyRoomSize", applyRoomSize);
+  bindClick("btnAddObject3d", () => { addObject3DFromForm(); renderBom(); });
+  bindClick("btnCreateRoom", createRoom);
+  bindClick("btnAddFurniture", addFurnitureSet);
+  bindClick("btnGenerateBom", () => { renderBom(); toast("Список деталей обновлён"); });
+  bindClick("btnEstimateCost", () => {
+    renderBom();
+    document.getElementById("costPane")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    toast("Стоимость пересчитана");
+  });
+  bindClick("btnSubmitToWork", submitProjectToWork);
+  bindClick("btnCutFrom3d", cutFrom3D);
+  bindClick("btnExportBasisB3d", exportBasisB3d);
+  bindClick("btnExportDbs", exportDbsFile);
+  bindClick("btnExportCutPdf", exportCutPdf);
+  bindClick("btnExportAssemblyPdf", exportAssemblyPdf);
+  bindClick("btnExport3d", exportSceneGltf);
+  bindClick("btnRefreshProjects", renderAdminPlannerProjects);
+  bindClick("btnLogin", loginCustomer);
+  bindClick("btnRegister", registerCustomer);
+  bindClick("btnAdminLogin", loginCustomer);
+  bindClick("btnCrmNewOrder", () => openCrmOrderEditor(null));
+  bindClick("btnCrmDictionaries", openCrmDictionariesModal);
+  bindClick("btnCrmAddField", addCrmDictionaryField);
+  document.getElementById("crmNewFieldLabel")?.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      addCrmDictionaryField();
+    }
+  });
+  bindClick("btnCrmSaveOrder", saveCrmOrderFromEditor);
+  bindClick("btnCrmStageAlertSave", saveStageAlertSettings);
+  bindClick("btnCrmReceiptSave", saveCrmReceiptFromModal);
+  document.getElementById("crmReceiptFile")?.addEventListener("change", previewCrmReceiptFile);
+  bindClick("btnSaveProduct", saveProductEditor);
+  bindClick("btnAddProduct", openNewProductEditor);
+  bindClick("btnSaveDeliverySettings", saveDeliverySettingsAdmin);
+  bindClick("btnSavePricingSettings", savePricingSettingsAdmin);
+  bindClick("btnQuoteDelivery", quoteDelivery);
+  bindClick("btnPaySbp", startSbpCheckout);
+  bindClick("btnCreateStaff", createStaffFromForm);
+  bindClick("btnStaffEditSave", saveStaffEdit);
+  bindClick("btnRefreshJobs", renderCuttingJobs);
+  bindClick("btnClearCuttingJobs", clearCuttingJobs);
+
+  document.addEventListener("pointermove", handleDragMove);
+  document.addEventListener("pointerup", endDrag);
+  document.addEventListener("pointercancel", endDrag);
+
+  if (APP_MODE === "admin") {
+    state.cuttingParts = [];
+    renderParts();
+    state.objects3d = [];
+  } else {
+    state.objects3d = [];
+  }
+  renderCart();
+  applyPlannerModeUi();
+  if (document.getElementById("roomPlan")) renderRoomTopView();
+  renderObjects3dList();
+  renderBom();
+  if (APP_MODE !== "admin") {
+    ensureRoom3D();
+  }
+  updateAccountButton();
+
+  const useCustomColorEl = document.getElementById("objUseCustomColor");
+  const customColorEl = document.getElementById("objCustomColor");
+  const productPhotosInput = document.getElementById("editProductPhotos");
+  if (productPhotosInput) productPhotosInput.addEventListener("change", handleProductPhotosSelected);
+  if (useCustomColorEl && customColorEl) {
+    const syncCustomColorInput = () => {
+      customColorEl.disabled = !useCustomColorEl.checked;
+    };
+    useCustomColorEl.addEventListener("change", syncCustomColorInput);
+    syncCustomColorInput();
+  }
+
+  document.getElementById("objTexture")?.addEventListener("change", () => {
+    syncObjectEditorControls();
+  });
+  document.getElementById("objType")?.addEventListener("change", syncObjectEditorControls);
+  syncObjectEditorControls();
+
+  try {
+    await api("GET", "/health");
+    await loadPublicPricingConfig();
+    setBackendStatus(true, APP_MODE === "admin" ? "Backend доступен" : "Магазин подключен");
+    if (APP_MODE === "admin") {
+      await autoLogin();
+      await bootAdminPanel();
+      setBackendStatus(true, token() ? "Панель администратора подключена" : "Войдите как admin");
+    } else {
+      if (token()) await refreshAuth();
+      await loadDeliverySettings();
+      setBackendStatus(true, "Магазин подключен");
+    }
+    await loadCatalog();
+  } catch (error) {
+    setBackendStatus(false, "Backend недоступен");
+    const grid = document.getElementById("productGrid");
+    const hint = formatApiError(error);
+    if (grid) {
+      grid.innerHTML = `<div class="col-12"><div class="alert alert-warning">Не удалось подключиться к backend (${escapeHtml(apiBase())}): ${escapeHtml(hint)}</div></div>`;
+    }
+  }
+
+  // Загрузка сохраненных данных пользователя (если есть)
+const savedName = localStorage.getItem("woodcraft_customer_name");
+const savedPhone = localStorage.getItem("woodcraft_customer_phone");
+const savedEmail = localStorage.getItem("woodcraft_customer_email");
+
+if (savedName) document.getElementById("customerName").value = savedName;
+if (savedPhone) document.getElementById("customerPhone").value = savedPhone;
+if (savedEmail) document.getElementById("customerEmail").value = savedEmail;
+
+// Сохранение данных при вводе (автозаполнение)
+document.getElementById("customerName")?.addEventListener("change", (e) => {
+  localStorage.setItem("woodcraft_customer_name", e.target.value);
+});
+document.getElementById("customerPhone")?.addEventListener("change", (e) => {
+  localStorage.setItem("woodcraft_customer_phone", e.target.value);
+});
+document.getElementById("customerEmail")?.addEventListener("change", (e) => {
+  localStorage.setItem("woodcraft_customer_email", e.target.value);
+});
+}
+
+window.deleteCrmOrder = deleteCrmOrder;
+window.apiBase = apiBase;
+window.token = token;
+window.toast = toast;
+window.escapeHtml = escapeHtml;
+
+document.addEventListener("DOMContentLoaded", boot);

@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <link rel="icon" href="./frontend-assets/favicon.svg?v=4" type="image/svg+xml">
+  <link rel="icon" href="./frontend-assets/favicon-32.png?v=4" type="image/png" sizes="32x32">
+  <link rel="apple-touch-icon" href="./frontend-assets/apple-touch-icon.png?v=4">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Петров мебель — мебель на заказ в Ижевске и Удмуртии. Спроектируйте комнату в 3D, выберите материалы и получите предварительный расчёт стоимости." />
+  <meta name="geo.region" content="RU-UD" />
+  <meta name="geo.placename" content="Ижевск" />
+  <meta name="robots" content="index,follow" />
+  <meta name="theme-color" content="#d4a23a" />
+  <link rel="canonical" href="http://127.0.0.1:8080/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="ru_RU" />
+  <meta property="og:site_name" content="Петров" />
+  <meta property="og:title" content="Петров мебель — мебель на заказ в Ижевске" />
+  <meta property="og:description" content="Мебель на заказ в Ижевске: 3D-планировщик, подбор материалов и предварительный расчёт проекта." />
+  <meta property="og:image" content="./frontend-assets/favicon.svg?v=4" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Петров мебель — мебель на заказ в Ижевске" />
+  <meta name="twitter:description" content="Каталог мебели, изготовление на заказ и 3D-планировщик комнаты в Ижевске." />
+  <title>Петров мебель — мебель на заказ в Ижевске | 3D-планировщик</title>
+  <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"FurnitureStore","name":"Петров мебель","alternateName":"Петров","description":"Мебель на заказ в Ижевске и 3D-планировщик комнаты.","url":"http://127.0.0.1:8080/","image":"http://127.0.0.1:8080/frontend-assets/favicon.svg?v=4","sameAs":["https://vk.ru/mebelpetrov"],"address":{"@type":"PostalAddress","addressLocality":"Ижевск","addressRegion":"Удмуртская Республика","addressCountry":"RU"},"areaServed":[{"@type":"City","name":"Ижевск"},{"@type":"AdministrativeArea","name":"Удмуртская Республика"}],"email":"petrov_mebel@mail.ru","priceRange":"₽₽","knowsAbout":["мебель на заказ","кухни на заказ","шкафы на заказ","3D-проектирование мебели"]}
+  </script>
+  <script>document.documentElement.dataset.theme=localStorage.getItem("woodcraft_theme")||(matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light");</script>
+  <script>
+    (function () {
+      var origin = location.origin;
+      var canonical = document.querySelector('link[rel="canonical"]');
+      if (canonical) canonical.setAttribute("href", origin + "/");
+      var ogImage = document.querySelector('meta[property="og:image"]');
+      if (ogImage) ogImage.setAttribute("content", origin + "/frontend-assets/favicon.svg?v=4");
+      var schema = document.querySelector('script[type="application/ld+json"]');
+      if (schema) {
+        try {
+          var data = JSON.parse(schema.textContent);
+          data.url = origin + "/";
+          data.image = origin + "/frontend-assets/favicon.svg?v=4";
+          schema.textContent = JSON.stringify(data);
+        } catch (_) {}
+      }
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Prata&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <link href="styles.css?v=20261021-distinct-furniture" rel="stylesheet" />
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">Перейти к содержанию</a>
+
+  <nav class="navbar navbar-expand-lg sticky-top" aria-label="Основная навигация">
+    <div class="container">
+      <a class="navbar-brand" href="#top" aria-label="Петров, на главную">
+        <span class="brand-mark" aria-hidden="true">П</span>
+        <span>Петров</span>
+      </a>
+      <div class="navbar-tools">
+        <a class="vk-link" href="https://vk.ru/mebelpetrov" target="_blank" rel="noopener noreferrer" aria-label="Петров ВКонтакте (откроется в новой вкладке)">
+          <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#0077ff"/><path fill="#fff" d="M5 7h2.5c.2 3 1.5 4.3 2.5 4.6V7h2.4v2.7c1-.1 2-1.3 2.4-2.7h2.4c-.3 1.8-1.5 3.1-2.4 3.7 1 .5 2.4 1.7 3 3.8h-2.6c-.5-1.4-1.5-2.5-2.8-2.6v2.6H12C7.5 14.5 5.3 11.4 5 7Z"/></svg>
+          <span>Мы в ВК</span>
+        </a>
+        <button class="theme-toggle" id="themeToggle" type="button" aria-label="Включить тёмную тему" title="Сменить тему"><span aria-hidden="true">☾</span></button>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#nav" aria-controls="nav" aria-expanded="false" aria-label="Открыть меню">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+      </div>
+      <div class="collapse navbar-collapse" id="nav">
+        <ul class="navbar-nav ms-auto align-items-lg-center gap-lg-1">
+          <li class="nav-item"><a class="nav-link" href="#howItWorks">Как это работает</a></li>
+          <li class="nav-item"><a class="nav-link" href="#planner">Планировщик</a></li>
+          <li class="nav-item"><a class="nav-link" href="#catalog">Каталог</a></li>
+          <li class="nav-item">
+            <button class="btn btn-quiet ms-lg-2" data-bs-toggle="modal" data-bs-target="#accountModal" id="accountBtn">Войти</button>
+          </li>
+          <li class="nav-item">
+            <button class="btn btn-cart ms-lg-1" data-bs-toggle="offcanvas" data-bs-target="#cartCanvas" aria-controls="cartCanvas">
+              Корзина <span class="cart-count" id="cartCount" aria-label="Товаров в корзине">0</span>
+            </button>
+          </li>
+          <li class="nav-item"><a class="btn btn-primary nav-cta ms-lg-1" href="#planner">Создать проект</a></li>
+        </ul>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero" id="top">
+    <div class="container hero-container">
+      <div class="hero-copy reveal-item">
+        <div class="eyebrow">Петров мебель · Ижевск и Удмуртия</div>
+        <h1>Мебель на заказ<br /><span>в Ижевске</span></h1>
+        <p class="hero-lead">Задайте размеры комнаты, расставьте мебель в 3D и получите ориентировочную стоимость проекта ещё до покупки.</p>
+        <div class="hero-actions">
+          <a href="#planner" class="btn btn-primary btn-lg">Начать планирование</a>
+          <a href="#catalog" class="btn btn-link-arrow">Посмотреть каталог <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="hero-assurances" aria-label="Преимущества сервиса">
+          <span><i aria-hidden="true">01</i> Свои размеры</span>
+          <span><i aria-hidden="true">02</i> Наглядный 3D</span>
+          <span><i aria-hidden="true">03</i> Расчёт проекта</span>
+        </div>
+      </div>
+
+      <div class="hero-visual reveal-item" aria-label="Пример комнаты в планировщике">
+        <div class="room-preview" aria-hidden="true">
+          <div class="preview-wall preview-wall-back"></div>
+          <div class="preview-wall preview-wall-side"></div>
+          <div class="preview-floor"></div>
+          <div class="preview-cabinet"><span></span><span></span><i></i><b></b><em></em></div>
+          <div class="preview-sofa"><div class="sofa-back"><i></i><i></i></div><div class="sofa-seat"><i></i><i></i></div><span></span><span></span></div>
+          <div class="preview-rug"></div>
+        </div>
+        <div class="floating-note note-material">
+          <span class="material-swatch"></span>
+          <span><small>Материал</small><strong>Тёмный дуб</strong></span>
+        </div>
+        <div class="floating-note note-size">
+          <small>Комната</small><strong>6 × 5 м</strong>
+        </div>
+        <div class="connection-card">
+          <span class="status-dot" id="backendDot"></span>
+          <span><small>Состояние сервиса</small><strong id="backendStatus">Подключаем витрину...</strong></span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <main id="mainContent">
+    <!-- <section class="section how-section" id="howItWorks">
+      <div class="container">
+        <div class="section-heading section-heading-split">
+          <div>
+            <div class="eyebrow">Простой путь к проекту</div>
+            <h2>От пустой комнаты<br />до готового решения</h2>
+          </div>
+          <p>Планировщик ведёт по шагам и не требует опыта в профессиональных программах.</p>
+        </div>
+        <ol class="process-grid">
+          <li class="process-step"><span>01</span><strong>Укажите размеры</strong><p>Введите ширину, длину и высоту комнаты.</p></li>
+          <li class="process-step"><span>02</span><strong>Добавьте мебель</strong><p>Выберите тип, габариты и подходящий материал.</p></li>
+          <li class="process-step"><span>03</span><strong>Оцените результат</strong><p>Выберите предмет и перемещайте его цветными стрелками прямо в 3D-сцене.</p></li>
+          <li class="process-step"><span>04</span><strong>Сохраните проект</strong><p>Получите расчёт и отправьте решение в работу.</p></li>
+        </ol>
+      </div>
+    </section> -->
+
+    <section class="section how-section" id="howItWorks">
+      <div class="container">
+        <div class="section-heading section-heading-split">
+          <div>
+            <div class="eyebrow">Простой путь к проекту</div>
+            <h2>От пустой комнаты<br />до готового решения</h2>
+          </div>
+          <div class="heading-right">
+            <p>Планировщик ведёт по шагам и не требует опыта в профессиональных программах.</p>
+            <div class="accuracy-badge">
+              <span class="accuracy-icon">📐</span>
+              <span class="accuracy-text">Соберите комнату под себя <span class="accuracy-highlight">(с погрешностью 5% к стоимости)</span></span>
+            </div>
+          </div>
+        </div>
+        <ol class="process-grid">
+          <li class="process-step"><span>01</span><strong>Укажите размеры</strong><p>Введите ширину, длину и высоту комнаты.</p></li>
+          <li class="process-step"><span>02</span><strong>Добавьте мебель</strong><p>Выберите тип, габариты и подходящий материал.</p></li>
+          <li class="process-step"><span>03</span><strong>Оцените результат</strong><p>Выберите предмет и перемещайте его цветными стрелками прямо в 3D-сцене.</p></li>
+          <li class="process-step"><span>04</span><strong>Сохраните проект</strong><p>Получите расчёт и отправьте решение в работу.</p></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section planner-section" id="planner">
+      <div class="container-fluid planner-container">
+        <div class="section-heading planner-heading">
+          <div class="eyebrow">3D-планировщик</div>
+          <h2>Соберите комнату под себя</h2>
+          <p>Двигайтесь по шагам слева направо. Выберите предмет в сцене и тяните цветные стрелки X, Y или Z.</p>
+        </div>
+
+        <div class="planner-progress" id="plannerProgress" aria-label="Этапы создания проекта">
+          <button class="active" type="button" data-planner-step="1"><i>1</i><span><strong>Комната</strong><small>Задайте размеры</small></span></button>
+          <button type="button" data-planner-step="2"><i>2</i><span><strong>Мебель</strong><small>Добавьте предметы</small></span></button>
+          <button type="button" data-planner-step="3"><i>3</i><span><strong>Проверка</strong><small>Оцените результат</small></span></button>
+          <button type="button" data-planner-step="4"><i>4</i><span><strong>Сохранение</strong><small>Сохраните проект</small></span></button>
+        </div>
+
+        <div class="planner-workspace">
+          <aside class="planner-controls" aria-label="Параметры проекта">
+            <div class="control-section">
+              <div class="control-heading"><span>01</span><div><h3>Размеры комнаты</h3><p>Укажите габариты в миллиметрах.</p></div></div>
+              <div class="field-grid field-grid-3">
+                <div class="form-field"><label for="roomWidth">Ширина <span>мм</span></label><input class="form-control" id="roomWidth" type="number" min="2000" step="100" value="6000" /></div>
+                <div class="form-field"><label for="roomLength">Длина <span>мм</span></label><input class="form-control" id="roomLength" type="number" min="2000" step="100" value="5000" /></div>
+                <div class="form-field"><label for="roomHeight">Высота <span>мм</span></label><input class="form-control" id="roomHeight" type="number" min="2000" step="100" value="2800" /></div>
+              </div>
+              <div class="field-grid field-grid-2">
+                <div class="form-field">
+                  <label for="roomFloorTexture">Пол</label>
+                  <select class="form-select" id="roomFloorTexture">
+                    <option value="wood_oak">Дерево (светлое)</option>
+                    <option value="wood_dark_oak">Дерево (тёмное)</option>
+                    <option value="laminate_grey">Ламинат (серый)</option>
+                    <option value="countertop">Камень / кварц</option>
+                    <option value="board_white">Светлый нейтральный</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="roomWallTexture">Стены</label>
+                  <select class="form-select" id="roomWallTexture">
+                    <option value="wall_default">Штукатурка</option>
+                    <option value="board_white">Светлые панели</option>
+                    <option value="mdf_matte">МДФ (матовый)</option>
+                    <option value="laminate_grey">Ламинат</option>
+                    <option value="board_black">Тёмные панели</option>
+                  </select>
+                </div>
+              </div>
+              <div class="custom-color-row">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="roomUseCustomColors" />
+                  <label class="form-check-label" for="roomUseCustomColors">Свои цвета пола/стен</label>
+                </div>
+                <div class="d-flex gap-2">
+                  <input class="form-control form-control-color" type="color" id="roomFloorColor" value="#E9DCCB" title="Цвет пола" disabled />
+                  <input class="form-control form-control-color" type="color" id="roomWallColor" value="#FAF7F2" title="Цвет стен" disabled />
+                </div>
+              </div>
+              <button class="btn btn-secondary w-100" id="btnApplyRoomSize">Применить размеры</button>
+            </div>
+
+            <div class="control-section">
+              <div class="control-heading"><span>02</span><div><h3>Мебель</h3><p>Добавьте предмет и настройте его вид.</p></div></div>
+              <button class="btn btn-quiet w-100 mb-2" type="button" data-bs-toggle="modal" data-bs-target="#objectPickerModal" id="btnOpenObjectPicker">Каталог предметов</button>
+              <input type="hidden" id="objType" value="wardrobe" />
+              <div class="form-field">
+                <label for="objName">Название</label>
+                <input class="form-control" id="objName" value="Новый объект" />
+              </div>
+              <div class="field-grid field-grid-3">
+                <div class="form-field"><label for="objW">Ширина <span>мм</span></label><input class="form-control" id="objW" type="number" min="300" step="10" value="1200" /></div>
+                <div class="form-field"><label for="objD">Глубина <span>мм</span></label><input class="form-control" id="objD" type="number" min="300" step="10" value="600" /></div>
+                <div class="form-field"><label for="objH">Высота <span>мм</span></label><input class="form-control" id="objH" type="number" min="300" step="10" value="2100" /></div>
+              </div>
+              <div class="form-field">
+                <label for="objTexture">Фасад / материал</label>
+                <select class="form-select" id="objTexture">
+                  <option value="wood_dark_oak">Тёмный дуб</option>
+                  <option value="wood_oak">Светлый дуб</option>
+                  <option value="mdf_matte">МДФ матовый</option>
+                  <option value="board_white">Белое ДСП</option>
+                  <option value="board_black">Чёрное ДСП</option>
+                  <option value="laminate_grey">Ламинат</option>
+                  <option value="countertop">Столешница</option>
+                  <option value="fabric_gray">Серая ткань</option>
+                  <option value="metal_graphite">Графитовый металл</option>
+                  <option value="mdf_film_matte">МДФ в плёнке (матовая)</option>
+                  <option value="mdf_film_gloss">МДФ в плёнке (глянцевая)</option>
+                  <option value="mdf_enamel">МДФ в эмали</option>
+                  <option value="mdf_plastic">МДФ пластик</option>
+                </select>
+              </div>
+              <div class="custom-color-row d-none" id="objMillingRow">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="objMilling" />
+                  <label class="form-check-label" for="objMilling">Фрезеровка фасада (+30%)</label>
+                </div>
+              </div>
+              <div class="form-field d-none" id="objCountertopRow">
+                <label for="objCountertopType">Столешница</label>
+                <select class="form-select" id="objCountertopType">
+                  <option value="skif">Скиф</option>
+                  <option value="kedr">Кедр</option>
+                  <option value="quartz">Кварцевый агломерат</option>
+                  <option value="compact">Компакт плита</option>
+                </select>
+              </div>
+              <div class="custom-color-row">
+                <div class="form-check">
+                  <input class="form-check-input" type="checkbox" id="objUseCustomColor" />
+                  <label class="form-check-label" for="objUseCustomColor">Свой цвет фасада</label>
+                </div>
+                <input class="form-control form-control-color" type="color" id="objCustomColor" value="#8B5E3C" title="Выберите цвет фасада" disabled />
+              </div>
+              <div class="control-actions">
+                <button class="btn btn-primary" id="btnAddObject3d">Добавить в комнату</button>
+                <button class="btn btn-quiet" id="btnAddFurniture">Добавить демо-комплект</button>
+              </div>
+              <div id="objects3dList" class="object-list" aria-live="polite">Объектов в комнате пока нет.</div>
+            </div>
+
+            <!-- <div class="control-section save-section">
+              <div class="control-heading"><span>03</span><div><h3>Сохранение</h3><p>Назовите проект, чтобы вернуться к нему позже.</p></div></div>
+              <div class="field-grid field-grid-2">
+                <div class="form-field"><label for="projectName">Название проекта</label><input class="form-control" id="projectName" placeholder="Например, кухня дома" /></div>
+                <div class="form-field"><label for="projectLocation">Город или адрес</label><input class="form-control" id="projectLocation" placeholder="Самара" /></div>
+              </div>
+              <div class="control-actions save-actions">
+                <button class="btn btn-secondary" id="btnCreateRoom">Сохранить проект</button>
+                <button class="btn btn-quiet d-none" id="btnGenerateBom">Обновить детали</button>
+                <button class="btn btn-primary" id="btnSubmitToWork">Отправить в работу</button>
+              </div>
+              <div class="planner-hint" id="plannerHint" role="status">Войдите, чтобы сохранить проект на сервере.</div>
+            </div> -->
+            <div class="control-section save-section">
+              <div class="control-heading"><span>03</span><div><h3>Сохранение</h3><p>Заполните контактные данные, чтобы мы могли связаться с вами.</p></div></div>
+              <div class="form-field"><label for="projectName">Название проекта</label><input class="form-control" id="projectName" placeholder="Например, кухня дома" maxlength="200" /></div>
+              <div class="field-grid field-grid-2">
+                <div class="form-field"><label for="customerName">Ваше имя</label><input class="form-control" id="customerName" placeholder="Иван Иванов" /></div>
+                <div class="form-field"><label for="customerPhone">Номер телефона</label><input class="form-control" id="customerPhone" placeholder="+7 (900) 123-45-67" type="tel" /></div>
+                <div class="form-field"><label for="customerEmail">Email</label><input class="form-control" id="customerEmail" placeholder="ivan@example.com" type="email" /></div>
+                <div class="form-field"><label for="projectLocation">Город или адрес</label><input class="form-control" id="projectLocation" placeholder="Ижевск" /></div>
+              </div>
+              <div class="form-check legal-consent-check">
+                <input class="form-check-input" type="checkbox" id="projectConsent" />
+                <label class="form-check-label" for="projectConsent">Я даю <a href="consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a> и принимаю <a href="terms.html" target="_blank" rel="noopener">условия использования</a>.</label>
+              </div>
+              <div class="control-actions save-actions">
+                <button class="btn btn-secondary" id="btnCreateRoom">Сохранить проект</button>
+                <button class="btn btn-quiet d-none" id="btnGenerateBom">Обновить детали</button>
+                <button class="btn btn-primary" id="btnSubmitToWork">Отправить в работу</button>
+              </div>
+              <div class="planner-hint" id="plannerHint" role="status">Войдите, чтобы сохранить проект на сервере.</div>
+            </div>
+          </aside>
+
+          <div class="planner-preview">
+            <div class="preview-header">
+              <div><span class="live-indicator"><i></i> Предпросмотр</span><h3>Ваша комната</h3></div>
+              <div class="preview-header-actions"><p>Выберите объект, чтобы увидеть его размеры и изменить положение.</p><button class="btn btn-quiet btn-sm" id="btnPlannerFullscreen" type="button" aria-pressed="false">⛶ На весь экран</button></div>
+            </div>
+            <div class="tab-content preview-content">
+              <div class="scene-pane" id="room3dPane">
+                <div class="viewer-3d" id="room3d"><span class="viewer-badge">3D-планировщик</span></div>
+                <div class="viewer-help" id="transformGizmoHint"><span>Выберите предмет и тяните стрелку X, Y или Z · магнитная привязка включена</span><span>Тяните фон для вращения · масштаб — двумя пальцами</span></div>
+                <div class="object-transform-panel is-empty" id="selectedObjectTransform">
+                  <div class="object-transform-heading">
+                    <div><small>Выбранный предмет</small><strong id="selectedObjectTitle">Предмет не выбран</strong></div>
+                    <span>Перетаскивайте стрелки <b>X / Y / Z</b> в 3D-сцене</span>
+                  </div>
+                  <div class="object-transform-grid">
+                    <label>X <small>мм</small><input class="form-control" id="selectedObjectX" type="number" step="10" disabled /></label>
+                    <label>Y <small>мм</small><input class="form-control" id="selectedObjectY" type="number" step="10" disabled /></label>
+                    <label>Z <small>мм</small><input class="form-control" id="selectedObjectZ" type="number" step="10" disabled /></label>
+                    <label>Поворот <small>°</small><input class="form-control" id="selectedObjectRotation" type="number" step="1" disabled /></label>
+                  </div>
+                  <div class="object-transform-actions">
+                    <button class="btn btn-quiet btn-sm" type="button" data-selected-object-action="rotate" data-delta="-15" disabled>↶ 15°</button>
+                    <button class="btn btn-quiet btn-sm" type="button" data-selected-object-action="rotate" data-delta="15" disabled>↷ 15°</button>
+                    <button class="btn btn-quiet btn-sm" type="button" data-selected-object-action="floor" disabled>На пол</button>
+                    <span id="selectedObjectTransformStatus" role="status">Выберите предмет в сцене</span>
+                  </div>
+                </div>
+              </div>
+              <div class="tab-pane fade" id="bomPane" role="tabpanel"><div id="bomList" class="detail-list"></div></div>
+            </div>
+
+            <template id="extraObjectCategories">
+            <div class="accordion-item">
+              <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerWardrobe" aria-expanded="false">Гардеробная</button></h3>
+              <div id="objectPickerWardrobe" class="accordion-collapse collapse" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body">
+                  <div class="small text-muted mb-2">Хранение одежды и обуви</div>
+                  <div class="list-group">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="wardrobe" data-type="wardrobe" data-name="Распашной шкаф" data-w="1600" data-d="600" data-h="2400" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-wardrobe"></use></svg></span><span><strong>Распашной шкаф</strong><small>1600×600×2400 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="wardrobe" data-type="wardrobe_sliding" data-name="Шкаф-купе" data-w="2200" data-d="650" data-h="2400" data-texture="wood_dark_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-wardrobe-sliding"></use></svg></span><span><strong>Шкаф-купе</strong><small>2200×650×2400 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="wardrobe" data-type="wardrobe_corner" data-name="Угловой шкаф" data-w="1200" data-d="1200" data-h="2400" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-wardrobe-corner"></use></svg></span><span><strong>Угловой шкаф</strong><small>1200×1200×2400 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="wardrobe" data-type="cabinet" data-name="Комод" data-w="1200" data-d="480" data-h="900" data-drawers="4" data-handles="4" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-cabinet"></use></svg></span><span><strong>Комод</strong><small>1200×480×900 мм · 4 ящика</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="wardrobe" data-type="shelf" data-name="Обувница" data-w="900" data-d="350" data-h="1100" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-shoe-rack"></use></svg></span><span><strong>Обувница</strong><small>900×350×1100 мм</small></span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerBathroom" aria-expanded="false">Ванная</button></h3>
+              <div id="objectPickerBathroom" class="accordion-collapse collapse" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body">
+                  <div class="small text-muted mb-2">Сантехника и мебель</div>
+                  <div class="list-group">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bath_vanity" data-name="Тумба с раковиной" data-w="900" data-d="500" data-h="850" data-drawers="2" data-handles="2" data-texture="mdf_film_matte"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-vanity"></use></svg></span><span><strong>Тумба с раковиной</strong><small>900×500×850 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bathroom_sink" data-name="Раковина" data-w="600" data-d="480" data-h="180" data-y="750" data-texture="ceramic_white"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-sink"></use></svg></span><span><strong>Подвесная раковина</strong><small>600×480×180 мм · на стену</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bathroom_bathtub" data-name="Ванна" data-w="1700" data-d="750" data-h="600" data-texture="ceramic_white"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-bath"></use></svg></span><span><strong>Ванна</strong><small>1700×750×600 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bathroom_shower" data-name="Душевая кабина" data-w="900" data-d="900" data-h="2100" data-texture="glass_clear"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-shower"></use></svg></span><span><strong>Душевая кабина</strong><small>900×900×2100 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bathroom_toilet" data-name="Унитаз" data-w="380" data-d="680" data-h="780" data-texture="ceramic_white"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-toilet"></use></svg></span><span><strong>Унитаз</strong><small>380×680×780 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="appliance_washer" data-name="Стиральная машина" data-w="600" data-d="600" data-h="850" data-texture="metal_graphite"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-washer"></use></svg></span><span><strong>Стиральная машина</strong><small>600×600×850 мм</small></span></button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bathroom" data-type="bathroom_mirror" data-name="Зеркало" data-w="800" data-d="40" data-h="900" data-y="1100" data-texture="glass_clear"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-mirror"></use></svg></span><span><strong>Зеркало</strong><small>800×40×900 мм · на стену</small></span></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerBedroom" aria-expanded="false">Спальня</button></h3>
+              <div id="objectPickerBedroom" class="accordion-collapse collapse" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body"><div class="list-group">
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bedroom" data-type="bed" data-name="Двуспальная кровать" data-w="1800" data-d="2100" data-h="1100" data-texture="fabric_gray"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-bed"></use></svg></span><span><strong>Двуспальная кровать</strong><small>1800×2100×1100 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bedroom" data-type="bed" data-name="Односпальная кровать" data-w="1000" data-d="2100" data-h="950" data-texture="fabric_gray"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-bed-single"></use></svg></span><span><strong>Односпальная кровать</strong><small>1000×2100×950 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bedroom" data-type="cabinet" data-name="Прикроватная тумба" data-w="500" data-d="420" data-h="500" data-drawers="2" data-handles="2" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-nightstand"></use></svg></span><span><strong>Прикроватная тумба</strong><small>500×420×500 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="bedroom" data-type="wardrobe" data-name="Шкаф для спальни" data-w="1800" data-d="600" data-h="2300" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-closet"></use></svg></span><span><strong>Шкаф</strong><small>1800×600×2300 мм</small></span></button>
+                </div></div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h3 class="accordion-header"><button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerOffice" aria-expanded="false">Кабинет</button></h3>
+              <div id="objectPickerOffice" class="accordion-collapse collapse" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body"><div class="list-group">
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="office" data-type="table" data-name="Рабочий стол" data-w="1400" data-d="700" data-h="750" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-desk"></use></svg></span><span><strong>Рабочий стол</strong><small>1400×700×750 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="office" data-type="chair" data-name="Рабочее кресло" data-w="650" data-d="650" data-h="1100" data-texture="fabric_gray"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-chair"></use></svg></span><span><strong>Рабочее кресло</strong><small>650×650×1100 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="office" data-type="shelf" data-name="Книжный стеллаж" data-w="1000" data-d="350" data-h="2100" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-bookshelf"></use></svg></span><span><strong>Книжный стеллаж</strong><small>1000×350×2100 мм</small></span></button>
+                  <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="office" data-type="cabinet" data-name="Офисная тумба" data-w="500" data-d="500" data-h="650" data-drawers="3" data-handles="3" data-texture="wood_oak"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#icon-pedestal"></use></svg></span><span><strong>Офисная тумба</strong><small>500×500×650 мм</small></span></button>
+                </div></div>
+              </div>
+            </div>
+            </template>
+          </div>
+        </div>
+        <section class="planner-estimate" id="costPane" aria-labelledby="projectCostTitle">
+          <div class="planner-estimate-heading">
+            <div><div class="eyebrow">Ваш бюджет</div><h2 id="projectCostTitle">Стоимость проекта</h2><p>Расчёт обновляется после изменения мебели. Выберите комплектацию и настройте комплектующие.</p></div>
+            <button class="btn btn-secondary" id="btnEstimateCost" type="button">Пересчитать стоимость</button>
+          </div>
+          <div id="costEstimate" class="cost-panel" aria-busy="false"></div>
+          <p class="estimate-disclaimer">Предварительная оценка изготовления мебели. Техника, сантехника, доставка и монтаж рассчитываются отдельно. Окончательная цена — после замера и согласования материалов.</p>
+        </section>
+      </div>
+    </section>
+
+    <section class="section catalog-section" id="catalog">
+      <div class="container">
+        <div class="section-heading section-heading-split catalog-heading">
+          <div>
+            <div class="eyebrow">Каталог</div>
+            <h2>Основа будущего интерьера</h2>
+            <p>Выбирайте готовую мебель или используйте её как отправную точку для проекта.</p>
+          </div>
+          <div class="search-field">
+            <label for="searchInput">Поиск по каталогу</label>
+            <span class="search-icon" aria-hidden="true"></span>
+            <input class="form-control" id="searchInput" type="search" placeholder="Например, шкаф или стол" autocomplete="off" />
+            <button class="search-clear d-none" id="searchClear" type="button" aria-label="Очистить поиск">×</button>
+          </div>
+        </div>
+        <div class="catalog-toolbar">
+          <div class="category-list" id="categoryPills" aria-label="Категории товаров"></div>
+          <span class="catalog-hint">Нажмите на категорию, чтобы сузить выбор</span>
+        </div>
+        <div class="row g-4 product-grid" id="productGrid" aria-live="polite" aria-busy="true">
+          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
+          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
+          <div class="col-md-6 col-xl-4"><div class="product-skeleton"><span></span><i></i><i></i><i></i></div></div>
+        </div>
+      </div>
+    </section>
+
+
+    <section class="final-cta">
+      <div class="container final-cta-inner">
+        <div><div class="eyebrow">Можно начать без регистрации</div><h2>Посмотрите, как мебель впишется в вашу комнату</h2></div>
+        <a class="btn btn-primary btn-lg" href="#planner">Открыть планировщик</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div><a class="navbar-brand" href="#top"><span class="brand-mark" aria-hidden="true">П</span><span>Петров</span></a><p>Мебель на заказ и проектирование комнат в Ижевске и Удмуртии.</p><a href="mailto:petrov_mebel@mail.ru">petrov_mebel@mail.ru</a></div>
+      <nav aria-label="Навигация в подвале"><a href="#catalog">Каталог</a><a href="#planner">Планировщик</a><a href="#howItWorks">Как это работает</a></nav>
+      <div class="footer-service"><span>Правовая информация</span><a href="privacy.html">Политика конфиденциальности</a><a href="consent.html">Согласие на обработку данных</a><a href="terms.html">Условия использования и продажи</a><a href="cookies.html">Файлы cookie</a><button class="footer-link-button" type="button" data-open-cookie-settings>Настройки cookie</button><a href="admin.html" rel="nofollow">Для сотрудников</a></div>
+    </div>
+  </footer>
+
+  <div class="offcanvas offcanvas-end" tabindex="-1" id="cartCanvas" aria-labelledby="cartCanvasTitle">
+    <div class="offcanvas-header">
+      <div><div class="eyebrow">Ваш выбор</div><h2 class="offcanvas-title" id="cartCanvasTitle">Корзина</h2></div>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Закрыть корзину"></button>
+    </div>
+    <div class="offcanvas-body d-flex flex-column">
+      <div id="cartItems" class="vstack gap-3 flex-grow-1" aria-live="polite"></div>
+      <div class="cart-summary">
+        <div class="form-field"><label for="deliveryAddress">Адрес доставки</label><textarea class="form-control" id="deliveryAddress" rows="2" placeholder="Город, улица, дом"></textarea></div>
+        <div class="form-check legal-consent-check">
+          <input class="form-check-input" type="checkbox" id="checkoutConsent" />
+          <label class="form-check-label" for="checkoutConsent">Я принимаю <a href="terms.html" target="_blank" rel="noopener">условия продажи</a> и даю <a href="consent.html" target="_blank" rel="noopener">согласие на обработку данных</a>.</label>
+        </div>
+        <button class="btn btn-secondary w-100 mb-2" id="btnQuoteDelivery">Рассчитать доставку</button>
+        <div class="helper-text" id="deliveryHint">Загружаем условия доставки...</div>
+        <div class="summary-row"><span>Товары</span><span id="cartSubtotal">0 ₽</span></div>
+        <div class="summary-row"><span>Доставка</span><span id="cartDeliveryLine">—</span></div>
+        <div class="helper-text" id="cartDeliveryExtra"></div>
+        <div class="summary-row summary-total"><span>Итого</span><span id="cartTotal">0 ₽</span></div>
+        <button class="btn btn-primary w-100 mt-3" type="button" id="btnPaySbp">Оплатить через СБП</button>
+        <div class="helper-text mt-2 mb-0">Оплата через Систему быстрых платежей (НКО ЭЛПЛАТ).</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="sbpPayModal" tabindex="-1" aria-labelledby="sbpPayModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 rounded-4">
+        <div class="modal-header">
+          <div>
+            <div class="eyebrow">Система быстрых платежей</div>
+            <h2 class="modal-title h5" id="sbpPayModalTitle">Оплата заказа</h2>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body text-center" id="sbpPayBody">
+          <div class="text-muted">Готовим QR…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="accountModal" tabindex="-1" aria-labelledby="accountModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div><div class="eyebrow">Личное пространство</div><h2 class="modal-title" id="accountModalTitle">Ваш кабинет</h2></div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <div id="accountGuest">
+          <p class="account-benefit">Войдите, чтобы сохранять проекты, продолжать планирование и отслеживать заказы.</p>
+          <ul class="nav nav-pills account-tabs" id="accountTabs" role="tablist">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#loginPane" type="button">Вход</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#registerPane" type="button">Регистрация</button></li>
+            <li class="nav-item d-none" id="userProjectsTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#userProjectsPane" type="button">Проекты</button></li>
+            <li class="nav-item d-none" id="userOrdersTabNav"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#userOrdersPane" type="button">Заказы</button></li>
+          </ul>
+          <div class="tab-content">
+            <div class="tab-pane fade show active" id="loginPane">
+              <div class="form-field"><label for="loginUser">Логин</label><input class="form-control" id="loginUser" autocomplete="username" /></div>
+              <div class="form-field"><label for="loginPass">Пароль</label><input type="password" class="form-control" id="loginPass" autocomplete="current-password" /></div>
+              <button class="btn btn-primary w-100" id="btnLogin">Войти</button>
+            </div>
+            <div class="tab-pane fade" id="registerPane">
+              <div class="form-field"><label for="regUser">Имя пользователя</label><input class="form-control" id="regUser" autocomplete="username" /></div>
+              <div class="form-field"><label for="regPass">Пароль <span>не менее 8 символов</span></label><input type="password" class="form-control" id="regPass" autocomplete="new-password" /></div>
+              <div class="form-check legal-consent-check">
+                <input class="form-check-input" type="checkbox" id="registrationConsent" />
+                <label class="form-check-label" for="registrationConsent">Я принимаю <a href="terms.html" target="_blank" rel="noopener">условия использования</a> и даю <a href="consent.html" target="_blank" rel="noopener">согласие на обработку персональных данных</a>.</label>
+              </div>
+              <button class="btn btn-primary w-100" id="btnRegister">Создать аккаунт</button>
+            </div>
+            <div class="tab-pane fade" id="userProjectsPane"><div id="userProjectsPanel" class="empty-copy">Войдите, чтобы увидеть сохранённые проекты.</div></div>
+            <div class="tab-pane fade" id="userOrdersPane"><div id="userOrdersPanel" class="empty-copy">Войдите, чтобы увидеть заказы в производстве.</div></div>
+          </div>
+          </div>
+          <div class="d-none" id="accountMember">
+            <div class="account-member-head"><div><span>Вы вошли как</span><strong id="accountMemberName"></strong></div><button class="btn btn-quiet btn-sm" id="btnLogout" type="button">Выйти</button></div>
+            <ul class="nav nav-pills account-tabs" role="tablist">
+              <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#memberProjectsPane" type="button">Мои проекты</button></li>
+              <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#memberOrdersPane" type="button">Мои заказы</button></li>
+            </ul>
+            <div class="tab-content">
+              <div class="tab-pane fade show active" id="memberProjectsPane"><div id="memberProjectsPanel" class="loading-state">Загружаем проекты...</div></div>
+              <div class="tab-pane fade" id="memberOrdersPane"><div id="memberOrdersPanel" class="loading-state">Загружаем заказы...</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="projectSavedModal" tabindex="-1" aria-labelledby="projectSavedModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <div class="eyebrow">Проект сохранён</div>
+            <h2 class="modal-title" id="projectSavedModalTitle">С вами свяжутся</h2>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <p class="mb-0">С вами свяжутся, когда рассмотрят ваш проект (можно оплатить через СБП или наличкой).</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-primary" data-bs-dismiss="modal">Понятно</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="productCardModal" tabindex="-1" aria-labelledby="productCardTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <div class="eyebrow" id="productCardCategory">Товар</div>
+            <h2 class="modal-title" id="productCardTitle">Карточка товара</h2>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <div class="product-card-gallery" id="productCardGallery"></div>
+          <div class="product-card-meta">
+            <div class="product-brand" id="productCardBrand"></div>
+            <p class="mb-3" id="productCardDesc"></p>
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <span class="price" id="productCardPrice"></span>
+              <span class="stock-status" id="productCardStock"></span>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" id="productCardActions"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal fade" id="objectPickerModal" tabindex="-1" aria-labelledby="objectPickerTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg modal-dialog-centered">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div>
+            <div class="eyebrow">Каталог предметов</div>
+            <h2 class="modal-title" id="objectPickerTitle">Выберите предмет</h2>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+        </div>
+        <div class="modal-body">
+          <svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden">
+            <symbol id="icon-wardrobe" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="1.2"/><path d="M12 3.5v17M8.8 11.2v.1M15.2 11.2v.1"/></g></symbol>
+            <symbol id="icon-wardrobe-sliding" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3.5" width="15" height="17" rx="1.2"/><path d="M10.2 5.2v13.6M13.8 5.2v13.6M8 11.2h1.2M14.8 11.2h1.2"/></g></symbol>
+            <symbol id="icon-wardrobe-corner" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 20.5V6.5h8v6h7v8zM12.5 12.5V20.5M8.2 11.2v.1M16.8 16.2v.1"/></g></symbol>
+            <symbol id="icon-display-cabinet" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="3.5" width="13" height="17" rx="1.2"/><path d="M12 3.5v17M7.2 7.2h3.6v8H7.2zM13.2 7.2h3.6v8h-3.6z"/></g></symbol>
+            <symbol id="icon-closet" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3.5" width="15" height="17" rx="1.2"/><path d="M12 3.5v17M6.8 6.8h3.2M14 6.8h3.2M8.6 11.2v.1M15.4 11.2v.1"/></g></symbol>
+            <symbol id="icon-cabinet" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="5.5" width="15" height="13.5" rx="1.2"/><path d="M4.5 10.2h15M4.5 14.4h15M12 7.6v.1M12 12.2v.1M12 16.4v.1"/></g></symbol>
+            <symbol id="icon-tv-stand" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="11" width="17" height="8" rx="1.2"/><path d="M8.5 11v8M15.5 11v8M12 13.8v.1M7 5.5h10v4H7z"/></g></symbol>
+            <symbol id="icon-shelf" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="3.8" width="13" height="16.4" rx="1"/><path d="M5.5 8.8h13M5.5 13.2h13M5.5 17.4h13"/></g></symbol>
+            <symbol id="icon-bookshelf" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3.5" width="14" height="17" rx="1"/><path d="M5 9h14M5 14.5h14M7.2 5.6h2.2v3.2H7.2zM10.2 5.6h2.4v3.2h-2.4zM13.6 5.6h3.2v3.2h-3.2zM7.2 10.4h3.4v3.8H7.2zM11.2 10.4h2v3.8h-2zM14 10.4h2.8v3.8H14z"/></g></symbol>
+            <symbol id="icon-shoe-rack" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="4.5" width="15" height="15" rx="1.2"/><path d="M4.5 9.5h15M4.5 14.5h15M7 7.2h3.2M13.8 7.2h3.2M7 12.2h3.2M13.8 12.2h3.2M7 17h3.2M13.8 17h3.2"/></g></symbol>
+            <symbol id="icon-table" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 8.5h15M6.5 8.5v10M17.5 8.5v10M6.5 18.5h2M15.5 18.5h2"/></g></symbol>
+            <symbol id="icon-dining-table" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="9" rx="8" ry="3"/><path d="M5.2 9.4V18M18.8 9.4V18M8 18h8"/></g></symbol>
+            <symbol id="icon-desk" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3.8 8.2h16.4v2.2H3.8zM5.2 10.4v8.4M18.8 10.4v8.4M13.2 10.4v8.4M13.2 13.2h5.6M13.2 16h5.6"/></g></symbol>
+            <symbol id="icon-island" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="9" width="16" height="8.5" rx="1.2"/><path d="M4 12.2h16M8 14.6v.1M12 14.6v.1M16 14.6v.1M7.5 6.5h9v2.5h-9z"/></g></symbol>
+            <symbol id="icon-kitchen-base" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="8.5" width="15" height="11" rx="1.2"/><path d="M4.5 11.2h15M12 8.5v11M8.2 14.4v.1M15.8 14.4v.1M4.5 8.5l1.4-2.2h12.2L19.5 8.5"/></g></symbol>
+            <symbol id="icon-tall-unit" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3" width="10" height="18" rx="1.2"/><path d="M7 8.2h10M7 13.2h10M12 5.4v.1M12 10.6v.1M12 16.4v.1"/></g></symbol>
+            <symbol id="icon-wall-cabinet" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="5" width="15" height="9" rx="1.2"/><path d="M12 5v9M8.2 9.4v.1M15.8 9.4v.1M7 16.8h10"/></g></symbol>
+            <symbol id="icon-sofa" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 13V9.6A2 2 0 0 1 8 7.6h8A2 2 0 0 1 18 9.6V13"/><rect x="4.5" y="12.8" width="15" height="4.4" rx="1.2"/><path d="M7 17.2v2M17 17.2v2"/></g></symbol>
+            <symbol id="icon-fridge" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="3.2" width="11" height="17.6" rx="1.4"/><path d="M6.5 10.8h11M8.8 7.2v.1M8.8 14.8v.1"/></g></symbol>
+            <symbol id="icon-microwave" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="7" width="15" height="10" rx="1.2"/><rect x="6.4" y="9" width="7.4" height="6"/><path d="M16.4 9.4v.1M16.4 12v.1M16.4 14.6v.1"/></g></symbol>
+            <symbol id="icon-hood" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 3.8h4v4.2h-4zM5.5 8h13l-2.2 11H7.7z"/></g></symbol>
+            <symbol id="icon-hood-builtin" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="6.5" width="15" height="5.5" rx="1"/><path d="M8 12v2.8h8V12M10.5 8.6h3"/></g></symbol>
+            <symbol id="icon-stove-gas" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4.5" width="14" height="15" rx="1.2"/><circle cx="9" cy="9" r="1.6"/><circle cx="15" cy="9" r="1.6"/><circle cx="9" cy="14.5" r="1.6"/><circle cx="15" cy="14.5" r="1.6"/></g></symbol>
+            <symbol id="icon-stove-electric" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4.5" width="14" height="15" rx="1.2"/><rect x="7.2" y="7" width="4" height="4" rx=".6"/><rect x="12.8" y="7" width="4" height="4" rx=".6"/><rect x="7.2" y="12.6" width="4" height="4" rx=".6"/><rect x="12.8" y="12.6" width="4" height="4" rx=".6"/></g></symbol>
+            <symbol id="icon-oven" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="4.5" width="13" height="15" rx="1.2"/><rect x="7.6" y="8.6" width="8.8" height="8"/><path d="M8.4 6.6h.1M11 6.6h.1M13.6 6.6h.1"/></g></symbol>
+            <symbol id="icon-dishwasher" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="3.5" width="13" height="17" rx="1.2"/><path d="M5.5 7.4h13M8 5.4h8M8.6 10.4h6.8v7H8.6zM10 13.2h3.8"/></g></symbol>
+            <symbol id="icon-bed" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V8.5M20 19v-6.2H4M6.8 12.8V8.4h5.2A2.6 2.6 0 0 1 14.6 11v1.8M4 17.2h16"/></g></symbol>
+            <symbol id="icon-bed-single" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 19.2V7.8M17.5 19.2v-7H6.5M8.4 12.2V8.2h3.6A2.2 2.2 0 0 1 14.2 10.4v1.8M6.5 17.2h11"/></g></symbol>
+            <symbol id="icon-nightstand" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="6.5" width="11" height="11.5" rx="1.2"/><path d="M6.5 12.2h11M12 9.2v.1M12 15v.1M8 19.2v1M16 19.2v1"/></g></symbol>
+            <symbol id="icon-chair" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4.5" width="10" height="8.2" rx="1.4"/><path d="M5.8 12.7h12.4M8 12.7v7M16 12.7v7"/></g></symbol>
+            <symbol id="icon-pedestal" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="4.5" width="10" height="15" rx="1.2"/><path d="M7 9.4h10M7 14h10M12 6.8v.1M12 11.6v.1M12 16.4v.1"/></g></symbol>
+            <symbol id="icon-vanity" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.2" width="15" height="9.3" rx="1.2"/><path d="M4.5 14h15M12 16.6v.1M7.2 7.4h9.6a3 2.4 0 0 1-9.6 0zM12 7.4V5.6"/></g></symbol>
+            <symbol id="icon-bath" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16v2.4a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4zM7 12V7.4A2.4 2.4 0 0 1 9.4 5H11M7 18.4v1.2M17 18.4v1.2"/></g></symbol>
+            <symbol id="icon-shower" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 20.2V8a4 4 0 0 1 8 0M11 8h6.4M12.6 11v.1M15.2 11v.1M17.8 11v.1M14 14v.1M16.6 14v.1M5 20.2h14"/></g></symbol>
+            <symbol id="icon-sink" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 10h14a7 5 0 0 1-14 0zM12 15v4M9 19h6M10 10V7a2 2 0 0 1 4 0"/></g></symbol>
+            <symbol id="icon-toilet" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3.8" width="8.4" height="7.2" rx="1"/><path d="M6 11h11c0 4-2 6.6-5.5 6.6S6 15 6 11zM9.2 17.6v1.6h6"/></g></symbol>
+            <symbol id="icon-washer" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="3.5" width="13" height="17" rx="1.2"/><path d="M8.4 6.4h.1M11 6.4h4.4"/><circle cx="12" cy="13.2" r="3.2"/></g></symbol>
+            <symbol id="icon-mirror" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3.4" width="10" height="17.2" rx="5"/><path d="M9.4 7.2 14.2 5.8"/></g></symbol>
+          </svg>
+          <div class="object-library-search">
+            <div class="search-field">
+              <label for="objectPickerSearch">Поиск по предметам</label>
+              <span class="search-icon" aria-hidden="true"></span>
+              <input class="form-control" id="objectPickerSearch" type="search" placeholder="Например, пенал, обувница или навесной шкаф" autocomplete="off" />
+              <button class="search-clear" type="button" data-clear-object-search aria-label="Очистить поиск">×</button>
+            </div>
+            <span id="objectPickerCount" class="object-library-count" aria-live="polite"></span>
+          </div>
+          <div class="accordion" id="objectPickerAccordion">
+            <div class="accordion-item">
+              <h3 class="accordion-header">
+                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerLiving" aria-expanded="true">
+                  Гостиная
+                </button>
+              </h3>
+              <div id="objectPickerLiving" class="accordion-collapse collapse show" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body">
+                  <div class="small text-muted mb-2">Корпусная мебель</div>
+                  <div class="list-group mb-3">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="living" data-type="wardrobe" data-name="Шкаф" data-w="1200" data-d="600" data-h="2100" data-texture="wood_oak">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-display-cabinet"></use></svg></span>
+                      <span><strong>Шкаф</strong><small>1200×600×2100 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="living" data-type="cabinet" data-name="Тумба" data-w="900" data-d="500" data-h="900" data-texture="wood_oak">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-tv-stand"></use></svg></span>
+                      <span><strong>Тумба</strong><small>900×500×900 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="living" data-type="shelf" data-name="Стеллаж" data-w="900" data-d="350" data-h="1800" data-texture="wood_oak">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-shelf"></use></svg></span>
+                      <span><strong>Стеллаж</strong><small>900×350×1800 мм</small></span>
+                    </button>
+                  </div>
+                  <div class="small text-muted mb-2">Мебель</div>
+                  <div class="list-group">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="living" data-type="table" data-name="Стол" data-w="1400" data-d="800" data-h="750" data-texture="metal_graphite" data-countertop="skif">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-dining-table"></use></svg></span>
+                      <span><strong>Стол</strong><small>1400×800×750 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="living" data-type="sofa" data-name="Диван" data-w="2200" data-d="900" data-h="900" data-texture="fabric_gray">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-sofa"></use></svg></span>
+                      <span><strong>Диван</strong><small>2200×900×900 мм</small></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="accordion-item">
+              <h3 class="accordion-header">
+                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#objectPickerKitchen" aria-expanded="false">
+                  Кухня
+                </button>
+              </h3>
+              <div id="objectPickerKitchen" class="accordion-collapse collapse" data-bs-parent="#objectPickerAccordion">
+                <div class="accordion-body">
+                  <div class="small text-muted mb-2">Корпусная мебель</div>
+                  <div class="list-group mb-3">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="cabinet" data-name="Кухонный модуль" data-w="600" data-d="560" data-h="850" data-texture="mdf_film_matte" data-countertop="skif">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-kitchen-base"></use></svg></span>
+                      <span><strong>Нижний модуль (шкаф)</strong><small>600×560×850 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="wardrobe" data-name="Пенал" data-w="600" data-d="560" data-h="2200" data-texture="mdf_film_matte" data-countertop="skif">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-tall-unit"></use></svg></span>
+                      <span><strong>Пенал</strong><small>600×560×2200 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="cabinet" data-name="Навесной шкаф" data-w="800" data-d="340" data-h="720" data-y="1400" data-drawers="0" data-handles="2" data-texture="mdf_film_matte">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-wall-cabinet"></use></svg></span>
+                      <span><strong>Навесной шкаф</strong><small>800×340×720 мм · на стену</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="cabinet" data-name="Кухонный остров" data-w="1600" data-d="900" data-h="900" data-drawers="3" data-handles="3" data-texture="mdf_film_matte" data-countertop="quartz">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-island"></use></svg></span>
+                      <span><strong>Кухонный остров</strong><small>1600×900×900 мм</small></span>
+                    </button>
+                  </div>
+                  <div class="small text-muted mb-2">Техника</div>
+                  <div class="list-group">
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_fridge" data-name="Холодильник" data-w="600" data-d="650" data-h="2000" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-fridge"></use></svg></span>
+                      <span><strong>Холодильник</strong><small>600×650×2000 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_microwave" data-name="СВЧ" data-w="600" data-d="420" data-h="380" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-microwave"></use></svg></span>
+                      <span><strong>СВЧ</strong><small>600×420×380 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_hood" data-name="Вытяжка (отдельная)" data-w="600" data-d="500" data-h="700" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-hood"></use></svg></span>
+                      <span><strong>Вытяжка (отдельная)</strong><small>600×500×700 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_hood_builtin" data-name="Вытяжка (встраиваемая)" data-w="600" data-d="300" data-h="260" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-hood-builtin"></use></svg></span>
+                      <span><strong>Вытяжка (встраиваемая)</strong><small>600×300×260 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_stove_gas" data-name="Плита (газовая)" data-w="600" data-d="600" data-h="850" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-stove-gas"></use></svg></span>
+                      <span><strong>Плита (газовая)</strong><small>600×600×850 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_stove_electric" data-name="Плита (электро)" data-w="600" data-d="600" data-h="850" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-stove-electric"></use></svg></span>
+                      <span><strong>Плита (электро)</strong><small>600×600×850 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_oven" data-name="Духовой шкаф" data-w="600" data-d="560" data-h="600" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-oven"></use></svg></span>
+                      <span><strong>Духовой шкаф</strong><small>600×560×600 мм</small></span>
+                    </button>
+                    <button type="button" class="list-group-item list-group-item-action object-picker-item" data-pick-object data-section="kitchen" data-type="appliance_dishwasher" data-name="Посудомоечная машина" data-w="600" data-d="560" data-h="820" data-texture="metal_graphite">
+                      <span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#icon-dishwasher"></use></svg></span>
+                      <span><strong>Посудомоечная машина</strong><small>600×560×820 мм</small></span>
+                    </button>
+                  </div>
+                  <div class="alert alert-light border mt-3 small mb-0">
+                    <div class="fw-semibold mb-1">Фасады кухни</div>
+                    <div class="text-muted">После выбора модуля откройте «Фасад / материал» и выберите: МДФ в плёнке (мат/глянец, с фрезеровкой), МДФ в эмали или МДФ пластик.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-quiet" data-bs-dismiss="modal">Закрыть</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="lightbox" id="imageLightbox" hidden aria-hidden="true" role="dialog" aria-modal="true" aria-label="Просмотр изображения">
+    <button class="lightbox-close" type="button" data-lightbox-close aria-label="Закрыть просмотр">×</button>
+    <button class="lightbox-nav lightbox-prev" type="button" data-lightbox-prev aria-label="Предыдущее изображение">‹</button>
+    <figure><img id="lightboxImage" alt="" /><figcaption id="lightboxCaption"></figcaption></figure>
+    <button class="lightbox-nav lightbox-next" type="button" data-lightbox-next aria-label="Следующее изображение">›</button>
+  </div>
+
+  <section class="cookie-consent" id="cookieConsent" hidden aria-label="Настройки файлов cookie" role="dialog" aria-live="polite">
+    <div><strong>Управление данными на устройстве</strong><p>Мы используем необходимые локальные данные для входа, корзины и работы планировщика. Необязательные функции включаются только с вашего согласия.</p><a href="cookies.html">Подробнее о cookie</a></div>
+    <div class="cookie-consent-actions"><button class="btn btn-quiet" type="button" data-cookie-choice="necessary">Только необходимые</button><button class="btn btn-quiet" type="button" data-bs-toggle="modal" data-bs-target="#cookiePreferencesModal">Настроить</button><button class="btn btn-primary" type="button" data-cookie-choice="all">Принять все</button></div>
+  </section>
+
+  <div class="modal fade" id="cookiePreferencesModal" tabindex="-1" aria-labelledby="cookiePreferencesTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered"><div class="modal-content"><div class="modal-header"><div><div class="eyebrow">Конфиденциальность</div><h2 class="modal-title h5" id="cookiePreferencesTitle">Настройки cookie</h2></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button></div><div class="modal-body">
+      <div class="cookie-setting"><div><strong>Необходимые</strong><p>Авторизация, корзина, безопасность и сохранение выбора. Отключить нельзя.</p></div><input class="form-check-input" type="checkbox" checked disabled aria-label="Необходимые cookie включены" /></div>
+      <div class="cookie-setting"><div><strong>Функциональные</strong><p>Запоминают тему и настройки интерфейса на этом устройстве.</p></div><input class="form-check-input" id="cookieFunctional" type="checkbox" /></div>
+      <div class="cookie-setting"><div><strong>Аналитические</strong><p>Помогают оценивать использование сайта. Сейчас аналитические системы не подключены.</p></div><input class="form-check-input" id="cookieAnalytics" type="checkbox" /></div>
+    </div><div class="modal-footer"><button class="btn btn-primary" type="button" id="saveCookiePreferences">Сохранить выбор</button></div></div></div>
+  </div>
+
+  <div class="toast-container position-fixed bottom-0 end-0 p-3" aria-live="polite" aria-atomic="true"></div>
+  <script>window.APP_MODE = "user";</script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="dimensions3d.js?v=20260721-cad-dimensions-v2"></script>
+  <script src="textures3d.js?v=20261021-distinct-furniture"></script>
+  <script type="module" src="app.js?v=20261021-distinct-furniture"></script>
+</body>
+</html>

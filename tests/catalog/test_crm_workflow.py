@@ -451,3 +451,12 @@ def test_order_receipt_create_and_list(catalog_client: TestClient):
     assert len(items) == 1
     assert items[0]["note"] == "Петли Blum"
     assert items[0]["amount_rub"] == 4500.5
+
+
+def test_order_stores_assembler_price_for_production_role(catalog_client: TestClient):
+    created = catalog_client.post(
+        "/crm/orders",
+        json={"title": "Цена сборки", "price_assembler": 24500, "materials": []},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["price_assembler"] == 24500.0
