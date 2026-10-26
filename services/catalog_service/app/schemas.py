@@ -107,12 +107,28 @@ class DeliverySettingsOut(BaseModel):
 class DeliverySettingsPublicOut(BaseModel):
     free_delivery_threshold: float
     delivery_price_per_km: float
+    fixed_delivery_fee: float = 3000
 
 
 class DeliverySettingsUpdate(BaseModel):
     free_delivery_threshold: float = Field(gt=0)
     delivery_price_per_km: float = Field(ge=0)
     warehouse_address: str = Field(min_length=5, max_length=500)
+
+
+class PricingVariantSettings(BaseModel):
+    key: str = Field(pattern=r"^[a-z][a-z0-9_]{1,31}$")
+    title: str = Field(min_length=2, max_length=120)
+    coefficient: float = Field(gt=0, le=20)
+    tax_coefficient: float = Field(gt=0, le=20)
+    prices: dict[str, float] = Field(min_length=7)
+
+
+class PricingSettings(BaseModel):
+    packaging: float = Field(ge=0, le=1_000_000)
+    delivery: float = Field(ge=0, le=1_000_000)
+    tax_coefficient: float = Field(gt=0, le=20)
+    tiers: list[PricingVariantSettings] = Field(min_length=4, max_length=4)
 
 
 class DeliveryQuoteRequest(BaseModel):
@@ -129,6 +145,7 @@ class DeliveryQuoteOut(BaseModel):
     delivery_price_per_km: float
     amount_until_free_delivery: float
     grand_total: float
+    fixed_delivery_fee: float | None = None
 
 
 class CrmMaterialCreate(BaseModel):
@@ -209,6 +226,7 @@ class CrmOrderAdminFields(BaseModel):
     signature_date: str | None = Field(default=None, description="YYYY-MM-DD")
     delivery_date: str | None = Field(default=None, description="YYYY-MM-DD")
     price_admin: float | None = Field(default=None, ge=0)
+    price_assembler: float | None = Field(default=None, ge=0)
     advance_paid: float | None = Field(default=None, ge=0)
     balance_due: float | None = Field(default=None)
     email: str = Field(default="", max_length=254)
@@ -255,6 +273,7 @@ class CrmOrderUpdate(BaseModel):
     signature_date: str | None = None
     delivery_date: str | None = None
     price_admin: float | None = Field(default=None, ge=0)
+    price_assembler: float | None = Field(default=None, ge=0)
     advance_paid: float | None = Field(default=None, ge=0)
     balance_due: float | None = None
     email: str | None = Field(default=None, max_length=254)
@@ -303,6 +322,7 @@ class CrmOrderOut(CrmOrderAdminFields):
     created_at: str | None = None
     status_changed_at: str | None = None
     calendar_kind: str | None = None
+    calendar_stage: str | None = None
     stage_workdays: dict[str, int] = Field(default_factory=dict)
     custom_fields: dict[str, str] = Field(default_factory=dict)
 

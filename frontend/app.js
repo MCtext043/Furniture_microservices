@@ -11,8 +11,11 @@ import { ModelAssetLoader } from "/planner-modules/furniture/ModelAssetLoader.js
 import { applyTranslationDelta, clampPlacementToRoom, coordinateDeltaForAxis, snapPlacement3D } from "/planner-modules/interaction/Transform3D.js";
 import { HARD_FURNITURE_CATEGORIES, HARD_FURNITURE_LIBRARY } from "/planner-modules/catalog/HardFurnitureCatalog.js";
 import { CostQuoteController } from "/planner-modules/pricing/CostQuoteController.js";
+import { DEFAULT_SPREADSHEET_PRICING, estimateSpreadsheetPrices, quantitiesFromScene } from "/planner-modules/pricing/SpreadsheetPricing.js";
+import { catalogThumbnailSvg } from "/planner-modules/catalog/CatalogThumbnail.js";
 
 const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
+let furnitureThumbnailRenderer = null;
 const APP_MODE = window.APP_MODE || "user";
 const LS_API = "furniture_gateway_url";
 const LS_TOKEN = "furniture_jwt";
@@ -29,6 +32,7 @@ const state = {
   roles: [],
   deliverySettings: null,
   deliveryQuote: null,
+  pricingConfig: null,
   deliveryAddress: "",
   projectId: null,
   sceneRevision: 0,
@@ -51,7 +55,7 @@ const state = {
   lastCutResult: null,
   cuttingQuoteCache: null,
   selectedCutJobId: null,
-  crm: { orders: [], warehouse: [], movements: [], whTab: "stock", purchaseDraft: [], procurementByOrder: {}, tab: "active", dictionaries: [], editingOrderId: null },
+  crm: { orders: [], calendarEntries: [], warehouse: [], movements: [], whTab: "stock", purchaseDraft: [], procurementByOrder: {}, tab: "active", dictionaries: [], editingOrderId: null },
   calendar: { year: null, month: null },
   staff: [],
   staffPermissionCatalog: [],
@@ -94,9 +98,10 @@ const defaultCuttingParts = [
 ];
 
 const PRICING_TIERS = [
-  { key: "standard", title: "Стандарт", material: 1, hardware: 1, labor: 1 },
-  { key: "comfort", title: "Комфорт", material: 1.18, hardware: 1.25, labor: 1.1 },
-  { key: "premium", title: "Премиум", material: 1.42, hardware: 1.55, labor: 1.22 },
+  { key: "standard", title: "Вариант 0", material: 1, hardware: 1, labor: 1 },
+  { key: "comfort", title: "Вариант 1 · МДФ + Boyard", material: 1, hardware: 1, labor: 1 },
+  { key: "premium", title: "Вариант 2 · МДФ + JAT", material: 1, hardware: 1, labor: 1 },
+  { key: "luxury", title: "Вариант 3 · Эмаль + Blum", material: 1, hardware: 1, labor: 1 },
 ];
 
 const HARDWARE_SLIDERS = [
@@ -120,6 +125,11 @@ const TIER_MATERIAL_PROFILES = {
   premium: {
     qty: { panel: 1.18, edge: 1.28, hinges: 1.65, slides: 1.8, screws: 1.2 },
     specs: ["МДФ фасады / шпон", "Кромка ABS 2 мм", "Blum / Hettich", "Tandembox / Legrabox"],
+    patterns: { panel: "дсп", edge: "кромка", hinges: "blum", slides: "направляющ", screws: "саморез" },
+  },
+  luxury: {
+    qty: { panel: 1, edge: 1, hinges: 1, slides: 1, screws: 1 },
+    specs: ["Эмаль", "Кромка ABS 2 мм", "Blum", "Фурнитура премиум"],
     patterns: { panel: "дсп", edge: "кромка", hinges: "blum", slides: "направляющ", screws: "саморез" },
   },
 };
@@ -1078,7 +1088,7 @@ function renderProducts() {
       const imgUrl = state.productPhotoUrls[p.id];
       const art = imgUrl
         ? `<div class="product-art product-art-photo"><img src="${imgUrl}" alt="${escapeHtml(displayProductTitle(p))}" width="640" height="460" loading="lazy" decoding="async"></div>`
-        : `<div class="product-art" style="background:${meta.gradient}" role="img" aria-label="${escapeHtml(displayProductTitle(p))}">${meta.icon}</div>`;
+        : `<div class="product-art product-art-3d" role="img" aria-label="${escapeHtml(displayProductTitle(p))}">${catalogThumbnailSvg(p)}</div>`;
       const actionButtons = adminActions
         ? `<div class="btn-group">
             <button class="btn btn-outline-primary btn-sm" data-edit="${p.id}">Изменить</button>
@@ -1246,7 +1256,7 @@ async function loadDeliverySettings() {
   try {
     state.deliverySettings = await api("GET", "/catalog/delivery/settings");
   } catch {
-    state.deliverySettings = { free_delivery_threshold: 3000, delivery_price_per_km: 45 };
+    state.deliverySettings = { free_delivery_threshold: 0, delivery_price_per_km: 0, fixed_delivery_fee: 3000 };
   }
 }
 
@@ -1423,6 +1433,100 @@ async function loadDeliverySettingsAdmin() {
   }
 }
 
+async function loadPublicPricingConfig() {
+  try {
+    state.pricingConfig = await api("GET", "/catalog/pricing");
+  } catch (error) {
+    state.pricingConfig = DEFAULT_SPREADSHEET_PRICING;
+    console.warn("Pricing settings unavailable, using workbook defaults:", formatApiError(error));
+  }
+}
+
+function pricingConfigForForm(config) {
+  const source = config || DEFAULT_SPREADSHEET_PRICING;
+  return {
+    packaging: Number(source.packaging ?? 1000),
+    delivery: Number(source.delivery ?? 3000),
+    tax_coefficient: Number(source.tax_coefficient ?? source.taxCoefficient ?? 1.02),
+    tiers: (source.tiers || DEFAULT_SPREADSHEET_PRICING.tiers).map((tier) => ({
+      key: tier.key,
+      title: tier.title || tier.key,
+      coefficient: Number(tier.coefficient ?? 2),
+      tax_coefficient: Number(tier.tax_coefficient ?? tier.taxCoefficient ?? 1.02),
+      prices: {
+        facade1: Number(tier.prices?.facade1 ?? 0),
+        facade2: Number(tier.prices?.facade2 ?? 0),
+        facade3: Number(tier.prices?.facade3 ?? 0),
+        hinges: Number(tier.prices?.hinges ?? 0),
+        guides: Number(tier.prices?.guides ?? 0),
+        countertop: Number(tier.prices?.countertop ?? 0),
+        backsplash: Number(tier.prices?.backsplash ?? 0),
+      },
+    })),
+  };
+}
+
+function renderPricingSettingsForm(config) {
+  const host = document.getElementById("pricingSettingsForm");
+  if (!host) return;
+  const normalized = pricingConfigForForm(config);
+  const labels = {
+    facade1: "Фасад 1 (₽/м²)", facade2: "Фасад 2 (₽/м²)", facade3: "Фасад 3 (₽/м²)",
+    hinges: "Петли (₽/шт)", guides: "Направляющие (₽/шт)", countertop: "Столешница (₽/м)", backsplash: "Фартук (₽/м)",
+  };
+  host.innerHTML = `
+    <div class="row g-3 mb-3">
+      <div class="col-md-4"><label class="form-label small">Упаковка, ₽</label><input class="form-control" type="number" min="0" step="1" data-pricing-global="packaging" value="${normalized.packaging}"></div>
+      <div class="col-md-4"><label class="form-label small">Доставка, ₽ за заказ</label><input class="form-control" type="number" min="0" step="1" data-pricing-global="delivery" value="${normalized.delivery}"></div>
+      <div class="col-md-4"><label class="form-label small">Коэффициент таблицы</label><input class="form-control" type="number" min="0" step="0.01" data-pricing-global="tax_coefficient" value="${normalized.tax_coefficient}"></div>
+    </div>
+    <div class="table-responsive"><table class="table table-sm align-middle mb-0"><thead><tr><th>Вариант</th><th>Множитель</th><th>Коэфф. 1,02</th>${Object.values(labels).map((label) => `<th class="small">${label}</th>`).join("")}</tr></thead><tbody>
+      ${normalized.tiers.map((tier) => `<tr data-pricing-tier="${escapeHtml(tier.key)}"><td><input class="form-control form-control-sm" data-pricing-field="title" value="${escapeHtml(tier.title)}"></td><td><input class="form-control form-control-sm" type="number" min="0" step="0.01" data-pricing-field="coefficient" value="${tier.coefficient}"></td><td><input class="form-control form-control-sm" type="number" min="0" step="0.01" data-pricing-field="tax_coefficient" value="${tier.tax_coefficient}"></td>${Object.keys(labels).map((key) => `<td><input class="form-control form-control-sm" type="number" min="0" step="0.01" data-pricing-price="${key}" value="${tier.prices[key]}"></td>`).join("")}</tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+function readPricingSettingsForm() {
+  const host = document.getElementById("pricingSettingsForm");
+  const config = { packaging: Number(host?.querySelector('[data-pricing-global="packaging"]')?.value), delivery: Number(host?.querySelector('[data-pricing-global="delivery"]')?.value), tax_coefficient: Number(host?.querySelector('[data-pricing-global="tax_coefficient"]')?.value), tiers: [] };
+  host?.querySelectorAll("[data-pricing-tier]").forEach((row) => {
+    const prices = {};
+    row.querySelectorAll("[data-pricing-price]").forEach((input) => { prices[input.dataset.pricingPrice] = Number(input.value); });
+    config.tiers.push({ key: row.dataset.pricingTier, title: row.querySelector('[data-pricing-field="title"]')?.value.trim() || row.dataset.pricingTier, coefficient: Number(row.querySelector('[data-pricing-field="coefficient"]')?.value), tax_coefficient: Number(row.querySelector('[data-pricing-field="tax_coefficient"]')?.value), prices });
+  });
+  return config;
+}
+
+async function loadPricingSettingsAdmin() {
+  const card = document.getElementById("pricing-admin");
+  if (!card) return;
+  card.classList.toggle("d-none", !isSuperAdmin());
+  if (!isSuperAdmin()) return;
+  try {
+    const config = await api("GET", "/catalog/settings/pricing", undefined, true);
+    state.pricingConfig = config;
+    renderPricingSettingsForm(config);
+  } catch (error) {
+    toast(`Не удалось загрузить цены: ${formatApiError(error)}`, false);
+  }
+}
+
+async function savePricingSettingsAdmin() {
+  if (!isSuperAdmin()) return;
+  const payload = readPricingSettingsForm();
+  if (![payload.packaging, payload.delivery, payload.tax_coefficient, ...payload.tiers.flatMap((tier) => [tier.coefficient, tier.tax_coefficient, ...Object.values(tier.prices)])].every((value) => Number.isFinite(value) && value >= 0) || payload.tiers.length !== 4) {
+    toast("Проверьте все цены и коэффициенты", false);
+    return;
+  }
+  try {
+    state.pricingConfig = await api("PUT", "/catalog/settings/pricing", payload, true);
+    renderPricingSettingsForm(state.pricingConfig);
+    renderBom();
+    toast("Цены из расчётной таблицы сохранены");
+  } catch (error) {
+    toast(`Ошибка сохранения цен: ${formatApiError(error)}`, false);
+  }
+}
+
 async function saveDeliverySettingsAdmin() {
   const payload = {
     free_delivery_threshold: Number(document.getElementById("freeDeliveryThreshold").value),
@@ -1470,13 +1574,10 @@ function renderCart() {
   const subtotalEl = document.getElementById("cartSubtotal");
   if (subtotalEl) subtotalEl.textContent = money(subtotal);
 
-  const threshold = state.deliverySettings?.free_delivery_threshold ?? 3000;
-  const rate = state.deliverySettings?.delivery_price_per_km ?? 45;
+  const fixedFee = state.deliverySettings?.fixed_delivery_fee ?? 3000;
   const hintEl = document.getElementById("deliveryHint");
   if (hintEl) {
-    hintEl.textContent = subtotal >= threshold
-      ? `Доставка бесплатна — заказ от ${money(threshold)}.`
-      : `Доставка ${money(rate)}/км. Бесплатно от ${money(threshold)} (ещё ${money(Math.max(threshold - subtotal, 0))}).`;
+    hintEl.textContent = `Фиксированная доставка — ${money(fixedFee)} за заказ.`;
   }
 
   const deliveryLine = document.getElementById("cartDeliveryLine");
@@ -1487,6 +1588,8 @@ function renderCart() {
   if (deliveryLine) {
     if (!quote) {
       deliveryLine.textContent = "—";
+    } else if (quote.fixed_delivery_fee != null) {
+      deliveryLine.textContent = money(quote.fixed_delivery_fee);
     } else if (quote.free_delivery) {
       deliveryLine.textContent = "Бесплатно";
     } else {
@@ -1497,7 +1600,9 @@ function renderCart() {
     if (!quote) {
       deliveryExtra.textContent = "Укажите адрес и нажмите «Рассчитать доставку».";
     } else {
-      deliveryExtra.textContent = `≈ ${quote.distance_km} км от склада · тариф ${money(quote.delivery_price_per_km)}/км`;
+      deliveryExtra.textContent = quote.fixed_delivery_fee != null
+        ? "Фиксированная доставка для каждого заказа"
+        : `≈ ${quote.distance_km} км от склада · тариф ${money(quote.delivery_price_per_km)}/км`;
     }
   }
   if (totalEl) {
@@ -1776,7 +1881,7 @@ async function savePlannerProject() {
   const bom = buildBomFromObjects();
   const cutting = await quoteCuttingForBom(bom);
   const cost = estimateProjectCost(bom, cutting);
-  const tiers = estimateTierPrices(cost);
+  const tiers = estimateTierPrices(cost, bom);
   
   // Получаем данные из новых полей
   const customerName = document.getElementById("customerName")?.value?.trim() || "";
@@ -3096,12 +3201,14 @@ function buildBomFromObjects() {
   const assembly = [];
   const pushPart = (name, width, height, quantity, options = {}) => {
     const multiplier = Number(options.costMultiplier) || 1;
-    const key = `${name}_${width}_${height}_${multiplier}`;
+    const role = String(options.role || "");
+    const milling = Boolean(options.milling);
+    const key = `${name}_${width}_${height}_${multiplier}_${role}_${milling ? 1 : 0}`;
     const existing = parts.find((part) => part.key === key);
     if (existing) {
       existing.quantity += quantity;
     } else {
-      parts.push({ key, name, width, height, quantity, cost_multiplier: multiplier });
+      parts.push({ key, name, width, height, quantity, cost_multiplier: multiplier, role, milling });
     }
   };
 
@@ -3113,7 +3220,11 @@ function buildBomFromObjects() {
     const definition = furnitureRegistry.get(item.type);
     if (definition && (definition.category === "kitchen" || definition.category === "wardrobe")) {
       const production = definition.buildBom(migrateLegacyObject(item));
-      production.parts.forEach((part) => pushPart(part.id, part.dimensions.width, part.dimensions.height, part.quantity || 1, { costMultiplier: part.role === "facade" ? facadeMultiplier : 1 }));
+      production.parts.forEach((part) => pushPart(part.id, part.dimensions.width, part.dimensions.height, part.quantity || 1, {
+        costMultiplier: part.role === "facade" ? facadeMultiplier : 1,
+        role: part.role,
+        milling: part.role === "facade" && Boolean(item.milling),
+      }));
       assembly.push(...(production.assembly || []).map((step) => `${item.name}: ${step}`));
       continue;
     }
@@ -3123,7 +3234,7 @@ function buildBomFromObjects() {
       pushPart("Крышка/дно", w, d, 2);
       pushPart("Полка", Math.max(w - 36, 100), d, Math.max(2, Math.round(h / 500)));
       pushPart("Задняя стенка", w, h, 1);
-      if (["wardrobe", "wardrobe_sliding", "wardrobe_corner"].includes(item.type)) pushPart("Фасад дверцы", Math.round(w / 2), h, 2, { costMultiplier: facadeMultiplier });
+      if (["wardrobe", "wardrobe_sliding", "wardrobe_corner"].includes(item.type)) pushPart("Фасад дверцы", Math.round(w / 2), h, 2, { costMultiplier: facadeMultiplier, role: "facade", milling: Boolean(item.milling) });
       assembly.push(`Собрать корпус "${item.name}": стяжки 8 шт, конфирматы 16 шт, петли 4 шт`);
     } else if (item.type === "table") {
       pushPart("Столешница", w, d, 1);
@@ -3132,7 +3243,7 @@ function buildBomFromObjects() {
     } else if (item.type === "cabinet" || item.type === "bath_vanity") {
       pushPart("Боковина", d, h, 2);
       pushPart("Крышка/дно", w, d, 2);
-      pushPart("Фасад", w, h, 1, { costMultiplier: facadeMultiplier });
+      pushPart("Фасад", w, h, 1, { costMultiplier: facadeMultiplier, role: "facade", milling: Boolean(item.milling) });
       if (item.countertopType) {
         pushPart("Столешница", w, d, 1);
       }
@@ -3219,13 +3330,14 @@ function hardwareQualityFactor() {
   return 0.82 + (avg / 100) * 0.36;
 }
 
-function estimateTierPrices(cost) {
-  const comfort = Math.round(cost.procurementCost * RETAIL_MULTIPLIER * hardwareQualityFactor());
-  return {
-    standard: Math.round(comfort * 0.8),
-    comfort,
-    premium: Math.round(comfort * 1.3),
-  };
+function estimateTierPrices(cost, bom = null) {
+  const config = state.pricingConfig || DEFAULT_SPREADSHEET_PRICING;
+  const rows = estimateSpreadsheetPrices({
+    procurementCost: cost.procurementCost,
+    quantities: quantitiesFromScene(state.objects3d, bom || { parts: [] }),
+    config,
+  });
+  return Object.fromEntries(rows.map((row) => [row.key, row.price]));
 }
 
 function cuttingPartsSignature(parts) {
@@ -3259,7 +3371,9 @@ async function quoteCuttingForBom(bom) {
 }
 
 function tierTitle(key) {
-  return PRICING_TIERS.find((tier) => tier.key === key)?.title || key;
+  return state.pricingConfig?.tiers?.find((tier) => tier.key === key)?.title
+    || PRICING_TIERS.find((tier) => tier.key === key)?.title
+    || key;
 }
 
 function orderSelectedPrice(order) {
@@ -3295,19 +3409,21 @@ function renderTierCards(tiers) {
     standard: { badge: "bg-secondary", hint: "Базовые материалы и фурнитура" },
     comfort: { badge: "bg-primary", hint: "Улучшенные фасады и направляющие" },
     premium: { badge: "bg-warning text-dark", hint: "Премиум фурнитура и отделка" },
+    luxury: { badge: "bg-dark", hint: "Эмаль и премиальная фурнитура" },
   };
   const selected = state.selectedTier || "standard";
-  return `<div class="row g-3">${PRICING_TIERS.map((tier) => {
-    const meta = tierMeta[tier.key];
+  return `<div class="row g-3">${PRICING_TIERS.filter((tier) => tier.key !== "standard").map((tier) => {
+    const meta = tierMeta[tier.key] || { badge: "bg-secondary", hint: "Комплектация из таблицы" };
     const profile = TIER_MATERIAL_PROFILES[tier.key];
     const active = tier.key === selected ? "border-primary border-2 shadow-sm" : "";
     const selectable = APP_MODE !== "admin";
+    const title = tierTitle(tier.key);
     return `<div class="col-md-4">
       <div class="p-3 border rounded h-100 bg-white ${active} ${selectable ? "tier-select-card" : ""}"
         ${selectable ? `data-tier-select="${tier.key}" role="button" tabindex="0" style="cursor:pointer"` : ""}>
         <div class="d-flex justify-content-between align-items-center mb-2">
-          <span class="fw-semibold">${tier.title}</span>
-          <span class="badge ${meta.badge}">${tier.title}</span>
+          <span class="fw-semibold">${escapeHtml(title)}</span>
+          <span class="badge ${meta.badge}">${escapeHtml(title)}</span>
         </div>
         <div class="cost-highlight" data-tier-price="${tier.key}">${money(tiers[tier.key])}</div>
         <div class="small text-muted mt-1">${meta.hint}</div>
@@ -3361,7 +3477,7 @@ function refreshCostAmounts(host) {
   const data = buildBomFromObjects();
   if (!data.parts.length && !state.objects3d.length) return;
   const quote = cuttingQuoteInput(data);
-  const tiers = estimateTierPrices(estimateProjectCost(data, quote ? costQuotes.get(quote.key) : null));
+  const tiers = estimateTierPrices(estimateProjectCost(data, quote ? costQuotes.get(quote.key) : null), data);
   const selectedTotal = tiers[state.selectedTier] || tiers.comfort;
   const totalEl = host.querySelector(".estimate-total");
   if (totalEl) totalEl.textContent = `от ${money(selectedTotal)}`;
@@ -3402,7 +3518,7 @@ function renderCostEstimate(bom = null) {
 
 function paintCostEstimate(host, data, cutting) {
   const cost = estimateProjectCost(data, cutting);
-  const tiers = estimateTierPrices(cost);
+  const tiers = estimateTierPrices(cost, data);
   const cuttingNote = cost.fromCutting
     ? `Цена по раскрою: ${cost.sheets} лист(ов) ${cutting?.sheet_width || 2800}×${cutting?.sheet_height || 2070} мм`
     : "Предварительно по площади деталей, затем уточняется раскроем";
@@ -3417,10 +3533,9 @@ function paintCostEstimate(host, data, cutting) {
       </div>
       <div class="mt-3 mb-2 small text-muted">Выберите комплектацию:</div>
       ${renderTierCards(tiers)}
-      ${renderHardwareConstructor()}`;
+      <div class="small text-muted mt-3">Цена рассчитана по четырём вариантам из таблицы и количествам, полученным из 3D-проекта.</div>`;
 
     bindTierCardSelection(host);
-    bindHardwareConstructor(host);
     host.querySelector("[data-exact-quote]")?.addEventListener("click", () => {
       const contact = document.getElementById("customerName");
       contact?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -3437,12 +3552,11 @@ function paintCostEstimate(host, data, cutting) {
     </div>
     <div class="small text-muted mt-2">${escapeHtml(cuttingNote)}</div>
     <div class="mt-3">${renderTierCards(tiers)}</div>
-    ${renderHardwareConstructor()}
+    <div class="small text-muted mt-3">Цена рассчитана по четырём вариантам из таблицы и количествам, полученным из 3D-проекта.</div>
     <div class="mt-3 p-3 border rounded bg-white">
       <div class="small text-muted">Базовая сумма (стандарт)</div>
       <div class="cost-highlight">${money(tiers.standard)}</div>
     </div>`;
-  bindHardwareConstructor(host);
 }
 
 async function ensureCategoriesLoaded() {
@@ -3657,7 +3771,7 @@ function openProductCard(productId) {
       });
     });
   } else {
-    gallery.innerHTML = `<div class="product-art product-card-placeholder" style="background:${meta.gradient}" role="img" aria-label="${escapeHtml(title)}">${meta.icon}</div>`;
+    gallery.innerHTML = `<div class="product-art product-art-3d product-card-placeholder" role="img" aria-label="${escapeHtml(title)}">${catalogThumbnailSvg(p)}</div>`;
   }
   const actions = document.getElementById("productCardActions");
   if (APP_MODE === "admin") {
@@ -4018,6 +4132,7 @@ const CRM_ADMIN_SCALAR_FIELDS = [
   { key: "signature_date", label: "Дата подписи", type: "date" },
   { key: "delivery_date", label: "Дата сдачи", type: "date" },
   { key: "price_admin", label: "Цена", type: "number" },
+  { key: "price_assembler", label: "Цена для сборщиков", type: "number", superadminOnly: true },
   { key: "advance_paid", label: "Аванс внесенный", type: "number" },
   { key: "balance_due", label: "Остаток", type: "number" },
   { key: "email", label: "Почта", type: "email" },
@@ -4046,7 +4161,7 @@ function crmDictOptions(fieldKey) {
 
 function buildCrmOrderEditorHtml(order) {
   const o = order || {};
-  const scalar = CRM_ADMIN_SCALAR_FIELDS.map((field) => {
+  const scalar = CRM_ADMIN_SCALAR_FIELDS.filter((field) => !field.superadminOnly || isSuperAdmin()).map((field) => {
     const val = o[field.key] ?? (field.key === "status" ? "черновой замер" : "");
     if (field.type === "status") {
       return `<div class="col-md-6"><label class="form-label small">${escapeHtml(field.label)}</label>
@@ -4122,6 +4237,7 @@ function readCrmOrderEditorPayload() {
     status: get("status"),
     notes: get("notes"),
   };
+  if (isSuperAdmin()) payload.price_assembler = num("price_assembler");
   const customFields = {};
   (state.crm.dictionaries || []).forEach((dict) => {
     const value = get(dict.field_key).trim();
@@ -4325,18 +4441,20 @@ async function saveStageAlertSettings() {
 }
 
 async function loadCrm() {
-  if (APP_MODE !== "admin" || (!canManageCatalog() && !canEditCrmOrders())) return;
+  if (APP_MODE !== "admin" || (!canManageCatalog() && !canEditCrmOrders() && !hasRole("calendar:read"))) return;
   try {
-    const [warehouse, orders, dictionaries, movements] = await Promise.all([
+    const [warehouse, orders, dictionaries, movements, calendarEntries] = await Promise.all([
       api("GET", "/catalog/crm/warehouse", undefined, true),
       api("GET", "/catalog/crm/orders", undefined, true),
       api("GET", "/catalog/crm/field-dictionaries", undefined, true),
       api("GET", "/catalog/crm/warehouse/movements", undefined, true).catch(() => []),
+      api("GET", "/catalog/crm/calendar", undefined, true).catch(() => []),
     ]);
     state.crm.warehouse = warehouse;
     state.crm.orders = orders;
     state.crm.dictionaries = dictionaries;
     state.crm.movements = movements;
+    state.crm.calendarEntries = calendarEntries;
     renderCrmPanel();
     renderOrderCalendar();
     await loadStageAlertSettings();
@@ -4933,6 +5051,7 @@ function renderCrmOrderCard(order) {
     : "";
   const moneyBits = [
     order.price_admin != null ? `Цена ${money(order.price_admin)}` : null,
+    order.price_assembler != null && hasRole("crm:assembler_price:read") ? `Сборка ${money(order.price_assembler)}` : null,
     order.advance_paid != null ? `Аванс ${money(order.advance_paid)}` : null,
     order.balance_due != null ? `Остаток ${money(order.balance_due)}` : null,
   ].filter(Boolean).join(" · ");
@@ -4962,7 +5081,7 @@ function renderCrmOrderCard(order) {
         <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
         <button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>
-        <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>` : `<button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>`}
+        <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>` : `${hasRole("assets:write") ? `<button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button><button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>` : ""}<button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>`}
         ${canDeleteCrmOrders() ? `<button type="button" class="btn btn-sm btn-outline-danger" data-crm-delete="${order.id}" title="Удалить заказ">Удалить</button>` : ""}
       </div>
       <div id="crm-proc-${order.id}"></div>
@@ -5544,7 +5663,7 @@ async function submitProjectToWork() {
     const bom = buildBomFromObjects();
     const cutting = await quoteCuttingForBom(bom);
     const cost = estimateProjectCost(bom, cutting);
-    const tiers = estimateTierPrices(cost);
+    const tiers = estimateTierPrices(cost, bom);
     const project = await savePlannerProject();
     state.projectId = project.id;
     state.plannerStep = 4;
@@ -5956,9 +6075,14 @@ function renderOrderCalendar() {
     if (!grouped.has(key)) grouped.set(key, []);
     grouped.get(key).push(entry);
   };
-  for (const order of state.crm.orders) {
-    pushCal(dateKeyInAppTz(orderCalendarDate(order)), { ...order, calendar_kind: "status" });
-    if (order.delivery_date) {
+  const calendarEntries = state.crm.calendarEntries?.length ? state.crm.calendarEntries : state.crm.orders;
+  for (const order of calendarEntries) {
+    if (!order.calendar_kind || order.calendar_kind === "status") {
+      pushCal(dateKeyInAppTz(orderCalendarDate(order)), { ...order, calendar_kind: "status" });
+    }
+    if (order.calendar_kind === "stage_deadline") {
+      pushCal(String(order.status_changed_at || "").slice(0, 10), { ...order, calendar_kind: "stage_deadline" });
+    } else if (order.calendar_kind === "delivery" || (!order.calendar_kind && order.delivery_date)) {
       pushCal(String(order.delivery_date).slice(0, 10), { ...order, calendar_kind: "delivery" });
     }
   }
@@ -5973,7 +6097,8 @@ function renderOrderCalendar() {
       <div class="prod-cal-events">
         ${dayOrders.map((order) => {
           const isDelivery = order.calendar_kind === "delivery";
-          const label = isDelivery ? "Сдача" : escapeHtml(order.status);
+          const isStageDeadline = order.calendar_kind === "stage_deadline";
+          const label = isDelivery ? "Сдача" : isStageDeadline ? `Этап: ${escapeHtml(order.calendar_stage || "")}` : escapeHtml(order.status);
           const subtitle = isDelivery
             ? (order.install_address || order.customer_full_name || order.customer || "—")
             : (order.customer_full_name || order.customer || "—");
@@ -5996,10 +6121,12 @@ function renderOrderCalendar() {
         <h3>${Number(d)} ${monthLabel}</h3>
         ${orders.map((order) => {
           const isDelivery = order.calendar_kind === "delivery";
-          const badge = isDelivery ? "Сдача" : escapeHtml(order.status);
-          const badgeClass = isDelivery ? "text-bg-warning" : crmStatusBadge(order.status);
+          const isStageDeadline = order.calendar_kind === "stage_deadline";
+          const badge = isDelivery ? "Сдача" : isStageDeadline ? `Этап: ${escapeHtml(order.calendar_stage || "")}` : escapeHtml(order.status);
+          const badgeClass = isDelivery ? "text-bg-warning" : isStageDeadline ? "text-bg-info" : crmStatusBadge(order.status);
           const sub = isDelivery
             ? escapeHtml(order.install_address || order.customer_full_name || order.customer || "—")
+            : isStageDeadline ? `Срок по производственному календарю · ${escapeHtml(order.customer_full_name || order.customer || "—")}`
             : `${escapeHtml(order.customer_full_name || order.customer || "—")} · ${formatAppDateTime(orderCalendarDate(order))}`;
           return `<button type="button" class="prod-cal-agenda-item" data-cal-order="${order.id}">
           <span class="badge ${badgeClass}">${badge}</span>
@@ -6012,8 +6139,11 @@ function renderOrderCalendar() {
       </section>`;
     })
     .join("");
+  const conflicts = [...grouped.entries()].filter(([, entries]) => entries.filter((entry) => ["delivery", "stage_deadline"].includes(entry.calendar_kind)).length > 1);
+  const conflictHtml = conflicts.length ? `<div class="alert alert-warning py-2 mb-3"><strong>Нужна проверка графика:</strong> ${conflicts.map(([key, entries]) => `${key}: ${entries.filter((entry) => ["delivery", "stage_deadline"].includes(entry.calendar_kind)).length} событий`).join("; ")}. Проверьте, чтобы монтажи не пересекались.</div>` : "";
   host.innerHTML = `
     <div class="prod-cal">
+      ${conflictHtml}
       <div class="prod-cal-toolbar">
         <div>
           <div class="muted-title">Календарь заказов</div>
@@ -6030,6 +6160,13 @@ function renderOrderCalendar() {
       <div class="prod-cal-grid">${cells.join("")}</div>
       <div class="prod-cal-agenda">${agenda || `<div class="text-muted">В этом месяце заказов нет.</div>`}</div>
     </div>`;
+  if (conflicts.length && isSuperAdmin()) {
+    const signature = conflicts.map(([key, entries]) => `${key}:${entries.length}`).join("|");
+    if (state.calendar.lastConflictSignature !== signature) {
+      state.calendar.lastConflictSignature = signature;
+      toast(`Внимание: в календаре есть пересечения (${conflicts.length})`, false);
+    }
+  }
   host.querySelector("[data-cal-today]")?.addEventListener("click", () => {
     const current = appNowParts();
     state.calendar.year = current.year;
@@ -6093,6 +6230,7 @@ function collectStaffPermissions(hostId) {
 function formatStaffRolesSummary(roles) {
   const list = roles || [];
   if (list.includes("superadmin")) return "Главный админ";
+  if (["calendar:read", "crm:assembler_price:read", "assets:write"].every((code) => list.includes(code))) return "Сборщик";
   const catalog = state.staffPermissionCatalog || [];
   const labels = catalog.filter((p) => list.includes(p.code)).map((p) => p.label);
   if (!labels.length) return "Только вход в панель";
@@ -6144,12 +6282,14 @@ async function createStaffFromForm() {
     toast("Укажите логин и пароль от 8 символов", false);
     return;
   }
-  const roles = collectStaffPermissions("staffCreatePermissions");
+  const preset = document.getElementById("staffRolePreset")?.value;
+  const roles = preset || collectStaffPermissions("staffCreatePermissions");
   try {
     await api("POST", "/auth/admins", { username, password, email: email || undefined, roles }, true);
     document.getElementById("staffUsername").value = "";
     document.getElementById("staffPassword").value = "";
     document.getElementById("staffEmail").value = "";
+    if (document.getElementById("staffRolePreset")) document.getElementById("staffRolePreset").value = "";
     renderStaffPermissionToggles("staffCreatePermissions", STAFF_DEFAULT_PERMISSIONS, "staffCreate");
     await loadStaffDirectory();
     toast(email ? "Администратор создан. Письмо с подтверждением отправлено, если SMTP настроен." : "Администратор создан");
@@ -6166,6 +6306,8 @@ async function editStaff(userId) {
   document.getElementById("staffEditUsername").value = user.username;
   document.getElementById("staffEditPassword").value = "";
   document.getElementById("staffEditEmail").value = user.email || "";
+  const editPreset = document.getElementById("staffEditRolePreset");
+  if (editPreset) editPreset.value = ["calendar:read", "crm:assembler_price:read", "assets:write"].every((code) => (user.roles || []).includes(code)) ? "assembler" : "";
   renderStaffPermissionToggles("staffEditPermissions", user.roles || [], "staffEdit");
   const modalEl = document.getElementById("staffEditModal");
   if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
@@ -6183,7 +6325,7 @@ async function saveStaffEdit() {
   const payload = {
     username,
     email: email || null,
-    roles: collectStaffPermissions("staffEditPermissions"),
+    roles: document.getElementById("staffEditRolePreset")?.value || collectStaffPermissions("staffEditPermissions"),
   };
   if (password) payload.password = password;
   try {
@@ -6226,9 +6368,11 @@ async function bootAdminPanel() {
   document.getElementById("btnCrmDictionaries")?.classList.toggle("d-none", !canEditCrmDicts());
   document.getElementById("btnAddProduct")?.classList.toggle("d-none", !canManageCatalog());
   document.getElementById("btnSaveDeliverySettings")?.classList.toggle("d-none", !canManageCatalog());
+  document.getElementById("btnSavePricingSettings")?.classList.toggle("d-none", !isSuperAdmin());
   renderAdminCatalogTable();
   await renderCuttingJobs();
   await loadDeliverySettingsAdmin();
+  await loadPricingSettingsAdmin();
   await loadCrm();
   renderOrderCalendar();
   await loadStaffDirectory();
@@ -6895,11 +7039,114 @@ function renderHardFurnitureLibrary(accordion) {
               [["data-y", item.y], ["data-drawers", item.drawers], ["data-handles", item.handles], ["data-countertop", item.countertop]]
                 .forEach(([name, value]) => { if (value !== undefined && value !== null) attributes.push([name, value]); });
               const attrs = attributes.map(([name, value]) => value === "" ? name : `${name}="${escapeHtml(value)}"`).join(" ");
-              return `<button type="button" class="list-group-item list-group-item-action object-picker-item" ${attrs} data-search="${escapeHtml(item.name)}"><span class="object-picker-icon-wrap" aria-hidden="true"><svg class="object-picker-icon"><use href="#${hardFurnitureIcon(item.type)}"></use></svg></span><span><strong>${escapeHtml(item.name)}</strong><small>${item.width}×${item.depth}×${item.height} мм${item.y ? ` · высота ${item.y} мм` : ""}</small></span></button>`;
+              return `<button type="button" class="list-group-item list-group-item-action object-picker-item" ${attrs} data-search="${escapeHtml(item.name)}"><span class="object-picker-icon-wrap"><svg class="object-picker-icon"><use href="#${hardFurnitureIcon(item.type)}"></use></svg></span><span><strong>${escapeHtml(item.name)}</strong><small>${item.width}×${item.depth}×${item.height} мм${item.y ? ` · высота ${item.y} мм` : ""}</small></span></button>`;
             }).join("")}
           </div>`;
     body.appendChild(section);
   });
+  upgradeObjectPickerThumbnails(accordion);
+}
+
+function upgradeObjectPickerThumbnails(accordion) {
+  accordion?.querySelectorAll("[data-pick-object]").forEach((button) => {
+    const existing = button.querySelector(".object-picker-model");
+    if (existing) return;
+    const icon = button.querySelector(".object-picker-icon-wrap");
+    if (!icon) return;
+    const item = {
+      type: button.dataset.type,
+      name: button.dataset.name,
+      width: Number(button.dataset.w || 0),
+      depth: Number(button.dataset.d || 0),
+      height: Number(button.dataset.h || 0),
+    };
+    const model = document.createElement("span");
+    model.className = "object-picker-model";
+    model.setAttribute("aria-hidden", "true");
+    model.innerHTML = "<canvas class=\"furniture-3d-thumbnail\" width=164 height=124></canvas>";
+    icon.replaceWith(model);
+    const canvas = model.querySelector("canvas");
+    canvas.dataset.furnitureType = item.type || "cabinet";
+    canvas.dataset.furnitureName = item.name || "Мебель";
+    canvas.dataset.furnitureWidth = String(item.width || 600);
+    canvas.dataset.furnitureDepth = String(item.depth || 450);
+    canvas.dataset.furnitureHeight = String(item.height || 800);
+    observeFurnitureThumbnail(canvas);
+  });
+}
+
+let furnitureThumbnailObserver = null;
+
+function observeFurnitureThumbnail(canvas) {
+  if (!canvas || canvas.dataset.rendered3d === "true" || canvas.dataset.observed3d === "true") return;
+  if (typeof IntersectionObserver !== "function") return;
+  if (!furnitureThumbnailObserver) {
+    furnitureThumbnailObserver = new IntersectionObserver((entries) => {
+      entries.filter((entry) => entry.isIntersecting).forEach((entry) => {
+        furnitureThumbnailObserver.unobserve(entry.target);
+        entry.target.dataset.observed3d = "true";
+        renderFurnitureThumbnail(entry.target, {
+          type: entry.target.dataset.furnitureType,
+          name: entry.target.dataset.furnitureName,
+          width: Number(entry.target.dataset.furnitureWidth),
+          depth: Number(entry.target.dataset.furnitureDepth),
+          height: Number(entry.target.dataset.furnitureHeight),
+        });
+      });
+    }, { rootMargin: "100px 0px", threshold: 0.01 });
+  }
+  canvas.dataset.observed3d = "true";
+  furnitureThumbnailObserver.observe(canvas);
+}
+
+function renderFurnitureThumbnail(canvas, item) {
+  if (!canvas || !window.THREE || !window.Texture3D?.buildFurnitureGroup) return;
+  try {
+    const w = Math.max(Number(item.width) || 600, 80);
+    const d = Math.max(Number(item.depth) || 450, 80);
+    const h = Math.max(Number(item.height) || 800, 80);
+    const texturePreset = resolveTexturePreset(item);
+    const materialSet = createFurnitureMaterialSet(item, texturePreset);
+    const placement = migrateLegacyObject({ ...item, id: `thumbnail-${item.type}`, x: 0, z: 0, y: 0, rotationY: 0 });
+    const group = furnitureRegistry.buildGeometry(placement, {
+      buildLegacy: (normalized) => window.Texture3D.buildFurnitureGroup(toLegacyObject(normalized), w, h, d, materialSet),
+    });
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xf1e5d6);
+    const camera = new THREE.PerspectiveCamera(28, canvas.width / canvas.height, 1, 10000);
+    if (!furnitureThumbnailRenderer) {
+      const renderCanvas = document.createElement("canvas");
+      furnitureThumbnailRenderer = new THREE.WebGLRenderer({ canvas: renderCanvas, alpha: false, antialias: true });
+      furnitureThumbnailRenderer.shadowMap.enabled = false;
+    }
+    const renderer = furnitureThumbnailRenderer;
+    renderer.setPixelRatio(1);
+    renderer.setSize(canvas.width, canvas.height, false);
+    scene.add(new THREE.HemisphereLight(0xfff8ed, 0x70563f, 2.1));
+    const key = new THREE.DirectionalLight(0xffffff, 2.4);
+    key.position.set(2, 4, 5);
+    scene.add(key);
+    scene.add(group);
+    group.updateMatrixWorld(true);
+    const bounds = new THREE.Box3().setFromObject(group);
+    const center = bounds.getCenter(new THREE.Vector3());
+    const size = bounds.getSize(new THREE.Vector3());
+    const radius = Math.max(size.x, size.y, size.z, 100);
+    camera.position.set(radius * 1.7, radius * 1.25, radius * 1.9);
+    camera.lookAt(center.x, center.y, center.z);
+    renderer.render(scene, camera);
+    const targetContext = canvas.getContext("2d");
+    targetContext?.clearRect(0, 0, canvas.width, canvas.height);
+    targetContext?.drawImage(renderer.domElement, 0, 0, canvas.width, canvas.height);
+    canvas.setAttribute("aria-label", item.name || "Предмет мебели");
+    canvas.dataset.rendered3d = "true";
+    window.setTimeout(() => {
+      scene.traverse((node) => { if (node.isMesh) { node.geometry?.dispose?.(); } });
+      // The shared renderer stays alive so the catalog does not create one WebGL context per item.
+    }, 1000);
+  } catch (error) {
+    console.warn("Не удалось построить миниатюру 3D-модели", error);
+  }
 }
 
 function initObjectPickerSearch(modalEl, accordion) {
@@ -7052,6 +7299,30 @@ function initRoomFinishControls() {
 async function boot() {
   applyTheme(document.documentElement.dataset.theme || "light");
   initCookieConsent();
+  // Connect the storefront before initializing the heavier 3D planner and picker UI.
+  // Otherwise a slow planner startup can leave the page showing its initial loading state.
+  try {
+    await api("GET", "/health");
+    await loadPublicPricingConfig();
+    setBackendStatus(true, APP_MODE === "admin" ? "Backend доступен" : "Магазин подключен");
+    if (APP_MODE === "admin") {
+      await autoLogin();
+      await bootAdminPanel();
+      setBackendStatus(true, token() ? "Панель администратора подключена" : "Войдите как admin");
+    } else {
+      if (token()) await refreshAuth();
+      await loadDeliverySettings();
+      setBackendStatus(true, "Магазин подключен");
+    }
+    await loadCatalog();
+  } catch (error) {
+    setBackendStatus(false, "Backend недоступен");
+    const grid = document.getElementById("productGrid");
+    const hint = formatApiError(error);
+    if (grid) {
+      grid.innerHTML = `<div class="col-12"><div class="alert alert-warning">Не удалось подключиться к backend (${escapeHtml(apiBase())}): ${escapeHtml(hint)}</div></div>`;
+    }
+  }
   bindClick("themeToggle", toggleTheme);
   bindClick("btnLogout", logoutCustomer);
   const apiBaseInput = document.getElementById("apiBase");
@@ -7131,6 +7402,7 @@ async function boot() {
   bindClick("btnSaveProduct", saveProductEditor);
   bindClick("btnAddProduct", openNewProductEditor);
   bindClick("btnSaveDeliverySettings", saveDeliverySettingsAdmin);
+  bindClick("btnSavePricingSettings", savePricingSettingsAdmin);
   bindClick("btnQuoteDelivery", quoteDelivery);
   bindClick("btnPaySbp", startSbpCheckout);
   bindClick("btnCreateStaff", createStaffFromForm);
@@ -7176,28 +7448,6 @@ async function boot() {
   });
   document.getElementById("objType")?.addEventListener("change", syncObjectEditorControls);
   syncObjectEditorControls();
-
-  try {
-    await api("GET", "/health");
-    setBackendStatus(true, APP_MODE === "admin" ? "Backend доступен" : "Магазин подключен");
-    if (APP_MODE === "admin") {
-      await autoLogin();
-      await bootAdminPanel();
-      setBackendStatus(true, token() ? "Панель администратора подключена" : "Войдите как admin");
-    } else {
-      if (token()) await refreshAuth();
-      await loadDeliverySettings();
-      setBackendStatus(true, "Магазин подключен");
-    }
-    await loadCatalog();
-  } catch (error) {
-    setBackendStatus(false, "Backend недоступен");
-    const grid = document.getElementById("productGrid");
-    const hint = formatApiError(error);
-    if (grid) {
-      grid.innerHTML = `<div class="col-12"><div class="alert alert-warning">Не удалось подключиться к backend (${escapeHtml(apiBase())}): ${escapeHtml(hint)}</div></div>`;
-    }
-  }
 
   // Загрузка сохраненных данных пользователя (если есть)
 const savedName = localStorage.getItem("woodcraft_customer_name");

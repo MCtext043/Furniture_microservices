@@ -121,6 +121,7 @@ class ShopSettings(Base):
     warehouse_lat: Mapped[float | None] = mapped_column(nullable=True)
     warehouse_lon: Mapped[float | None] = mapped_column(nullable=True)
     stage_alert_lead_days: Mapped[int] = mapped_column(Integer, default=2)
+    pricing_config: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
 
 
 class CrmMaterial(Base):
@@ -164,6 +165,7 @@ class CrmProductionOrder(Base):
     signature_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     delivery_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
     price_admin: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
+    price_assembler: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     advance_paid: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     balance_due: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
     email: Mapped[str] = mapped_column(String(254), default="")

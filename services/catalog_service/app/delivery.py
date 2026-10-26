@@ -28,6 +28,7 @@ class DeliveryQuote:
     delivery_price_per_km: float
     amount_until_free_delivery: float
     grand_total: float
+    fixed_delivery_fee: float | None = None
 
 
 def haversine_km(a: GeoPoint, b: GeoPoint) -> float:
@@ -71,13 +72,20 @@ def calculate_delivery_quote(
     distance_km: float,
     free_delivery_threshold: float,
     delivery_price_per_km: float,
+    fixed_delivery_fee: float | None = None,
 ) -> DeliveryQuote:
     subtotal = round(max(subtotal, 0), 2)
     threshold = round(max(free_delivery_threshold, 0), 2)
     rate = round(max(delivery_price_per_km, 0), 2)
-    free_delivery = subtotal >= threshold
-    delivery_fee = 0.0 if free_delivery else round(distance_km * rate)
-    amount_until_free = 0.0 if free_delivery else round(max(threshold - subtotal, 0), 2)
+    fixed_fee = None if fixed_delivery_fee is None else round(max(fixed_delivery_fee, 0), 2)
+    if fixed_fee is not None:
+        free_delivery = False
+        delivery_fee = fixed_fee
+        amount_until_free = 0.0
+    else:
+        free_delivery = subtotal >= threshold
+        delivery_fee = 0.0 if free_delivery else round(distance_km * rate)
+        amount_until_free = 0.0 if free_delivery else round(max(threshold - subtotal, 0), 2)
     grand_total = round(subtotal + delivery_fee, 2)
 
     return DeliveryQuote(
@@ -89,4 +97,5 @@ def calculate_delivery_quote(
         delivery_price_per_km=rate,
         amount_until_free_delivery=amount_until_free,
         grand_total=grand_total,
+        fixed_delivery_fee=fixed_fee,
     )

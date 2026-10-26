@@ -27,6 +27,21 @@ def test_paid_delivery_below_threshold():
     assert quote.amount_until_free_delivery == 500
 
 
+def test_fixed_delivery_fee_ignores_distance_and_threshold():
+    quote = calculate_delivery_quote(
+        subtotal=2500,
+        distance_km=10,
+        free_delivery_threshold=3000,
+        delivery_price_per_km=45,
+        fixed_delivery_fee=3000,
+    )
+    assert quote.free_delivery is False
+    assert quote.delivery_fee == 3000
+    assert quote.fixed_delivery_fee == 3000
+    assert quote.grand_total == 5500
+    assert quote.amount_until_free_delivery == 0
+
+
 def test_haversine_distance_positive():
     moscow = GeoPoint(55.7558, 37.6173)
     nearby = GeoPoint(55.80, 37.70)

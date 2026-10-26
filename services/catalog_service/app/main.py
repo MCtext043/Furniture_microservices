@@ -4,8 +4,9 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from sqlalchemy import Select, func, select
 from sqlalchemy.orm import Session
 
-from common.jwt_auth import ensure_can_delete, ensure_catalog_writer, ensure_shop_user
+from common.jwt_auth import ensure_can_delete, ensure_catalog_writer, ensure_shop_user, ensure_superadmin
 from common.messaging import publish_event
+from common.spreadsheet_pricing import default_pricing_config
 
 from .db import SessionLocal, get_session
 from .order_email import email_lifespan
@@ -23,6 +24,7 @@ from .schemas import (
     DeliverySettingsOut,
     DeliverySettingsPublicOut,
     DeliverySettingsUpdate,
+    PricingSettings,
     ProductCreate,
     ProductFiltersOut,
     ProductOut,
@@ -75,11 +77,43 @@ def _get_or_create_shop_settings(session: Session) -> ShopSettings:
             free_delivery_threshold=3000,
             delivery_price_per_km=45,
             warehouse_address="",
+            pricing_config=default_pricing_config(),
         )
         session.add(row)
         session.commit()
         session.refresh(row)
     return row
+
+
+@app.get("/settings/pricing", response_model=PricingSettings, tags=["delivery"], dependencies=[Depends(ensure_superadmin)])
+def get_pricing_settings(session: Session = Depends(get_session)) -> dict:
+    settings = _get_or_create_shop_settings(session)
+    if not settings.pricing_config:
+        settings.pricing_config = default_pricing_config()
+        session.commit()
+    return settings.pricing_config
+
+
+@app.get("/pricing", response_model=PricingSettings, tags=["delivery"])
+def get_public_pricing_settings(session: Session = Depends(get_session)) -> dict:
+    """Return the active workbook pricing for the customer calculator."""
+    settings = _get_or_create_shop_settings(session)
+    if not settings.pricing_config:
+        settings.pricing_config = default_pricing_config()
+        session.commit()
+    return settings.pricing_config
+
+
+@app.put("/settings/pricing", response_model=PricingSettings, tags=["delivery"], dependencies=[Depends(ensure_superadmin)])
+def update_pricing_settings(payload: PricingSettings, session: Session = Depends(get_session)) -> dict:
+    settings = _get_or_create_shop_settings(session)
+    config = payload.model_dump()
+    expected_keys = {"facade1", "facade2", "facade3", "hinges", "guides", "countertop", "backsplash"}
+    if len({tier["key"] for tier in config["tiers"]}) != 4 or any(set(tier["prices"]) != expected_keys for tier in config["tiers"]):
+        raise HTTPException(status_code=422, detail="Для каждого варианта нужны семь цен комплектующих")
+    settings.pricing_config = config
+    session.commit()
+    return config
 
 
 async def _warehouse_point(settings: ShopSettings) -> GeoPoint:
@@ -526,6 +560,7 @@ def get_delivery_settings_public(session: Session = Depends(get_session)) -> Del
     return DeliverySettingsPublicOut(
         free_delivery_threshold=float(settings.free_delivery_threshold),
         delivery_price_per_km=float(settings.delivery_price_per_km),
+        fixed_delivery_fee=float((settings.pricing_config or {}).get("delivery", 3000)),
     )
 
 
@@ -596,6 +631,11 @@ async def quote_delivery(payload: DeliveryQuoteRequest, session: Session = Depen
         distance_km=distance_km,
         free_delivery_threshold=float(settings.free_delivery_threshold),
         delivery_price_per_km=float(settings.delivery_price_per_km),
+        fixed_delivery_fee=(
+            float((settings.pricing_config or {}).get("delivery", 3000))
+            if settings.pricing_config is not None
+            else 3000.0
+        ),
     )
     return DeliveryQuoteOut(
         subtotal=quote.subtotal,
@@ -606,4 +646,5 @@ async def quote_delivery(payload: DeliveryQuoteRequest, session: Session = Depen
         delivery_price_per_km=quote.delivery_price_per_km,
         amount_until_free_delivery=quote.amount_until_free_delivery,
         grand_total=quote.grand_total,
+        fixed_delivery_fee=quote.fixed_delivery_fee,
     )

@@ -82,6 +82,16 @@
         </div>
       </section>
 
+      <section class="mb-5 d-none" id="pricing-admin">
+        <div class="service-card p-4">
+          <div class="muted-title">Ценообразование</div>
+          <h2 class="section-title h4 mb-2">Цены из расчётной таблицы</h2>
+          <p class="small text-muted">Главный администратор может изменить фиксированные упаковку и доставку, коэффициенты и цены комплектующих для всех четырёх вариантов.</p>
+          <div id="pricingSettingsForm"></div>
+          <button class="btn btn-primary mt-3" id="btnSavePricingSettings">Сохранить цены</button>
+        </div>
+      </section>
+
       <section class="mb-5" id="catalog-admin">
         <div class="d-flex flex-wrap justify-content-between align-items-end gap-3 mb-4">
           <div>
@@ -275,6 +285,11 @@
             <div class="col-md-4"><input class="form-control" id="staffEmail" type="email" placeholder="Почта (необязательно)" /></div>
           </div>
           <div class="mb-3">
+            <label class="form-label small" for="staffRolePreset">Готовая роль</label>
+            <select class="form-select form-select-sm mb-3" id="staffRolePreset">
+              <option value="">Пользовательские права</option>
+              <option value="assembler">Сборщик</option>
+            </select>
             <div class="small fw-semibold mb-2">Права нового администратора</div>
             <div id="staffCreatePermissions" class="staff-perm-grid small text-muted">Загрузка прав...</div>
           </div>
@@ -308,6 +323,11 @@
               <input class="form-control" id="staffEditEmail" type="email" placeholder="необязательно" />
             </div>
           </div>
+          <label class="form-label small" for="staffEditRolePreset">Готовая роль</label>
+          <select class="form-select form-select-sm mb-3" id="staffEditRolePreset">
+            <option value="">Пользовательские права</option>
+            <option value="assembler">Сборщик</option>
+          </select>
           <div class="small fw-semibold mb-2">Права</div>
           <div id="staffEditPermissions" class="staff-perm-grid"></div>
         </div>
@@ -570,6 +590,6 @@
     });
   </script>
   
-  <script type="module" src="app.js?v=20261021-distinct-furniture"></script>
+  <script type="module" src="app.js?v=20261025-storefront-first"></script>
 </body>
 </html>
