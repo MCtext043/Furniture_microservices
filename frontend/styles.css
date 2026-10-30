@@ -309,6 +309,25 @@ html { scroll-padding-top: 5.5rem; }
 .product-brand { margin-bottom: 0.6rem; color: var(--color-muted); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; }
 .stock-status { color: var(--color-success); font-size: 0.66rem; font-weight: 700; }
 .stock-status.is-empty { color: var(--color-danger); }
+.crm-dashboard { padding: 1rem; border: 1px solid rgba(82, 68, 48, .12); border-radius: 16px; background: linear-gradient(145deg, #fffdf9, #f8f3e9); }
+.crm-dashboard-kpis { display: grid; grid-template-columns: repeat(5, minmax(110px, 1fr)); gap: .65rem; }
+.crm-dashboard-kpi { display: flex; flex-direction: column; gap: .25rem; min-height: 78px; padding: .75rem; border-radius: 12px; background: #fff; }
+.crm-dashboard-kpi span { color: #71695e; font-size: .75rem; }
+.crm-dashboard-kpi strong { color: #302a21; font-size: 1.45rem; line-height: 1.1; }
+.crm-dashboard-kpi-estimate { background: #f0f5fc; }
+.crm-dashboard-kpi-declined { background: #fff1ee; }
+.crm-dashboard-kpi-done { background: #eef6ed; }
+.crm-dashboard-breakdown { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 1.5rem; margin-top: 1.1rem; }
+.crm-dashboard-bar-row { display: grid; grid-template-columns: minmax(120px, 1fr) minmax(80px, 2fr) 24px; gap: .55rem; align-items: center; margin: .35rem 0; font-size: .75rem; }
+.crm-dashboard-bar-row > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.crm-dashboard-bar { height: 8px; overflow: hidden; border-radius: 9px; background: #ebe6dc; }
+.crm-dashboard-bar i { display: block; height: 100%; border-radius: inherit; background: #c39339; }
+.crm-dashboard-tiers { display: grid; gap: .4rem; }
+.crm-dashboard-tiers > div { display: flex; justify-content: space-between; gap: .6rem; font-size: .75rem; }
+.crm-order-filters { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.crm-order-filters select { width: auto; min-width: 170px; }
+.crm-order-search { flex: 1 1 260px; }
+@media (max-width: 700px) { .crm-dashboard-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .crm-dashboard-breakdown { grid-template-columns: 1fr; gap: .9rem; } .crm-order-filters select { flex: 1 1 145px; } }
 .product-actions { display: flex; gap: 0.4rem; align-items: center; }
 .product-actions .btn { min-height: 38px; padding: 0.45rem 0.75rem; font-size: 0.72rem; }
 .wishlist-button { width: 38px; padding: 0 !important; font-size: 1rem !important; }

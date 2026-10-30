@@ -257,6 +257,7 @@ class CrmOrderCreate(CrmOrderAdminFields):
     title: str = Field(min_length=2, max_length=180)
     customer: str = Field(default="", max_length=120)
     status: str = Field(default="черновой замер", max_length=32)
+    selected_tier: str = Field(default="standard", max_length=16)
     notes: str = ""
     materials: list[CrmOrderMaterialLineIn] = Field(default_factory=list)
     stage_workdays: dict[str, int] = Field(default_factory=dict)
@@ -267,6 +268,7 @@ class CrmOrderUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=2, max_length=180)
     customer: str | None = Field(default=None, max_length=120)
     status: str | None = Field(default=None, max_length=32)
+    selected_tier: str | None = Field(default=None, max_length=16)
     notes: str | None = None
     materials: list[CrmOrderMaterialLineIn] | None = None
     customer_full_name: str | None = Field(default=None, max_length=180)
@@ -361,7 +363,7 @@ class CrmFieldDictionaryOut(BaseModel):
 
 class CrmOrderStatusUpdate(BaseModel):
     status: str = Field(
-        pattern=r"^(черновой замер|чистовой замер|выбор цветов|технолог|распил-фасады-фурнитура|доставлено|собрано|готово|конструктор|закупка|сборка|готова)$"
+        pattern=r"^(черновой замер|чистовой замер|выбор цветов|технолог|распил-фасады-фурнитура|доставлено|собрано|готово|конструктор|закупка|сборка|готова|на просчет|отказались дорого|хотят заказать позже|отказались без причины)$"
     )
 
 

@@ -55,7 +55,7 @@ const state = {
   lastCutResult: null,
   cuttingQuoteCache: null,
   selectedCutJobId: null,
-  crm: { orders: [], calendarEntries: [], warehouse: [], movements: [], whTab: "stock", purchaseDraft: [], procurementByOrder: {}, tab: "active", dictionaries: [], editingOrderId: null },
+  crm: { orders: [], dashboard: null, calendarEntries: [], warehouse: [], movements: [], whTab: "stock", purchaseDraft: [], procurementByOrder: {}, tab: "active", search: "", statusFilter: "", tierFilter: "", dictionaries: [], editingOrderId: null },
   calendar: { year: null, month: null },
   staff: [],
   staffPermissionCatalog: [],
@@ -144,6 +144,9 @@ const CRM_STATUSES = [
   "собрано",
   "готово",
 ];
+const CRM_STATUS_CHOICES = [...CRM_STATUSES, "на просчет", "отказались дорого", "хотят заказать позже", "отказались без причины"];
+const CRM_DECLINED_STATUSES = new Set(["отказались дорого", "хотят заказать позже", "отказались без причины"]);
+const CRM_ESTIMATING_STATUSES = new Set(["на просчет"]);
 const CRM_STATUS_DONE = "готово";
 const CRM_STATUS_DONE_ALIASES = new Set(["готово", "готова"]);
 
@@ -4444,15 +4447,17 @@ async function saveStageAlertSettings() {
 async function loadCrm() {
   if (APP_MODE !== "admin" || (!canManageCatalog() && !canEditCrmOrders() && !hasRole("calendar:read"))) return;
   try {
-    const [warehouse, orders, dictionaries, movements, calendarEntries] = await Promise.all([
+    const [warehouse, orders, dashboard, dictionaries, movements, calendarEntries] = await Promise.all([
       api("GET", "/catalog/crm/warehouse", undefined, true),
       api("GET", "/catalog/crm/orders", undefined, true),
+      api("GET", "/catalog/crm/orders/dashboard", undefined, true).catch(() => null),
       api("GET", "/catalog/crm/field-dictionaries", undefined, true),
       api("GET", "/catalog/crm/warehouse/movements", undefined, true).catch(() => []),
       api("GET", "/catalog/crm/calendar", undefined, true).catch(() => []),
     ]);
     state.crm.warehouse = warehouse;
     state.crm.orders = orders;
+    state.crm.dashboard = dashboard;
     state.crm.dictionaries = dictionaries;
     state.crm.movements = movements;
     state.crm.calendarEntries = calendarEntries;
@@ -5009,8 +5014,8 @@ function bindCrmProcurementTable(host, orderId) {
 }
 
 function crmStatusOptions(current) {
-  if (!current || CRM_STATUSES.includes(current)) return CRM_STATUSES;
-  return [current, ...CRM_STATUSES];
+  if (!current || CRM_STATUS_CHOICES.includes(current)) return CRM_STATUS_CHOICES;
+  return [current, ...CRM_STATUS_CHOICES];
 }
 
 function crmStatusBadge(status) {
@@ -5027,15 +5032,29 @@ function crmStatusBadge(status) {
     закупка: "text-bg-warning",
     сборка: "text-bg-success",
     готова: "text-bg-dark",
+    "на просчет": "text-bg-primary",
+    "отказались дорого": "text-bg-danger",
+    "хотят заказать позже": "text-bg-warning",
+    "отказались без причины": "text-bg-secondary",
   };
   return map[status] || "text-bg-secondary";
 }
 
 function crmOrdersForTab(tab = state.crm.tab) {
-  if (tab === "archive") {
-    return state.crm.orders.filter((order) => CRM_STATUS_DONE_ALIASES.has(order.status));
+  let orders = state.crm.orders.filter((order) => {
+    if (tab === "archive") return CRM_STATUS_DONE_ALIASES.has(order.status);
+    if (tab === "declined") return CRM_DECLINED_STATUSES.has(order.status);
+    if (tab === "estimating") return CRM_ESTIMATING_STATUSES.has(order.status);
+    return !CRM_STATUS_DONE_ALIASES.has(order.status) && !CRM_DECLINED_STATUSES.has(order.status) && !CRM_ESTIMATING_STATUSES.has(order.status);
+  });
+  const search = (state.crm.search || "").trim().toLocaleLowerCase("ru");
+  if (search) {
+    orders = orders.filter((order) => [order.id, order.title, order.customer, order.customer_full_name, order.phone, order.email, order.install_address, order.notes]
+      .some((value) => String(value || "").toLocaleLowerCase("ru").includes(search)));
   }
-  return state.crm.orders.filter((order) => !CRM_STATUS_DONE_ALIASES.has(order.status));
+  if (state.crm.statusFilter) orders = orders.filter((order) => order.status === state.crm.statusFilter);
+  if (state.crm.tierFilter) orders = orders.filter((order) => (order.selected_tier || "standard") === state.crm.tierFilter);
+  return orders;
 }
 
 function renderCrmOrderCard(order) {
@@ -5153,77 +5172,88 @@ function bindCrmOrderPanel(host) {
   });
 }
 
+function crmFolderCounts() {
+  const counts = { active: 0, estimating: 0, declined: 0, archive: 0 };
+  for (const order of state.crm.orders) {
+    if (CRM_STATUS_DONE_ALIASES.has(order.status)) counts.archive += 1;
+    else if (CRM_DECLINED_STATUSES.has(order.status)) counts.declined += 1;
+    else if (CRM_ESTIMATING_STATUSES.has(order.status)) counts.estimating += 1;
+    else counts.active += 1;
+  }
+  return counts;
+}
+
+function renderCrmDashboard() {
+  const data = state.crm.dashboard || (() => {
+    const by_status = {};
+    const by_tier = {};
+    for (const order of state.crm.orders) {
+      by_status[order.status] = (by_status[order.status] || 0) + 1;
+      const tier = order.selected_tier || "standard";
+      by_tier[tier] = (by_tier[tier] || 0) + 1;
+    }
+    const declined = state.crm.orders.filter((order) => CRM_DECLINED_STATUSES.has(order.status)).length;
+    const estimating = state.crm.orders.filter((order) => CRM_ESTIMATING_STATUSES.has(order.status)).length;
+    const completed = state.crm.orders.filter((order) => CRM_STATUS_DONE_ALIASES.has(order.status)).length;
+    return { total: state.crm.orders.length, active: state.crm.orders.length - declined - estimating - completed, declined, estimating, completed, by_status, by_tier };
+  })();
+  const maxStatus = Math.max(1, ...Object.values(data.by_status || {}));
+  const stages = Object.entries(data.by_status || {}).sort((a, b) => b[1] - a[1]).slice(0, 7);
+  const tiers = PRICING_TIERS.map((tier) => ({ ...tier, count: (data.by_tier || {})[tier.key] || 0 }));
+  return `<section class="crm-dashboard mb-3" aria-label="Статистика заказов">
+    <div class="crm-dashboard-kpis">
+      <div class="crm-dashboard-kpi"><span>Всего заказов</span><strong>${data.total || 0}</strong></div>
+      <div class="crm-dashboard-kpi"><span>В работе</span><strong>${data.active || 0}</strong></div>
+      <div class="crm-dashboard-kpi crm-dashboard-kpi-estimate"><span>На просчёте</span><strong>${data.estimating || 0}</strong></div>
+      <div class="crm-dashboard-kpi crm-dashboard-kpi-declined"><span>Отказались</span><strong>${data.declined || 0}</strong></div>
+      <div class="crm-dashboard-kpi crm-dashboard-kpi-done"><span>Выполнено</span><strong>${data.completed || 0}</strong></div>
+    </div>
+    <div class="crm-dashboard-breakdown">
+      <div><div class="small fw-semibold mb-2">Распределение по статусам</div>${stages.length ? stages.map(([status, count]) => `<div class="crm-dashboard-bar-row"><span>${escapeHtml(status)}</span><span class="crm-dashboard-bar"><i style="width:${Math.round(count / maxStatus * 100)}%"></i></span><b>${count}</b></div>`).join("") : '<div class="small text-muted">Пока нет данных</div>'}</div>
+      <div><div class="small fw-semibold mb-2">Комплектации</div><div class="crm-dashboard-tiers">${tiers.map((tier) => `<div><span>${escapeHtml(tier.title)}</span><b>${tier.count}</b></div>`).join("")}</div></div>
+    </div>
+  </section>`;
+}
+
 function renderCrmPanel() {
   renderCrmWarehouse();
   const host = document.getElementById("crmOrdersPanel");
   if (!host) return;
-  
-  // Подсчет количества заказов
-  const activeCount = state.crm.orders.filter((order) => !CRM_STATUS_DONE_ALIASES.has(order.status)).length;
-  const archiveCount = state.crm.orders.filter((order) => CRM_STATUS_DONE_ALIASES.has(order.status)).length;
+  const counts = crmFolderCounts();
   const orders = crmOrdersForTab(state.crm.tab);
-  
-  // HTML для вкладок
-  const tabs = `
-    <ul class="nav nav-pills mb-3" role="tablist">
-      <li class="nav-item" role="presentation">
-        <button class="nav-link ${state.crm.tab === "active" ? "active" : ""}" 
-                data-crm-tab="active" 
-                type="button" 
-                role="tab">
-          Активные <span class="badge bg-secondary">${activeCount}</span>
-        </button>
-      </li>
-      <li class="nav-item" role="presentation">
-        <button class="nav-link ${state.crm.tab === "archive" ? "active" : ""}" 
-                data-crm-tab="archive" 
-                type="button" 
-                role="tab">
-          Архив <span class="badge bg-secondary">${archiveCount}</span>
-        </button>
-      </li>
-    </ul>
-  `;
-  
-  // Если нет заказов
-  if (!orders.length) {
-    host.innerHTML = `
-      ${tabs}
-      <div class="text-muted py-3">
-        ${state.crm.tab === "archive" 
-          ? "В архиве пока нет завершённых проектов." 
-          : "Нет активных заказов. Нажмите «Загрузить демо CRM» или дождитесь отправки проекта клиентом."}
-      </div>
-    `;
-    
-    // Привязываем обработчики для вкладок
-    host.querySelectorAll("[data-crm-tab]").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        state.crm.tab = btn.dataset.crmTab;
-        renderCrmPanel();
-      });
-    });
-    return;
-  }
-  
-  // Отображаем заказы
-  host.innerHTML = `
-    ${tabs}
-    ${orders.map((order) => renderCrmOrderCard(order)).join("")}
-  `;
-  
-  // Привязываем обработчики для вкладок
-  host.querySelectorAll("[data-crm-tab]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      state.crm.tab = btn.dataset.crmTab;
-      renderCrmPanel();
-    });
+  const tabs = [
+    ["active", "В работе"], ["estimating", "На просчёте"], ["declined", "Отказались"], ["archive", "Архив выполненных"],
+  ].map(([key, label]) => `<button class="nav-link ${state.crm.tab === key ? "active" : ""}" data-crm-tab="${key}" type="button" role="tab">${label} <span class="badge bg-secondary">${counts[key]}</span></button>`).join("");
+  const statuses = [...new Set([...CRM_STATUS_CHOICES, ...state.crm.orders.map((order) => order.status)])].sort((a, b) => a.localeCompare(b, "ru"));
+  host.innerHTML = `${renderCrmDashboard()}
+    <ul class="nav nav-pills mb-3 gap-1 flex-wrap" role="tablist">${tabs}</ul>
+    <form class="crm-order-filters mb-3" data-crm-search-form>
+      <div class="crm-order-search"><label class="visually-hidden" for="crmOrderSearch">Поиск заказов</label><input class="form-control form-control-sm" id="crmOrderSearch" type="search" value="${escapeHtml(state.crm.search)}" placeholder="Номер, заказ, клиент, телефон, адрес…"></div>
+      <label class="visually-hidden" for="crmOrderStatusFilter">Фильтр по статусу</label><select class="form-select form-select-sm" id="crmOrderStatusFilter"><option value="">Все статусы</option>${statuses.map((status) => `<option value="${escapeHtml(status)}" ${state.crm.statusFilter === status ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}</select>
+      <label class="visually-hidden" for="crmOrderTierFilter">Фильтр по комплектации</label><select class="form-select form-select-sm" id="crmOrderTierFilter"><option value="">Все комплектации</option>${PRICING_TIERS.map((tier) => `<option value="${tier.key}" ${state.crm.tierFilter === tier.key ? "selected" : ""}>${escapeHtml(tier.title)}</option>`).join("")}</select>
+      <button class="btn btn-sm btn-outline-secondary" type="submit">Найти</button>
+      <button class="btn btn-sm btn-link" type="button" data-crm-clear-filters>Сбросить</button>
+    </form>
+    ${orders.length ? orders.map((order) => renderCrmOrderCard(order)).join("") : `<div class="text-muted py-3">${state.crm.search || state.crm.statusFilter || state.crm.tierFilter ? "По заданным условиям заказы не найдены." : state.crm.tab === "archive" ? "В архиве пока нет завершённых проектов." : state.crm.tab === "declined" ? "Отказов пока нет." : state.crm.tab === "estimating" ? "На просчёте пока нет заказов." : "Нет активных заказов."}</div>`}`;
+  host.querySelectorAll("[data-crm-tab]").forEach((btn) => btn.addEventListener("click", () => {
+    state.crm.tab = btn.dataset.crmTab;
+    state.crm.statusFilter = "";
+    renderCrmPanel();
+  }));
+  host.querySelector("[data-crm-search-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    state.crm.search = host.querySelector("#crmOrderSearch")?.value || "";
+    state.crm.statusFilter = host.querySelector("#crmOrderStatusFilter")?.value || "";
+    state.crm.tierFilter = host.querySelector("#crmOrderTierFilter")?.value || "";
+    renderCrmPanel();
   });
-  
-  // Привязываем обработчики для кнопок в карточках
+  host.querySelector("[data-crm-clear-filters]")?.addEventListener("click", () => {
+    state.crm.search = "";
+    state.crm.statusFilter = "";
+    state.crm.tierFilter = "";
+    renderCrmPanel();
+  });
   bindCrmOrderPanel(host);
-  
-  // Загружаем фото для каждого заказа
   orders.forEach((order) => renderCrmOrderPhotos(order.id));
 }
 
@@ -5232,6 +5262,12 @@ async function updateCrmOrderStatus(orderId, status) {
     await api("PATCH", `/catalog/crm/orders/${orderId}/status`, { status }, true);
     if (CRM_STATUS_DONE_ALIASES.has(status)) {
       state.crm.tab = "archive";
+    } else if (CRM_DECLINED_STATUSES.has(status)) {
+      state.crm.tab = "declined";
+    } else if (CRM_ESTIMATING_STATUSES.has(status)) {
+      state.crm.tab = "estimating";
+    } else {
+      state.crm.tab = "active";
     }
     await loadCrm();
     renderOrderCalendar();

@@ -7,8 +7,8 @@ from typing import Callable, TypeVar
 
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import delete, func, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session, joinedload
 
@@ -86,6 +86,11 @@ ISSUE_STATUSES = frozenset({
     "готово",
     "готова",
 })
+
+CRM_DONE_STATUSES = frozenset({"готово", "готова"})
+CRM_ESTIMATING_STATUSES = frozenset({"на просчет"})
+CRM_DECLINED_STATUSES = frozenset({"отказались дорого", "хотят заказать позже", "отказались без причины"})
+CRM_ORDER_FOLDERS = frozenset({"active", "estimating", "declined", "archive"})
 
 router = APIRouter(prefix="/crm", tags=["crm"])
 
@@ -635,10 +640,73 @@ def reconcile_warehouse(session: Session = Depends(get_session)) -> list[CrmWare
     return list_warehouse(session)
 
 
+@router.get("/orders/dashboard")
+@crm_db_guard
+def crm_orders_dashboard(session: Session = Depends(get_session)) -> dict:
+    orders = list(session.scalars(select(CrmProductionOrder)))
+    by_status: dict[str, int] = {}
+    by_tier: dict[str, int] = {}
+    for order in orders:
+        by_status[order.status] = by_status.get(order.status, 0) + 1
+        tier = (order.selected_tier or "").strip()
+        if tier:
+            by_tier[tier] = by_tier.get(tier, 0) + 1
+    declined = sum(order.status in CRM_DECLINED_STATUSES for order in orders)
+    estimating = sum(order.status in CRM_ESTIMATING_STATUSES for order in orders)
+    completed = sum(order.status in CRM_DONE_STATUSES for order in orders)
+    return {
+        "total": len(orders),
+        "active": len(orders) - declined - estimating - completed,
+        "estimating": estimating,
+        "declined": declined,
+        "completed": completed,
+        "by_status": by_status,
+        "by_tier": by_tier,
+    }
+
+
 @router.get("/orders", response_model=list[CrmOrderOut])
 @crm_db_guard
-def list_orders(session: Session = Depends(get_session)) -> list[CrmOrderOut]:
-    orders = list(session.scalars(select(CrmProductionOrder).order_by(CrmProductionOrder.id.desc())))
+def list_orders(
+    search: str = Query(default="", max_length=180),
+    status: str = Query(default="", max_length=32),
+    tier: str = Query(default="", max_length=16),
+    folder: str = Query(default="", max_length=16),
+    session: Session = Depends(get_session),
+) -> list[CrmOrderOut]:
+    query = select(CrmProductionOrder)
+    if folder and folder not in CRM_ORDER_FOLDERS:
+        raise HTTPException(status_code=422, detail="Неизвестная папка заказов")
+    if folder == "archive":
+        query = query.where(CrmProductionOrder.status.in_(CRM_DONE_STATUSES))
+    elif folder == "declined":
+        query = query.where(CrmProductionOrder.status.in_(CRM_DECLINED_STATUSES))
+    elif folder == "estimating":
+        query = query.where(CrmProductionOrder.status.in_(CRM_ESTIMATING_STATUSES))
+    elif folder == "active":
+        query = query.where(
+            ~CrmProductionOrder.status.in_(CRM_DONE_STATUSES | CRM_DECLINED_STATUSES | CRM_ESTIMATING_STATUSES)
+        )
+    if status:
+        query = query.where(CrmProductionOrder.status == status)
+    if tier:
+        query = query.where(CrmProductionOrder.selected_tier == tier)
+    search = search.strip()
+    if search:
+        pattern = f"%{search}%"
+        query = query.where(or_(*[
+            field.ilike(pattern)
+            for field in (
+                CrmProductionOrder.title,
+                CrmProductionOrder.customer,
+                CrmProductionOrder.customer_full_name,
+                CrmProductionOrder.email,
+                CrmProductionOrder.phone,
+                CrmProductionOrder.install_address,
+                CrmProductionOrder.notes,
+            )
+        ]))
+    orders = list(session.scalars(query.order_by(CrmProductionOrder.id.desc())))
     return [_order_out(session, order) for order in orders]
 
 
@@ -726,6 +794,7 @@ def create_order(payload: CrmOrderCreate, session: Session = Depends(get_session
         title=payload.title,
         customer=payload.customer or payload.customer_full_name or "",
         status=payload.status,
+        selected_tier=payload.selected_tier,
         notes=payload.notes,
     )
     _apply_admin_fields(order, payload.model_dump())
@@ -775,6 +844,8 @@ def update_order(
     if "status" in data and data["status"] is not None and data["status"] != order.status:
         order.status = data["status"]
         order.status_changed_at = datetime.now(timezone.utc)
+    if "selected_tier" in data and data["selected_tier"] is not None:
+        order.selected_tier = data["selected_tier"]
     if "custom_fields" in data:
         order.custom_fields = _normalize_custom_fields(session, data.pop("custom_fields"))
     if "stage_workdays" in data:

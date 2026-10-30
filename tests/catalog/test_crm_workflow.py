@@ -70,6 +70,74 @@ def test_status_change_moves_calendar_timestamp(catalog_client: TestClient):
     assert any(item["id"] == created["id"] for item in calendar.json())
 
 
+def test_new_crm_statuses_and_order_folders(catalog_client: TestClient):
+    statuses = ["отказались дорого", "хотят заказать позже", "отказались без причины", "на просчет"]
+    created = []
+    for index, status in enumerate(statuses):
+        response = catalog_client.post(
+            "/crm/orders",
+            json={"title": f"Новый статус {index}", "customer": "Проверка CRM", "status": "черновой замер"},
+        )
+        assert response.status_code == 201, response.text
+        order = response.json()
+        changed = catalog_client.patch(f"/crm/orders/{order['id']}/status", json={"status": status})
+        assert changed.status_code == 200, changed.text
+        assert changed.json()["status"] == status
+        created.append(order["id"])
+
+    active = catalog_client.get("/crm/orders", params={"folder": "active"}).json()
+    estimating = catalog_client.get("/crm/orders", params={"folder": "estimating"}).json()
+    declined = catalog_client.get("/crm/orders", params={"folder": "declined"}).json()
+    assert not set(created[:3]) & {order["id"] for order in active}
+    assert {created[3]} == {order["id"] for order in estimating}
+    assert set(created[:3]) == {order["id"] for order in declined}
+
+
+def test_crm_order_search_and_classification_filters(catalog_client: TestClient):
+    rows = [
+        {"title": "Угловая кухня", "customer": "Анна Смирнова", "selected_tier": "comfort", "status": "технолог"},
+        {"title": "Шкаф в прихожую", "customer": "Иван Петров", "selected_tier": "premium", "status": "закупка"},
+        {"title": "Прямая кухня", "customer": "Анна Иванова", "selected_tier": "premium", "status": "на просчет"},
+    ]
+    ids = []
+    for row in rows:
+        response = catalog_client.post("/crm/orders", json=row)
+        assert response.status_code == 201, response.text
+        ids.append(response.json()["id"])
+
+    search = catalog_client.get("/crm/orders", params={"search": "смирнова"}).json()
+    assert [order["id"] for order in search] == [ids[0]]
+    filtered = catalog_client.get("/crm/orders", params={"tier": "premium", "status": "закупка"}).json()
+    assert [order["id"] for order in filtered] == [ids[1]]
+    combined = catalog_client.get("/crm/orders", params={"folder": "estimating", "tier": "premium"}).json()
+    assert [order["id"] for order in combined] == [ids[2]]
+
+
+def test_crm_dashboard_aggregates_orders_by_status_and_tier(catalog_client: TestClient):
+    for title, status, tier in [
+        ("Кухня А", "технолог", "comfort"),
+        ("Шкаф Б", "готово", "premium"),
+        ("Тумба В", "отказались дорого", "standard"),
+        ("Кухня Г", "на просчет", "comfort"),
+    ]:
+        response = catalog_client.post(
+            "/crm/orders",
+            json={"title": title, "status": status, "selected_tier": tier},
+        )
+        assert response.status_code == 201, response.text
+
+    dashboard = catalog_client.get("/crm/orders/dashboard")
+    assert dashboard.status_code == 200, dashboard.text
+    data = dashboard.json()
+    assert data["total"] == 4
+    assert data["active"] == 1
+    assert data["estimating"] == 1
+    assert data["declined"] == 1
+    assert data["completed"] == 1
+    assert data["by_status"]["технолог"] == 1
+    assert data["by_tier"] == {"comfort": 2, "premium": 1, "standard": 1}
+
+
 def test_submit_project_creates_production_order(catalog_client: TestClient):
     material_id = _seed_material(catalog_client)
     response = catalog_client.post(

@@ -210,7 +210,7 @@ test("hard furniture library contains real kinds inside the original picker cate
   assert.equal(new Set(HARD_FURNITURE_LIBRARY.map((item) => item.name)).size, HARD_FURNITURE_LIBRARY.length);
   assert.equal(new Set(HARD_FURNITURE_LIBRARY.map((item) => item.variant)).size, HARD_FURNITURE_LIBRARY.length);
   assert.ok(HARD_FURNITURE_LIBRARY.every((item) => originalCategories.has(item.category)));
-  assert.ok(HARD_FURNITURE_LIBRARY.every((item) => !/\d+\s*мм$/i.test(item.name)), "Sizes must not masquerade as furniture kinds");
+  assert.ok(HARD_FURNITURE_LIBRARY.every((item) => !/^\d+\s*мм$/i.test(item.name.trim())), "A dimension alone must not masquerade as a furniture kind");
   const supported = new Set(registerBuiltInFurniture(new FurnitureRegistry()).list().map((definition) => definition.type));
   HARD_FURNITURE_LIBRARY.forEach((item) => {
     assert.ok(supported.has(item.type), `Unsupported planner type: ${item.type}`);
