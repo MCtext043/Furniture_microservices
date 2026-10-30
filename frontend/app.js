@@ -13,6 +13,7 @@ import { HARD_FURNITURE_CATEGORIES, HARD_FURNITURE_LIBRARY } from "/planner-modu
 import { CostQuoteController } from "/planner-modules/pricing/CostQuoteController.js";
 import { DEFAULT_SPREADSHEET_PRICING, estimateSpreadsheetPrices, quantitiesFromScene } from "/planner-modules/pricing/SpreadsheetPricing.js";
 import { catalogThumbnailSvg } from "/planner-modules/catalog/CatalogThumbnail.js";
+import { crmMediaType, crmStatusLabel } from "./crm/orderPresentation.js";
 
 const furnitureRegistry = registerBuiltInFurniture(new FurnitureRegistry());
 let furnitureThumbnailRenderer = null;
@@ -4615,7 +4616,7 @@ function renderWarehouseIssue() {
       return `<div class="border rounded-3 p-3 mb-3">
         <div class="d-flex justify-content-between gap-2 mb-2">
           <strong>${escapeHtml(order.title)}</strong>
-          <span class="badge ${active ? "text-bg-primary" : "text-bg-secondary"}">${escapeHtml(order.status)}${active ? " · списывается" : " · ещё не списывается"}</span>
+          <span class="badge ${active ? "text-bg-primary" : "text-bg-secondary"}">${escapeHtml(crmStatusLabel(order.status))}${active ? " · списывается" : " · ещё не списывается"}</span>
         </div>
         <table class="table table-sm mb-0">
           <thead><tr><th>Материал</th><th>Нужно на заказ</th><th>Уже списано</th></tr></thead>
@@ -5020,24 +5021,24 @@ function crmStatusOptions(current) {
 
 function crmStatusBadge(status) {
   const map = {
-    "черновой замер": "text-bg-secondary",
-    "чистовой замер": "text-bg-info",
-    "выбор цветов": "text-bg-info",
-    технолог: "text-bg-primary",
-    "распил-фасады-фурнитура": "text-bg-warning",
-    доставлено: "text-bg-warning",
-    собрано: "text-bg-success",
-    готово: "text-bg-dark",
-    конструктор: "text-bg-info",
-    закупка: "text-bg-warning",
-    сборка: "text-bg-success",
-    готова: "text-bg-dark",
-    "на просчет": "text-bg-primary",
-    "отказались дорого": "text-bg-danger",
-    "хотят заказать позже": "text-bg-warning",
-    "отказались без причины": "text-bg-secondary",
+    "черновой замер": "crm-status-muted",
+    "чистовой замер": "crm-status-info",
+    "выбор цветов": "crm-status-info",
+    технолог: "crm-status-info",
+    "распил-фасады-фурнитура": "crm-status-warning",
+    доставлено: "crm-status-warning",
+    собрано: "crm-status-success",
+    готово: "crm-status-success",
+    конструктор: "crm-status-info",
+    закупка: "crm-status-warning",
+    сборка: "crm-status-success",
+    готова: "crm-status-success",
+    "на просчет": "crm-status-estimate",
+    "отказались дорого": "crm-status-declined",
+    "хотят заказать позже": "crm-status-later",
+    "отказались без причины": "crm-status-muted",
   };
-  return map[status] || "text-bg-secondary";
+  return `crm-status-badge ${map[status] || "crm-status-muted"}`;
 }
 
 function crmOrdersForTab(tab = state.crm.tab) {
@@ -5077,37 +5078,37 @@ function renderCrmOrderCard(order) {
   ].filter(Boolean).join(" · ");
 
   return `
-    <div class="border rounded p-3 mb-3" data-order-card="${order.id}">
+    <article class="crm-order-card mb-3" data-order-card="${order.id}">
       <div class="d-flex flex-wrap justify-content-between gap-2 mb-2">
         <div>
           <strong>${escapeHtml(order.title)}</strong>
-          <span class="badge ${crmStatusBadge(order.status)} ms-2">${escapeHtml(order.status)}</span>
-          ${order.planner_project_id ? `<span class="badge text-bg-light ms-1">проект #${order.planner_project_id}</span>` : ""}
+          <span class="badge ${crmStatusBadge(order.status)} ms-2">${escapeHtml(crmStatusLabel(order.status))}</span>
+          ${order.planner_project_id ? `<span class="crm-order-chip ms-1">проект #${order.planner_project_id}</span>` : ""}
         </div>
         <span class="text-muted small">${escapeHtml(fio)}</span>
       </div>
       ${contactsHtml}
       ${moneyBits ? `<div class="small mb-1">${escapeHtml(moneyBits)}</div>` : ""}
       ${order.notes ? `<div class="small text-muted mb-2">${escapeHtml(order.notes)}</div>` : ""}
-      ${order.selected_tier ? `<div class="small mb-2"><span class="badge bg-info text-dark">Комплектация: ${escapeHtml(tierTitle(order.selected_tier))}</span> · <strong>${money(orderSelectedPrice(order))}</strong></div>` : ""}
+      ${order.selected_tier ? `<div class="small mb-2"><span class="crm-order-chip">Комплектация: ${escapeHtml(tierTitle(order.selected_tier))}</span> · <strong>${money(orderSelectedPrice(order))}</strong></div>` : ""}
       ${order.materials?.length ? `<div class="small mb-2"><strong>Материалы:</strong> ${order.materials.map((line) => `${escapeHtml(line.material_name)} — ${line.required_qty} ${escapeHtml(line.unit)}`).join("; ")}</div>` : ""}
       ${order.price_standard ? `<div class="small text-muted mb-2">Все цены: стандарт ${money(order.price_standard)} · комфорт ${money(order.price_comfort)} · премиум ${money(order.price_premium)}</div>` : ""}
       <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
         ${canChangeCrmStatus() ? `<select class="form-select form-select-sm" style="max-width:280px" data-crm-status="${order.id}">
-          ${crmStatusOptions(order.status).map((s) => `<option value="${s}" ${s === order.status ? "selected" : ""}>${s}</option>`).join("")}
+          ${crmStatusOptions(order.status).map((s) => `<option value="${escapeHtml(s)}" ${s === order.status ? "selected" : ""}>${escapeHtml(crmStatusLabel(s))}</option>`).join("")}
         </select>
-        <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>` : `<span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(order.status)}</span>`}
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-save-status="${order.id}">Сохранить статус</button>` : `<span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(crmStatusLabel(order.status))}</span>`}
         ${canEditCrmOrders() ? `<button type="button" class="btn btn-sm btn-outline-dark" data-crm-edit="${order.id}">Редактировать</button>
         <button type="button" class="btn btn-sm btn-outline-primary" data-crm-order="${order.id}">Рассчитать закупку</button>
         <button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>
         <button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>
-        <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button>` : `${hasRole("assets:write") ? `<button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото</button><button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>` : ""}<button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>`}
+        <button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото или видео</button>` : `${hasRole("assets:write") ? `<button type="button" class="btn btn-sm btn-outline-success" data-crm-photo="${order.id}">Добавить фото или видео</button><button type="button" class="btn btn-sm btn-outline-warning" data-crm-receipt-upload="${order.id}">Загрузить чек</button>` : ""}<button type="button" class="btn btn-sm btn-outline-secondary" data-crm-receipt-view="${order.id}">Посмотреть чеки</button>`}
         ${canDeleteCrmOrders() ? `<button type="button" class="btn btn-sm btn-outline-danger" data-crm-delete="${order.id}" title="Удалить заказ">Удалить</button>` : ""}
       </div>
       <div id="crm-proc-${order.id}"></div>
       <div id="crm-receipts-${order.id}" class="mt-2"></div>
       <div id="crm-photos-${order.id}" class="mt-2"></div>
-    </div>`;
+    </article>`;
 }
 
 function bindCrmOrderPanel(host) {
@@ -5209,7 +5210,7 @@ function renderCrmDashboard() {
       <div class="crm-dashboard-kpi crm-dashboard-kpi-done"><span>Выполнено</span><strong>${data.completed || 0}</strong></div>
     </div>
     <div class="crm-dashboard-breakdown">
-      <div><div class="small fw-semibold mb-2">Распределение по статусам</div>${stages.length ? stages.map(([status, count]) => `<div class="crm-dashboard-bar-row"><span>${escapeHtml(status)}</span><span class="crm-dashboard-bar"><i style="width:${Math.round(count / maxStatus * 100)}%"></i></span><b>${count}</b></div>`).join("") : '<div class="small text-muted">Пока нет данных</div>'}</div>
+      <div><div class="small fw-semibold mb-2">Распределение по статусам</div>${stages.length ? stages.map(([status, count]) => `<div class="crm-dashboard-bar-row"><span>${escapeHtml(crmStatusLabel(status))}</span><span class="crm-dashboard-bar"><i style="width:${Math.round(count / maxStatus * 100)}%"></i></span><b>${count}</b></div>`).join("") : '<div class="small text-muted">Пока нет данных</div>'}</div>
       <div><div class="small fw-semibold mb-2">Комплектации</div><div class="crm-dashboard-tiers">${tiers.map((tier) => `<div><span>${escapeHtml(tier.title)}</span><b>${tier.count}</b></div>`).join("")}</div></div>
     </div>
   </section>`;
@@ -5223,13 +5224,13 @@ function renderCrmPanel() {
   const orders = crmOrdersForTab(state.crm.tab);
   const tabs = [
     ["active", "В работе"], ["estimating", "На просчёте"], ["declined", "Отказались"], ["archive", "Архив выполненных"],
-  ].map(([key, label]) => `<button class="nav-link ${state.crm.tab === key ? "active" : ""}" data-crm-tab="${key}" type="button" role="tab">${label} <span class="badge bg-secondary">${counts[key]}</span></button>`).join("");
+  ].map(([key, label]) => `<button class="nav-link ${state.crm.tab === key ? "active" : ""} ${key === "estimating" ? "crm-folder-estimating" : ""}" data-crm-tab="${key}" type="button" role="tab">${label} <span class="badge ${key === "estimating" ? "crm-estimate-count" : ""}">${counts[key]}</span></button>`).join("");
   const statuses = [...new Set([...CRM_STATUS_CHOICES, ...state.crm.orders.map((order) => order.status)])].sort((a, b) => a.localeCompare(b, "ru"));
   host.innerHTML = `${renderCrmDashboard()}
-    <ul class="nav nav-pills mb-3 gap-1 flex-wrap" role="tablist">${tabs}</ul>
+    <ul class="nav nav-pills crm-orders-tabs mb-3 flex-wrap" role="tablist">${tabs}</ul>
     <form class="crm-order-filters mb-3" data-crm-search-form>
       <div class="crm-order-search"><label class="visually-hidden" for="crmOrderSearch">Поиск заказов</label><input class="form-control form-control-sm" id="crmOrderSearch" type="search" value="${escapeHtml(state.crm.search)}" placeholder="Номер, заказ, клиент, телефон, адрес…"></div>
-      <label class="visually-hidden" for="crmOrderStatusFilter">Фильтр по статусу</label><select class="form-select form-select-sm" id="crmOrderStatusFilter"><option value="">Все статусы</option>${statuses.map((status) => `<option value="${escapeHtml(status)}" ${state.crm.statusFilter === status ? "selected" : ""}>${escapeHtml(status)}</option>`).join("")}</select>
+      <label class="visually-hidden" for="crmOrderStatusFilter">Фильтр по статусу</label><select class="form-select form-select-sm" id="crmOrderStatusFilter"><option value="">Все статусы</option>${statuses.map((status) => `<option value="${escapeHtml(status)}" ${state.crm.statusFilter === status ? "selected" : ""}>${escapeHtml(crmStatusLabel(status))}</option>`).join("")}</select>
       <label class="visually-hidden" for="crmOrderTierFilter">Фильтр по комплектации</label><select class="form-select form-select-sm" id="crmOrderTierFilter"><option value="">Все комплектации</option>${PRICING_TIERS.map((tier) => `<option value="${tier.key}" ${state.crm.tierFilter === tier.key ? "selected" : ""}>${escapeHtml(tier.title)}</option>`).join("")}</select>
       <button class="btn btn-sm btn-outline-secondary" type="submit">Найти</button>
       <button class="btn btn-sm btn-link" type="button" data-crm-clear-filters>Сбросить</button>
@@ -5278,21 +5279,22 @@ async function updateCrmOrderStatus(orderId, status) {
 }
 
 async function uploadCrmOrderPhoto(orderId) {
-  const caption = window.prompt("Подпись к фото", "Этап изготовления") || "";
   const input = document.createElement("input");
   input.type = "file";
-  input.accept = "image/*";
+  input.accept = "image/*,video/mp4,video/webm,video/quicktime,video/x-m4v,video/3gpp,video/ogg";
   input.onchange = async () => {
     const file = input.files?.[0];
     if (!file) return;
+    const mediaType = file.type.startsWith("video/") || crmMediaType(file.name) === "video" ? "video" : "image";
+    const caption = window.prompt(mediaType === "video" ? "Подпись к видео" : "Подпись к фото", "Этап изготовления") || "";
     const objectKey = `orders/${orderId}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, "_")}`;
     try {
       await uploadAssetFile(file, objectKey);
-      await api("POST", `/catalog/crm/orders/${orderId}/photos`, { object_key: objectKey, caption }, true);
+      await api("POST", `/catalog/crm/orders/${orderId}/media`, { object_key: objectKey, caption }, true);
       await loadCrm();
-      toast("Фото добавлено к заказу");
+      toast(mediaType === "video" ? "Видео добавлено к заказу" : "Фото добавлено к заказу");
     } catch (error) {
-      toast(`Фото: ${formatApiError(error)}`, false);
+      toast(`Не удалось добавить файл: ${formatApiError(error)}`, false);
     }
   };
   input.click();
@@ -5575,41 +5577,44 @@ async function renderCrmOrderPhotos(orderId) {
   const host = document.getElementById(`crm-photos-${orderId}`);
   if (!host) return;
   try {
-    const photos = await api("GET", `/catalog/crm/orders/${orderId}/photos`, undefined, true);
+    const photos = await api("GET", `/catalog/crm/orders/${orderId}/media`, undefined, true);
     if (!photos.length) {
-      host.innerHTML = `<div class="small text-muted">Фото этапов пока нет.</div>`;
+      host.innerHTML = `<div class="small text-muted">Фото и видео этапов пока нет.</div>`;
       return;
     }
     const canDeletePhoto = canEditCrmOrders();
     const items = await Promise.all(
       photos.map(async (photo) => {
         const url = await getPhotoViewUrl(photo.object_key);
-        const img = url
-          ? `<img src="${url}" alt="${escapeHtml(photo.caption || `Фото #${photo.id}`)}" class="img-fluid rounded border crm-photo-thumb" style="max-height:100px;cursor:zoom-in" data-lightbox-image loading="lazy">`
+        const isVideo = photo.media_type === "video" || crmMediaType(photo.object_key) === "video";
+        const preview = url
+          ? isVideo
+            ? `<video src="${url}" aria-label="${escapeHtml(photo.caption || `Видео #${photo.id}`)}" class="img-fluid rounded border crm-video-thumb" style="width:140px;height:100px;object-fit:cover" controls preload="metadata" playsinline></video>`
+            : `<img src="${url}" alt="${escapeHtml(photo.caption || `Фото #${photo.id}`)}" class="img-fluid rounded border crm-photo-thumb" style="max-height:100px;cursor:zoom-in" data-lightbox-image loading="lazy">`
           : `<div class="border rounded p-2 small">${escapeHtml(photo.object_key)}</div>`;
         const del = canDeletePhoto
           ? `<button type="button" class="btn btn-sm btn-outline-danger w-100 mt-1" data-crm-photo-del="${photo.id}" data-crm-photo-order="${orderId}">Удалить</button>`
           : "";
         return `<div class="d-inline-block me-2 mb-2 align-top" style="max-width:140px">
-          ${img}
+          ${preview}
           <div class="small text-muted">${escapeHtml(photo.caption || "")}</div>
           ${del}
         </div>`;
       })
     );
-    host.innerHTML = `<div class="small fw-semibold mb-1">Фото производства</div>${items.join("")}`;
+    host.innerHTML = `<div class="small fw-semibold mb-1">Фото и видео производства</div>${items.join("")}`;
     host.querySelectorAll("[data-crm-photo-del]").forEach((btn) => {
       btn.addEventListener("click", async (event) => {
         event.stopPropagation();
         const photoId = Number(btn.dataset.crmPhotoDel);
         const oid = Number(btn.dataset.crmPhotoOrder);
-        if (!window.confirm("Удалить это фото?")) return;
+        if (!window.confirm("Удалить этот файл?")) return;
         try {
-          await api("DELETE", `/catalog/crm/orders/${oid}/photos/${photoId}`, undefined, true);
-          toast("Фото удалено");
+          await api("DELETE", `/catalog/crm/orders/${oid}/media/${photoId}`, undefined, true);
+          toast("Файл удалён");
           await renderCrmOrderPhotos(oid);
         } catch (error) {
-          toast(`Не удалось удалить фото: ${formatApiError(error)}`, false);
+          toast(`Не удалось удалить файл: ${formatApiError(error)}`, false);
         }
       });
     });
@@ -5830,13 +5835,14 @@ async function renderUserOrders() {
     state.userOrders.map(async (order) => {
       let photosHtml = "";
       try {
-        const photos = await api("GET", `/catalog/crm/orders/${order.id}/photos`, undefined, true);
+        const photos = await api("GET", `/catalog/crm/orders/${order.id}/media`, undefined, true);
         if (photos.length) {
           const thumbs = await Promise.all(
             photos.map(async (photo) => {
               const url = await getPhotoViewUrl(photo.object_key);
+              const video = photo.media_type === "video" || crmMediaType(photo.object_key) === "video";
               return url
-                ? `<div class="me-2 mb-2 d-inline-block"><img src="${url}" class="rounded border" style="height:72px" loading="lazy" data-lightbox-image alt="${escapeHtml(photo.caption || order.title)}"><div class="small text-muted">${escapeHtml(photo.caption || "")}</div></div>`
+                ? `<div class="me-2 mb-2 d-inline-block">${video ? `<video src="${url}" class="rounded border" style="height:72px;max-width:128px" controls preload="metadata" playsinline aria-label="${escapeHtml(photo.caption || order.title)}"></video>` : `<img src="${url}" class="rounded border" style="height:72px" loading="lazy" data-lightbox-image alt="${escapeHtml(photo.caption || order.title)}">`}<div class="small text-muted">${escapeHtml(photo.caption || "")}</div></div>`
                 : "";
             })
           );
@@ -5854,7 +5860,7 @@ async function renderUserOrders() {
       return `<div class="account-record">
         <div class="d-flex justify-content-between gap-2">
           <strong>${escapeHtml(order.title)}</strong>
-          <span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(order.status)}</span>
+          <span class="badge ${crmStatusBadge(order.status)}">${escapeHtml(crmStatusLabel(order.status))}</span>
         </div>
         ${prices}
         <div class="small text-muted">Заказ #${order.id}${order.planner_project_id ? ` · проект #${order.planner_project_id}` : ""}</div>
@@ -6135,7 +6141,7 @@ function renderOrderCalendar() {
         ${dayOrders.map((order) => {
           const isDelivery = order.calendar_kind === "delivery";
           const isStageDeadline = order.calendar_kind === "stage_deadline";
-          const label = isDelivery ? "Сдача" : isStageDeadline ? `Этап: ${escapeHtml(order.calendar_stage || "")}` : escapeHtml(order.status);
+          const label = isDelivery ? "Сдача" : isStageDeadline ? `Этап: ${escapeHtml(order.calendar_stage || "")}` : escapeHtml(crmStatusLabel(order.status));
           const subtitle = isDelivery
             ? (order.install_address || order.customer_full_name || order.customer || "—")
             : (order.customer_full_name || order.customer || "—");
@@ -6159,7 +6165,7 @@ function renderOrderCalendar() {
         ${orders.map((order) => {
           const isDelivery = order.calendar_kind === "delivery";
           const isStageDeadline = order.calendar_kind === "stage_deadline";
-          const badge = isDelivery ? "Сдача" : isStageDeadline ? `Этап: ${escapeHtml(order.calendar_stage || "")}` : escapeHtml(order.status);
+          const badge = isDelivery ? "Сдача" : isStageDeadline ? `Этап: ${escapeHtml(order.calendar_stage || "")}` : escapeHtml(crmStatusLabel(order.status));
           const badgeClass = isDelivery ? "text-bg-warning" : isStageDeadline ? "text-bg-info" : crmStatusBadge(order.status);
           const sub = isDelivery
             ? escapeHtml(order.install_address || order.customer_full_name || order.customer || "—")

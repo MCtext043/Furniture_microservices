@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -377,6 +379,10 @@ class CrmOrderPhotoOut(CrmOrderPhotoCreate):
     order_id: int
     created_at: str
     model_config = ConfigDict(from_attributes=True)
+
+
+class CrmOrderMediaOut(CrmOrderPhotoOut):
+    media_type: Literal["image", "video"] = "image"
 
 
 class CrmOrderReceiptCreate(BaseModel):

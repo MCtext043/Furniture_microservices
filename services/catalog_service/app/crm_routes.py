@@ -6,6 +6,7 @@ from functools import wraps
 from typing import Callable, TypeVar
 
 from datetime import date, datetime, timezone
+from pathlib import PurePosixPath
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import delete, func, or_, select
@@ -60,6 +61,7 @@ from .schemas import (
     CrmOrderOut,
     CrmOrderPhotoCreate,
     CrmOrderPhotoOut,
+    CrmOrderMediaOut,
     CrmOrderProcurementOut,
     CrmOrderReceiptCreate,
     CrmOrderReceiptOut,
@@ -932,6 +934,12 @@ def update_order_status(
 
 
 @router.post(
+    "/orders/{order_id}/media",
+    response_model=CrmOrderMediaOut,
+    status_code=201,
+    dependencies=[Depends(ensure_crm_order_writer)],
+)
+@router.post(
     "/orders/{order_id}/photos",
     response_model=CrmOrderPhotoOut,
     status_code=201,
@@ -942,7 +950,7 @@ def add_order_photo(
     order_id: int,
     payload: CrmOrderPhotoCreate,
     session: Session = Depends(get_session),
-) -> CrmOrderPhotoOut:
+) -> CrmOrderMediaOut:
     order = session.get(CrmProductionOrder, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
@@ -955,15 +963,26 @@ def add_order_photo(
     session.add(photo)
     session.commit()
     session.refresh(photo)
-    return CrmOrderPhotoOut(
+    return CrmOrderMediaOut(
         id=photo.id,
         order_id=photo.order_id,
         object_key=photo.object_key,
         caption=photo.caption,
         created_at=photo.created_at.isoformat(),
+        media_type=_crm_media_type(photo.object_key),
     )
 
 
+def _crm_media_type(object_key: str) -> str:
+    video_extensions = {".mp4", ".webm", ".mov", ".m4v", ".3gp", ".ogv"}
+    extension = PurePosixPath(object_key.split("?", 1)[0]).suffix.lower()
+    return "video" if extension in video_extensions else "image"
+
+
+@router.delete(
+    "/orders/{order_id}/media/{photo_id}",
+    dependencies=[Depends(ensure_crm_order_writer)],
+)
 @router.delete(
     "/orders/{order_id}/photos/{photo_id}",
     dependencies=[Depends(ensure_crm_order_writer)],
@@ -978,9 +997,10 @@ def delete_order_photo(order_id: int, photo_id: int, session: Session = Depends(
     return {"status": "deleted", "photo_id": str(photo_id)}
 
 
-@router.get("/orders/{order_id}/photos", response_model=list[CrmOrderPhotoOut])
+@router.get("/orders/{order_id}/media", response_model=list[CrmOrderMediaOut])
+@router.get("/orders/{order_id}/photos", response_model=list[CrmOrderMediaOut])
 @crm_db_guard
-def list_order_photos(order_id: int, session: Session = Depends(get_session)) -> list[CrmOrderPhotoOut]:
+def list_order_photos(order_id: int, session: Session = Depends(get_session)) -> list[CrmOrderMediaOut]:
     order = session.get(CrmProductionOrder, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Заказ не найден")
@@ -990,12 +1010,13 @@ def list_order_photos(order_id: int, session: Session = Depends(get_session)) ->
         )
     )
     return [
-        CrmOrderPhotoOut(
+        CrmOrderMediaOut(
             id=photo.id,
             order_id=photo.order_id,
             object_key=photo.object_key,
             caption=photo.caption,
             created_at=photo.created_at.isoformat(),
+            media_type=_crm_media_type(photo.object_key),
         )
         for photo in photos
     ]

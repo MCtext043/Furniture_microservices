@@ -51,3 +51,27 @@ def test_delete_order_photo_wrong_order_404(catalog_client: TestClient):
     photo_id = photo_resp.json()["id"]
     response = catalog_client.delete(f"/crm/orders/{b}/photos/{photo_id}")
     assert response.status_code == 404
+
+
+def test_order_media_api_accepts_and_identifies_video(catalog_client: TestClient):
+    created = catalog_client.post(
+        "/crm/orders",
+        json={"title": "Видео заказ", "customer": "Клиент", "status": "технолог", "materials": []},
+    )
+    assert created.status_code == 201, created.text
+    order_id = created.json()["id"]
+
+    video = catalog_client.post(
+        f"/crm/orders/{order_id}/media",
+        json={"object_key": f"crm/orders/{order_id}/stage.mp4", "caption": "Монтаж"},
+    )
+    assert video.status_code == 201, video.text
+    assert video.json()["media_type"] == "video"
+
+    listed = catalog_client.get(f"/crm/orders/{order_id}/media")
+    assert listed.status_code == 200, listed.text
+    assert listed.json()[0]["object_key"].endswith(".mp4")
+    assert listed.json()[0]["media_type"] == "video"
+
+    deleted = catalog_client.delete(f"/crm/orders/{order_id}/media/{video.json()['id']}")
+    assert deleted.status_code == 200, deleted.text
